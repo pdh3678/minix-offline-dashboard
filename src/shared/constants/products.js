@@ -8,7 +8,8 @@
 
    gongu  공동구매 화면 노출 여부(품목군·모델 모두 명시). false면 파생 상수에 아예 들어가지 않으므로
           사이드바·모델 탭·등록/수정 폼 드롭다운·공구 분석 필터·배지 어디에도 나타나지 않는다.
-          (미니 건조기·미니 식기세척기·더 플렌더 PLUS — 오프라인 코드 매핑용)
+          (미니 건조기·미니 식기세척기와 그 모델, 더 플렌더 Basic·PLUS — 오프라인 코드 매핑용)
+          색상은 모델이 아니라 제품마스터 '옵션'으로 구분한다 — 여기에 색상별 모델을 만들지 말 것.
           모델은 품목군과 둘 다 true여야 공구 화면에 나온다.
 
    배열 순서 = 사이드바 '품목별 실적' 순서 = 대시보드 품목 필터/히트맵 열 순서 = 모델 탭 순서.
@@ -30,7 +31,8 @@
    데이터가 들어오는 순간 별도 코드 수정 없이 모든 필터/집계에 자동으로 나타남. */
 const PRODUCT_CATALOG=[
   {key:'더플렌더', st:'플렌더', slug:'TheFlender', label:'더 플렌더', icon:'🌀', gongu:true, models:[
-    {key:'플렌더PRO',  label:'더 플렌더 PRO',  sheet:'더 플렌더 PRO',  option:'더플렌더PRO',  tab:'PRO',  color:{bg:'#F3E8FF',fg:'#7C3AED'}, gongu:true},
+    {key:'플렌더Basic', label:'더 플렌더 Basic', gongu:false}, // 오프라인 코드 매핑용
+    {key:'플렌더PRO', label:'더 플렌더 PRO',  sheet:'더 플렌더 PRO',  option:'더플렌더PRO',  tab:'PRO',  color:{bg:'#F3E8FF',fg:'#7C3AED'}, gongu:true},
     {key:'플렌더MAX',  label:'더 플렌더 MAX',  sheet:'더 플렌더 MAX',  option:'더플렌더MAX',  tab:'MAX',  color:{bg:'#DBEAFE',fg:'#2563EB'}, gongu:true},
     {key:'플렌더mini', label:'더 플렌더 mini', sheet:'더 플렌더 mini', option:'더플렌더mini', tab:'mini', color:{bg:'#DCFCE7',fg:'#16A34A'}, gongu:true},
     {key:'플렌더NEXT', label:'더 플렌더 NEXT', sheet:'더 플렌더 NEXT', option:'더플렌더NEXT', tab:'NEXT', color:{bg:'#FEF9C3',fg:'#CA8A04'}, gongu:true}, // 출시 예정
@@ -49,9 +51,12 @@ const PRODUCT_CATALOG=[
   // 오프라인 코드 매핑용 품목군 — 공구 화면에는 나타나지 않음
   {key:'미니건조기', label:'미니 건조기', gongu:false, models:[
     {key:'미니건조기', label:'미니 건조기', gongu:false},
+    {key:'미니건조기PRO', label:'미니 건조기 PRO', gongu:false},
+    {key:'미니건조기PRO+', label:'미니 건조기 PRO+', gongu:false},
   ]},
   {key:'미니식기세척기', label:'미니 식기세척기', gongu:false, models:[
     {key:'미니식기세척기', label:'미니 식기세척기', gongu:false},
+    {key:'미니식기세척기PRO', label:'미니 식기세척기 PRO', gongu:false},
   ]},
 ];
 // 공구 화면에 노출되는 품목군과 그 모델만(순서 유지)

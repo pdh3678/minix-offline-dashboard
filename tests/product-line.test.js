@@ -285,6 +285,16 @@ function captureRender(ctx, fn) {
       JSON.stringify(X.LINE_MODEL_OPTIONS['더플렌더']) === JSON.stringify(['더플렌더PRO', '더플렌더MAX', '더플렌더mini', '더플렌더NEXT']),
       X.LINE_MODEL_OPTIONS['더플렌더']);
     check('  ↳ PLUS는 배지 색/집계 키(PRODUCT_TAXONOMY)에 없음', !X.PRODUCT_TAXONOMY.some(t => t.key === plus.key));
+    // 2026-09-27 오프라인 코드 매핑용 모델 추가 — 전부 공구 비노출, 파생 상수에 섞이면 안 된다
+    const modelLabels = lb => lineByLabel(lb).models.map(m => m.label);
+    check('더 플렌더 모델 6개: Basic, PRO, MAX, mini, NEXT, PLUS',
+      JSON.stringify(modelLabels('더 플렌더')) === JSON.stringify(['더 플렌더 Basic', '더 플렌더 PRO', '더 플렌더 MAX', '더 플렌더 mini', '더 플렌더 NEXT', '더 플렌더 PLUS']), modelLabels('더 플렌더'));
+    check('미니 건조기 모델 3개: 기본, PRO, PRO+', JSON.stringify(modelLabels('미니 건조기')) === JSON.stringify(['미니 건조기', '미니 건조기 PRO', '미니 건조기 PRO+']), modelLabels('미니 건조기'));
+    check('미니 식기세척기 모델 2개: 기본, PRO', JSON.stringify(modelLabels('미니 식기세척기')) === JSON.stringify(['미니 식기세척기', '미니 식기세척기 PRO']), modelLabels('미니 식기세척기'));
+    const added = ['더 플렌더 Basic', '미니 건조기 PRO', '미니 건조기 PRO+', '미니 식기세척기 PRO'].map(lb => cat.flatMap(l => l.models).find(m => m.label === lb));
+    check('  ↳ 추가 모델은 전부 공구 비노출, 배지 색·집계 키·저장 표기에 없음',
+      added.every(m => m && m.gongu === false && !m.option && !m.tab && !X.PRODUCT_TAXONOMY.some(t => t.key === m.key) && !(m.key in X.PRODUCT_SHEET_NAME)), added);
+    check('  ↳ 모델 key가 카탈로그 전체에서 겹치지 않음', (() => { const ks = cat.flatMap(l => l.models.map(m => m.key)); return ks.length === new Set(ks).size; })());
     // 공구 화면이 보는 파생 상수 — 카탈로그 전환(2026-09-25) 이전의 리터럴 값과 똑같아야 한다
     check('더 시프트 모델 탭이 전과 동일(전체/더 시프트/PRO)',
       JSON.stringify(X.PRODUCT_MODEL_TABS['시프트']) ===

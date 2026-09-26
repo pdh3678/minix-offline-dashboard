@@ -193,7 +193,12 @@ function setup() {
     ctx._mpOpenNewSku(host, 0);
     const nh = el(host).innerHTML;
     check('폼: 품목군 선택지 = PRODUCT_CATALOG 6개', (nh.match(/<option value="(더플렌더|더시프트|더슬림|더에어드라이|미니건조기|미니식기세척기)"/g) || []).length === 6);
-    check('모델 제안 목록(datalist)', nh.indexOf('<datalist id="mpNsModels-' + host + '"><option value="더 플렌더 PRO">') >= 0);
+    const models = line => { el('mpNsLine-' + host).value = line; ctx._mpNsInput(host, true); const h = el(host).innerHTML;
+      const dl = h.slice(h.indexOf('<datalist'), h.indexOf('</datalist>')); return (dl.match(/<option value="([^"]+)">/g) || []).map(s => s.slice(15, -2)); };
+    check('모델 목록(datalist) 더 플렌더 6개', JSON.stringify(models('더플렌더')) === JSON.stringify(['더 플렌더 Basic', '더 플렌더 PRO', '더 플렌더 MAX', '더 플렌더 mini', '더 플렌더 NEXT', '더 플렌더 PLUS']), models('더플렌더'));
+    check('모델 목록 미니 건조기 3개', JSON.stringify(models('미니건조기')) === JSON.stringify(['미니 건조기', '미니 건조기 PRO', '미니 건조기 PRO+']), models('미니건조기'));
+    check('모델 목록 미니 식기세척기 2개', JSON.stringify(models('미니식기세척기')) === JSON.stringify(['미니 식기세척기', '미니 식기세척기 PRO']), models('미니식기세척기'));
+    check('자동 표준명: 미니 건조기 PRO+ + 옵션', ctx._mpAutoName('미니건조기', '미니 건조기 PRO+', '그레이지') === '미니 건조기 PRO+ 그레이지');
     el('mpNsLine-' + host).value = '더플렌더'; el('mpNsModel-' + host).value = 'MAX'; el('mpNsOption-' + host).value = '그레이지';
     ctx._mpNsInput(host);
     check('입력하면 표준명 칸이 따라 바뀜', el('mpNsName-' + host).value === '더 플렌더 MAX 그레이지');
