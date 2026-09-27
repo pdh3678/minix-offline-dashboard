@@ -47,15 +47,15 @@ const AUTH = { email: 'verify@local' };
 const pv = g.ctx._offMigrateProgress({ mode: 'preview' }, AUTH);
 console.log('① 월', pv.months[0] + '~' + pv.months[pv.months.length - 1], '(' + pv.months.length + '개월) · 품목 행', pv.legacyRows, '· 오류 칸', pv.badCells);
 console.log('   채널', pv.channels.map(c => c.legacy + '→' + (c.channelId || '?')).join(', '));
-console.log('   품목', pv.products.map(p => p.legacy + '→' + (p.suggest.model || (p.suggest.line ? p.suggest.line + '(모델 선택)' : '?'))).join(', '));
+console.log('   품목', pv.products.map(p => p.legacy + '→' + (p.suggest.level === 'category' ? '대분류 ' + p.suggest.category : (p.suggest.model || '?'))).join(', '));
 
-// ② 반영 — 모호한 품목은 품목군의 첫 모델로 가정(검증용)
+// ② 반영 — 제안 그대로(모델 단위 / 건조기·식세기는 대분류 단위)
 const mapping = { channels: {}, products: {} };
 pv.channels.forEach(c => { mapping.channels[c.legacy] = c.channelId; });
 pv.products.forEach(p => {
-  const line = p.suggest.line, model = p.suggest.model || (line ? g.ctx.OFFLINE_PRODUCT_MODELS[line][0] : '');
-  mapping.products[p.legacy] = { line, model };
+  mapping.products[p.legacy] = p.suggest.level === 'category' ? { category: p.suggest.category } : { line: p.suggest.line, model: p.suggest.model };
 });
+console.log('   미매핑', pv.unmapped.length ? pv.unmapped.join(', ') : '0건', '· 대분류 연결', pv.products.filter(p => p.level === 'category').map(p => p.legacy + '→' + p.category).join(', '));
 const ap = g.ctx._offMigrateProgress({ mode: 'apply', mapping }, AUTH);
 const n1 = dataRows(g.tab('목표실적_월')).length;
 g.ctx._offMigrateProgress({ mode: 'apply', mapping }, AUTH);
@@ -92,6 +92,30 @@ dataRows(g.tab('판매원장')).forEach(s => { if (String(s[1]).slice(0, 7) === 
 console.log('④ ' + ym + ' 월별 해석 vs 판매원장');
 mon.totals.byChannelMonth.filter(t => ledger[t.channelId] != null).forEach(t =>
   console.log('     ' + t.channelId.padEnd(8) + '집계 ' + t.out.actual + ' + 미매칭 ' + t.out.unmatchedQty + ' = ' + (t.out.actual + t.out.unmatchedQty) + ' | 원장 ' + ledger[t.channelId] + ((t.out.actual + t.out.unmatchedQty) === ledger[t.channelId] ? ' OK' : ' DIFF')));
+
+// ④-2 건조기 대분류 합계 = 진행현황 "건조기" 행 + "더에어드라이/에어드라이" 행 (업로드 달 OUT 실적은 원장이라 제외)
+{
+  const all = g.ctx._offGetMonthly({ from: pv.months[0], to: pv.months[pv.months.length - 1] });
+  const DRY = { '건조기': true, '더에어드라이': true, '에어드라이': true };
+  let ok = 0; const bad = [];
+  pv.channels.forEach(c => {
+    const legacyRows = parsed.rows.filter(r => r.channel === c.legacy && DRY[String(r.product).trim()]);
+    if (!legacyRows.length) return;
+    parsed.months.forEach(mo => [['inT', 'in', 'target'], ['inA', 'in', 'actual'], ['outT', 'out', 'target'], ['outA', 'out', 'actual']].forEach(([k, side, f]) => {
+      if (mo.cols[k] == null || (k === 'outA' && start[c.channelId] && mo.ym >= start[c.channelId])) return;
+      const want = legacyRows.reduce((a, r) => (r.values[mo.ym][k] == null ? a : (a || 0) + r.values[mo.ym][k]), null);
+      const t = all.totals.byCategory.find(x => x.ym === mo.ym && x.channelId === c.channelId && x.category === '건조기');
+      const got = t ? t[side][f] : null;
+      if ((want || 0) === (got || 0)) ok++; else bad.push(c.channelId + ' ' + mo.ym + ' ' + k + ' 원본 ' + want + ' / 대분류 합계 ' + got);
+    }));
+  });
+  console.log('④-2 건조기 대분류 합계 대조: 일치', ok, '/ 불일치', bad.length);
+  bad.forEach(b => console.log('     ' + b));
+  const samp = all.totals.byCategory.filter(x => x.category === '건조기' && (x.in.actual || x.in.target)).slice(0, 6);
+  samp.forEach(x => console.log('     표본 ' + x.channelId.padEnd(9) + x.ym + ' IN ' + x.in.target + '/' + x.in.actual + ' OUT ' + x.out.target + '/' + x.out.actual + (x.hasCategoryRow ? ' (대분류 행 포함)' : '')));
+  const dup = all.warnings.filter(w => /^중복 가능/.test(w));
+  console.log('     중복 경고', dup.length ? dup.join(' | ') : '없음');
+}
 
 // ⑤ 대조 리포트·납품가
 console.log('⑤ 업로드시작월 대조(채널 합계)');

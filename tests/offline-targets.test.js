@@ -114,11 +114,19 @@ const fmt = r => [r[0], r[1], r[3], r[4], r[5] + '/' + r[6], r[7]].join(' ');
       .forEach(([n, want]) => check(`채널 "${n}" → "${want}"`, g.ctx._offSuggestChannel(n, chRows) === want, g.ctx._offSuggestChannel(n, chRows)));
     [['더플렌더 MAX', '더플렌더', '더 플렌더 MAX', false], ['더플렌더 MINI', '더플렌더', '더 플렌더 mini', false], ['더플렌더 BASIC', '더플렌더', '더 플렌더 Basic', false],
       ['더시프트', '더시프트', '더 시프트', false], ['더슬림', '더슬림', '더 슬림', false], ['에어드라이', '더에어드라이', '더 에어드라이', false], ['더에어드라이', '더에어드라이', '더 에어드라이', false],
-      ['건조기', '미니건조기', '', true], ['식세기', '미니식기세척기', '', true], ['식기세척기', '미니식기세척기', '', true], ['PRO', '', '', true], ['모르는품목', '', '', true]]
+      ['PRO', '', '', true], ['모르는품목', '', '', true]]
       .forEach(([n, line, model, amb]) => {
         const s = g.ctx._offSuggestProduct(n);
-        check(`품목 "${n}" → ${line || '(없음)'} / ${model || '(빈칸)'}${amb ? ' · 모호' : ''}`, s.line === line && s.model === model && s.ambiguous === amb, s);
+        check(`품목 "${n}" → ${line || '(없음)'} / ${model || '(빈칸)'}${amb ? ' · 모호' : ''}`, s.line === line && s.model === model && s.ambiguous === amb && (amb || s.level === 'model'), s);
       });
+    // 여러 모델을 합친 품목명 → 대분류 단위(모델 구분 없음)
+    [['건조기', '건조기'], ['식세기', '식세기'], ['식기세척기', '식세기']].forEach(([n, cat]) => {
+      const s = g.ctx._offSuggestProduct(n);
+      check(`품목 "${n}" → 대분류 ${cat} 합계(모델 구분 없음)`, s.level === 'category' && s.category === cat && !s.line && !s.model && !s.ambiguous, s);
+    });
+    check('에어드라이는 대분류가 아니라 모델(더 에어드라이, 대분류 건조기)', (s => s.level === 'model' && s.model === '더 에어드라이' && s.category === '건조기')(g.ctx._offSuggestProduct('에어드라이')));
+    check('단가용(모델 단위만): 식기세척기 → 미니식기세척기 품목군만·모호, 건조기 → 모호', (a => a.line === '미니식기세척기' && a.model === '' && a.ambiguous)(g.ctx._offSuggestProduct('식기세척기', true)) &&
+      (b => b.ambiguous && !b.level)(g.ctx._offSuggestProduct('건조기', true)));
   }
 
   console.log('\n[3] 미리보기 — 아무것도 쓰지 않고 계획·미매핑·대조만');
@@ -128,8 +136,8 @@ const fmt = r => [r[0], r[1], r[3], r[4], r[5] + '/' + r[6], r[7]].join(' ');
     check('미리보기: 목표실적_월·이관로그에 쓰지 않음', g.targets().length === 0 && dataRows(g.tab('이관로그')).length === 0);
     check('월·채널·품목 목록', J(pv.months) === J(['2026-01', '2026-02', '2026-09']) && J(pv.channels.map(c => c.legacy + '=' + c.channelId)) === J(['하이마트=himart', '트레이더스=traders', '이마트할인점=emart', '특판=special']), pv.channels);
     check('품목 원문 목록(원문 그대로, 등장 순)', J(pv.products.map(p => p.legacy)) === J(['더플렌더 MAX', '더플렌더 mini', '더플렌더 Mini', '건조기', '에어드라이', '더플렌더 MINI', '더플렌더 PLUS', '식세기']), pv.products.map(p => p.legacy));
-    check('모호한 품목(건조기·식세기)은 제안 모델 빈칸 → 미매핑으로 보고', pv.products.filter(p => p.ambiguous).map(p => p.legacy).join() === '건조기,식세기' &&
-      pv.unmapped.some(u => /건조기/.test(u)) && pv.unmapped.some(u => /식세기/.test(u)), pv.unmapped);
+    check('건조기·식세기는 대분류로 연결 → 미매핑 0건', J(pv.products.filter(p => p.level === 'category').map(p => p.legacy + '=' + p.category)) === J(['건조기=건조기', '식세기=식세기']) &&
+      pv.unmapped.length === 0, { unmapped: pv.unmapped, products: pv.products.map(p => [p.legacy, p.level, p.category]) });
     check('원본 행 수·오류 칸 수', pv.legacyRows === 9 && pv.badCells === 1);
   }
 
@@ -267,6 +275,59 @@ const fmt = r => [r[0], r[1], r[3], r[4], r[5] + '/' + r[6], r[7]].join(' ');
       .forEach(([it, re]) => { const r = sp([it]); check('거절: ' + re, r.error && re.test(r.error), r); });
     const partial = sp([{ channelId: 'himart', line: '더시프트', model: '더 시프트', price: 1, startDate: '2026-01-01' }, { channelId: 'nope', line: '더시프트', model: '더 시프트', price: 1, startDate: '2026-01-01' }]);
     check('한 건이라도 틀리면 아무것도 쓰지 않음', partial.error && g.ctx._offGetPrices().items.length === 2);
+  }
+
+  console.log('\n[12] 대분류 단위 이관 — "건조기"·"식세기"는 모델 구분 없는 대분류 행, 에어드라이는 모델 행');
+  {
+    const g = env();
+    const r = g.ctx._offMigrateProgress({ mode: 'apply' }, AUTH); // 제안 그대로(건조기·식세기 → 대분류)
+    const t = g.targets();
+    const cat = t.filter(x => x[11] && !x[2]);
+    check('미매핑 0건', r.unmapped.length === 0, r.unmapped);
+    check('대분류 행: 품목군·모델 빈칸, 대분류만, 비고 "모델 구분 없음"', cat.length > 0 && cat.every(x => x[2] === '' && x[3] === '' && ['건조기', '식세기'].indexOf(x[11]) >= 0 && /모델 구분 없음/.test(x[10])), cat.map(fmt));
+    const cv = (ym, ch, c, type) => { const x = t.find(y => y[0] === ym && y[1] === ch && !y[2] && y[11] === c && y[4] === type); return x ? x[5] + '/' + x[6] : null; };
+    check('하이마트 건조기(대분류): 2월 IN 10/12 · OUT 8/9, 9월 OUT 목표 7(실적은 업로드 달이라 제외)', cv('2026-02', 'himart', '건조기', 'IN') === '10/12' && cv('2026-02', 'himart', '건조기', 'OUT') === '8/9' && cv('2026-09', 'himart', '건조기', 'OUT') === '7/');
+    check('특판 식세기(대분류): 2월 IN 3/2', cv('2026-02', 'special', '식세기', 'IN') === '3/2');
+    const air = t.find(x => x[1] === 'traders' && x[3] === '더 에어드라이' && x[0] === '2026-02' && x[4] === 'IN');
+    check('에어드라이는 모델 행(품목군 더에어드라이, 대분류 건조기)', air && air[2] === '더에어드라이' && air[11] === '건조기' && air[5] === 5);
+    check('모델 행에도 대분류가 채워짐', t.filter(x => x[2]).every(x => x[11] === { '더플렌더': '음식물처리기', '더에어드라이': '건조기', '미니건조기': '건조기' }[x[2]]));
+    const n = t.length, once = J(t);
+    g.ctx._offMigrateProgress({ mode: 'apply' }, AUTH);
+    check('두 번 반영해도 행·값 동일(대분류 행 포함)', g.targets().length === n && J(g.targets()) === once);
+
+    // 월별 해석 — 대분류 합계 = 대분류 행 + 그 대분류 모델 행(+ 원장), 모델 행 목록에는 대분류 행이 없음
+    const m2 = g.ctx._offGetMonthly({ from: '2026-02', to: '2026-02' });
+    check('모델 행 목록에 대분류 행 없음(모두 품목군·모델 있음)', m2.rows.every(x => x.line && x.model));
+    check('대분류 행은 categoryRows로 따로', J(m2.categoryRows.map(x => x.channelId + ':' + x.category)) === J(['himart:건조기', 'special:식세기']), m2.categoryRows.map(x => [x.channelId, x.category]));
+    const ct = (ch, c) => m2.totals.byCategory.find(x => x.channelId === ch && x.category === c);
+    check('하이마트 2월 건조기 합계 = 대분류 행(IN 10/12)', ct('himart', '건조기').in.target === 10 && ct('himart', '건조기').in.actual === 12 && ct('himart', '건조기').hasCategoryRow);
+    check('트레이더스 2월 건조기 합계 = 에어드라이 모델 행(IN 5/5)', ct('traders', '건조기').in.target === 5 && !ct('traders', '건조기').hasCategoryRow);
+    const chT = m2.totals.byChannelMonth.find(x => x.channelId === 'himart');
+    check('채널 합계에는 대분류 행도 포함 + "대분류 합계로만 있는 수치" 표시', chT.categoryOnly.join() === '건조기' && chT.in.actual === 524 + 0 + 12, chT);
+    check('대분류 행은 금액 미계산 경고', m2.warnings.some(w => /대분류 단위 행.*금액이 계산되지 않습니다/.test(w)));
+
+    const mixed = g.ctx._offMonthlyCompute({ from: '2026-02', to: '2026-02', channels: g.ctx._offChannelRows(g.ctx._offSS()), prices: [], sales: [], mappings: [], skus: [],
+      targets: [['2026-02', 'theablen', '', '', 'IN', 7, 6, 'migration', '', '', '', '건조기'], ['2026-02', 'theablen', '더에어드라이', '더 에어드라이', 'IN', 2, 1, 'migration', '', '', '', '건조기']] });
+    check('대분류 행 + 이관된 다른 모델 행(원본의 건조기 행 + 더에어드라이 행)은 중복 경고 없음, 합계는 더함(9/7)', !mixed.warnings.some(w => /중복 가능/.test(w)) &&
+      (x => x.in.target === 9 && x.in.actual === 7)(mixed.totals.byCategory.find(x => x.category === '건조기')), mixed.warnings);
+
+    console.log('\n[13] 같은 달·채널·대분류에 대분류 행(이관)과 모델 행(입력)이 함께 있으면 경고');
+    g.ctx._offSaveTargets({ items: [{ ym: '2026-02', channelId: 'himart', line: '미니건조기', model: '미니 건조기 PRO', type: 'IN', target: 4, actual: 3 }] }, AUTH);
+    const m3 = g.ctx._offGetMonthly({ from: '2026-02', to: '2026-02' });
+    check('중복 경고(IN 목표·IN 실적)', m3.warnings.some(w => /중복 가능: himart 2026-02 건조기.*IN 목표·IN 실적/.test(w)), m3.warnings);
+    check('  ↳ 대분류 합계에는 둘 다 더해짐(10+4 / 12+3)', (x => x.in.target === 14 && x.in.actual === 15)(m3.totals.byCategory.find(x => x.channelId === 'himart' && x.category === '건조기')));
+    check('  ↳ 대분류 행에 중복 항목 표시', J(m3.categoryRows.find(x => x.channelId === 'himart').duplicateFields) === J(['IN 목표', 'IN 실적']));
+    const saved = g.targets().find(x => x[3] === '미니 건조기 PRO' && x[7] === 'input');
+    check('입력(input) 행에도 대분류 채움', saved && saved[11] === '건조기');
+    g.ctx._offMigrateProgress({ mode: 'apply' }, AUTH);
+    check('다시 이관해도 input 행 보존(키가 달라 건너뛸 것 없음)', g.targets().some(x => x[3] === '미니 건조기 PRO' && x[7] === 'input' && x[5] === 4));
+
+    console.log('\n[14] 9월 대조 — 대분류로 이관한 품목은 대분류 합계 한 줄로 비교');
+    const pv = g.ctx._offMigrateProgress({ mode: 'preview' }, AUTH);
+    const row = pv.compare.find(x => x.channelId === 'himart' && x.level === 'category' && x.category === '건조기');
+    check('하이마트 "(대분류) 건조기 합계": 진행현황 6 vs 원장 0', row && row.model === '(대분류) 건조기 합계' && row.legacy === 6 && row.ledger === 0 && row.diff === -6, row);
+    check('  ↳ 같은 대분류의 모델 줄은 따로 나오지 않음', !pv.compare.some(x => x.channelId === 'himart' && x.category === '건조기' && x.level === 'model'));
+    check('  ↳ 채널 합계는 그대로(108 vs 101)', (x => x.legacy === 108 && x.ledger === 101)(pv.compare.find(x => x.channelId === 'himart' && x.total)));
   }
 
   console.log('\n[11] doPost 라우팅 — 새 액션도 세션 필수');

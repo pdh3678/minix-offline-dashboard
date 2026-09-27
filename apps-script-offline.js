@@ -54,7 +54,8 @@ var OFF_TABS = {
   uploadLog:  { name: '업로드로그', headers: ['upload_id', '업로드시각', '업로더', '파일명', '파일유형', 'channel_id', '기준일/기간', '원본행수', '반영행수', '미매칭코드수', '경고', '상태'], text: [0, 1, 2, 3, 4, 5, 6, 10, 11] },
   unmatched:  { name: '미매칭코드', headers: ['channel_id', '원본코드', '원본상품명', '최초발견일', '최근발견일', '발견횟수'], text: [0, 1, 2, 3, 4] },
   // 2-A단계(2026-09-27) — 목표·Sell-in 입력, 단가, 과거 실적 이관 (로직은 apps-script-offline-targets.js)
-  targets:    { name: '목표실적_월', headers: ['연월', 'channel_id', '품목군', '모델', '구분', '목표수량', '실적수량', '출처', '수정일', '수정자', '비고'], text: [0, 1, 2, 3, 4, 7, 8, 9, 10] },
+  // 대분류(11)는 뒤에 덧붙인 열 — 모델 단위 행은 대분류·품목군·모델 모두, 대분류 단위 행(이관 전용)은 대분류만 채운다
+  targets:    { name: '목표실적_월', headers: ['연월', 'channel_id', '품목군', '모델', '구분', '목표수량', '실적수량', '출처', '수정일', '수정자', '비고', '대분류'], text: [0, 1, 2, 3, 4, 7, 8, 9, 10, 11] },
   prices:     { name: '단가마스터', headers: ['channel_id', '품목군', '모델', '공급가', '적용시작일', '비고', '수정일', '수정자'], text: [0, 1, 2, 4, 5, 6, 7] },
   migrationLog: { name: '이관로그', headers: ['실행시각', '실행자', '대상', '월 범위', '반영 행수', '미매핑 항목', '상태'], text: [0, 1, 2, 3, 5, 6] }
 };
@@ -135,6 +136,12 @@ function _offExtendTab(sheet, def, from) {
     rows.forEach(function (r) { if (!r[5] && OFF_UPLOAD_START_SEED[r[0]]) r[5] = OFF_UPLOAD_START_SEED[r[0]]; });
     _offWriteAll(sheet, def, rows, rows.length);
   }
+  // 목표실적_월 대분류 — 기존(모델 단위) 행은 품목군에서 채운다(OFFLINE_LINE_CATEGORY: apps-script-offline-targets.js)
+  if (def === OFF_TABS.targets) {
+    var trows = _offReadRows(sheet, def);
+    trows.forEach(function (r) { if (!r[11] && r[2]) r[11] = OFFLINE_LINE_CATEGORY[r[2]] || ''; });
+    _offWriteAll(sheet, def, trows, trows.length);
+  }
 }
 
 function _offFormatNewTab(sheet, def) {
@@ -159,7 +166,7 @@ function _offReadmeRows() {
     ['하이마트_누적스냅샷', '하이마트 당월 누적 판매 스냅샷(판매 값이 있는 행만). 일별 판매 = 이웃 스냅샷의 차이. 최근 45일만 보관.'],
     ['업로드로그', '업로드 1건 = 1행. 반영 행수·미매칭 코드 수·경고.'],
     ['미매칭코드', '코드매핑이 없는 원본코드. 매핑하면 목록에서 빠진다.'],
-    ['목표실적_월', '채널×품목군×모델×월 목표·실적(구분 IN=Sell-in, OUT=Sell-out). 출처 input = 대시보드 목표 관리에서 입력(이관이 덮어쓰지 않음), migration = 기존 진행현황에서 이관. OUT 실적은 업로드시작월 이전 달·업로드 없는 채널만 쓰고, 그 뒤로는 판매원장에서 집계한다.'],
+    ['목표실적_월', '채널×품목군×모델×월 목표·실적(구분 IN=Sell-in, OUT=Sell-out). 출처 input = 대시보드 목표 관리에서 입력(이관이 덮어쓰지 않음), migration = 기존 진행현황에서 이관. OUT 실적은 업로드시작월 이전 달·업로드 없는 채널만 쓰고, 그 뒤로는 판매원장에서 집계한다. 대분류 열: 모델 단위 행은 대분류·품목군·모델 모두, 대분류 단위 행(모델 구분이 없는 과거 수치 — 예: 진행현황의 "건조기" 행)은 대분류만 채운다.'],
     ['단가마스터', '채널×품목군×모델 공급가 이력. 금액 = 수량 × 그 달 1일 기준 가장 최근 적용시작일의 공급가.'],
     ['이관로그', '기존 스프레드시트(진행현황·납품가 수수료) 이관 1회 = 1행.']
   ];

@@ -14,16 +14,25 @@
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // ── 품목 카탈로그(모델) ──
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// 프론트 src/shared/constants/products.js PRODUCT_CATALOG 의 품목군 key → 모델 label 과 **같아야 한다**
-// (tests/offline-monthly.test.js 가 대조한다). 목표·단가·SKU의 '모델'은 이 표기로 맞춰 집계한다.
-var OFFLINE_PRODUCT_MODELS = {
-  '더플렌더': ['더 플렌더 Basic', '더 플렌더 PRO', '더 플렌더 MAX', '더 플렌더 mini', '더 플렌더 NEXT', '더 플렌더 PLUS'],
-  '더시프트': ['더 시프트', '더 시프트 PRO'],
-  '더슬림': ['더 슬림'],
-  '더에어드라이': ['더 에어드라이'],
-  '미니건조기': ['미니 건조기', '미니 건조기 PRO', '미니 건조기 PRO+'],
-  '미니식기세척기': ['미니 식기세척기', '미니 식기세척기 PRO']
-};
+/* GAS 쪽 품목 정의는 **여기 한 곳**에만 적는다 — 품목군 key · 대분류 · 모델 label.
+   프론트 src/shared/constants/products.js PRODUCT_CATALOG 와 같아야 한다(tests/offline-monthly.test.js 가 대조).
+   GAS와 브라우저는 번들러 없이 따로 실행돼 파일을 공유할 수 없으므로, 두 벌이 어긋나면 테스트가 실패하게 둔다.
+   대분류는 품목군 위 단계다(더 에어드라이·미니 건조기 → 건조기). 품목군 자체는 합치지 않는다. */
+var OFFLINE_CATALOG = [
+  { line: '더플렌더', category: '음식물처리기', models: ['더 플렌더 Basic', '더 플렌더 PRO', '더 플렌더 MAX', '더 플렌더 mini', '더 플렌더 NEXT', '더 플렌더 PLUS'] },
+  { line: '더시프트', category: '김치냉장고', models: ['더 시프트', '더 시프트 PRO'] },
+  { line: '더슬림', category: '청소기', models: ['더 슬림'] },
+  { line: '더에어드라이', category: '건조기', models: ['더 에어드라이'] },
+  { line: '미니건조기', category: '건조기', models: ['미니 건조기', '미니 건조기 PRO', '미니 건조기 PRO+'] },
+  { line: '미니식기세척기', category: '식세기', models: ['미니 식기세척기', '미니 식기세척기 PRO'] }
+];
+// 파생 — 품목군 → 모델 목록 / 품목군 → 대분류 / 대분류 목록(등장 순)
+var OFFLINE_PRODUCT_MODELS = {}, OFFLINE_LINE_CATEGORY = {}, OFFLINE_CATEGORIES = [];
+OFFLINE_CATALOG.forEach(function (l) {
+  OFFLINE_PRODUCT_MODELS[l.line] = l.models;
+  OFFLINE_LINE_CATEGORY[l.line] = l.category;
+  if (OFFLINE_CATEGORIES.indexOf(l.category) < 0) OFFLINE_CATEGORIES.push(l.category);
+});
 
 // 비교용 표기 — 공백 제거·소문자('더플렌더 MINI' = '더 플렌더 mini')
 function _offNorm(s) { return String(s == null ? '' : s).replace(/\s+/g, '').toLowerCase(); }
@@ -114,7 +123,7 @@ function _offMonthlyCompute(input) {
     var k = [ym, ch, line, model].join(OFF_KEY_SEP);
     if (!rows[k]) {
       var canon = _offCanonModel(line, model);
-      rows[k] = { ym: ym, channelId: ch, line: line, model: model, knownModel: canon.known,
+      rows[k] = { ym: ym, channelId: ch, category: OFFLINE_LINE_CATEGORY[line] || '', line: line, model: model, knownModel: canon.known,
         'in': { target: null, actual: null }, out: { target: null, actual: null, source: '', byType: null } };
       order.push(k);
       if (!canon.known) warn('model' + OFF_KEY_SEP + line + OFF_KEY_SEP + model, '카탈로그에 없는 모델: ' + line + ' / ' + (model || '(빈칸)'));
@@ -123,12 +132,31 @@ function _offMonthlyCompute(input) {
   }
   var num = function (v) { return (v === '' || v == null) ? null : Number(v); };
 
+  // 대분류 단위 행(이관 전용 — 품목군·모델 없이 대분류만). 모델 행 목록에는 넣지 않고 따로 돌려준다.
+  var crows = {}, corder = [];
+  function crow(ym, ch, cat) {
+    var k = [ym, ch, cat].join(OFF_KEY_SEP);
+    if (!crows[k]) {
+      crows[k] = { ym: ym, channelId: ch, category: cat, 'in': { target: null, actual: null }, out: { target: null, actual: null, source: '', byType: null }, price: null };
+      corder.push(k);
+    }
+    return crows[k];
+  }
+
   // 1) 목표실적_월
   input.targets.forEach(function (t) {
     var ym = t[0], ch = t[1], line = t[2], type = t[4];
-    if (!inRange[ym] || !chInfo[ch] || !line || (type !== 'IN' && type !== 'OUT')) return;
-    var model = _offCanonModel(line, t[3]).model;
-    var r = row(ym, ch, line, model);
+    var cat = t[11] || (line ? OFFLINE_LINE_CATEGORY[line] || '' : '');
+    if (!inRange[ym] || !chInfo[ch] || (type !== 'IN' && type !== 'OUT')) return;
+    if (!line && !cat) return;
+    var r = line ? row(ym, ch, line, _offCanonModel(line, t[3]).model) : crow(ym, ch, cat);
+    // 직접 입력(input)한 모델 단위 값 — 대분류 단위 이관 값과 겹치는지 볼 때 쓴다(이관끼리는 원본의 서로 다른 행이라 겹침이 아니다)
+    if (line && t[7] === 'input') {
+      var side = type === 'IN' ? 'in' : 'out';
+      r.inputFields = r.inputFields || {};
+      if (num(t[5]) != null) r.inputFields[side + '.target'] = true;
+      if (num(t[6]) != null && !(type === 'OUT' && isUploadMonth(ch, ym))) r.inputFields[side + '.actual'] = true;
+    }
     if (type === 'IN') { r['in'].target = num(t[5]); r['in'].actual = num(t[6]); return; }
     r.out.target = num(t[5]);
     if (!isUploadMonth(ch, ym) && num(t[6]) != null) {
@@ -198,6 +226,22 @@ function _offMonthlyCompute(input) {
       (a.model < b.model ? -1 : a.model > b.model ? 1 : 0);
   });
 
+  // 대분류 단위 행 — 단가는 모델 단위라 금액은 계산하지 않는다(합계 금액은 incomplete로 표시)
+  var clist = corder.map(function (k) { return crows[k]; }).sort(function (a, b) {
+    return (a.ym < b.ym ? -1 : a.ym > b.ym ? 1 : 0) ||
+      ((Number(chInfo[a.channelId].order) || 99) - (Number(chInfo[b.channelId].order) || 99)) ||
+      (OFFLINE_CATEGORIES.indexOf(a.category) - OFFLINE_CATEGORIES.indexOf(b.category));
+  });
+  clist.forEach(function (r) {
+    ['in', 'out'].forEach(function (side) {
+      var s = r[side];
+      s.targetAmount = null; s.actualAmount = null; s.rate = _offRate(s.actual, s.target);
+    });
+    if (r['in'].target != null || r['in'].actual != null || r.out.target != null || r.out.actual != null) {
+      warn('catprice', '대분류 단위 행(모델 구분 없는 이관 수치)은 단가가 모델 단위라 금액이 계산되지 않습니다.');
+    }
+  });
+
   // 5) 합계 — 채널×월, 월. null만 있으면 null. 금액은 단가 없는 행이 섞이면 incomplete
   var unmatchedList = Object.keys(unmatched).sort().map(function (k) {
     var p = k.split(OFF_KEY_SEP);
@@ -215,11 +259,34 @@ function _offMonthlyCompute(input) {
       if (r.price == null && (s.target || s.actual)) t.amountIncomplete = true;
     });
   }
-  var byCM = {}, byM = {};
-  list.forEach(function (r) {
+  // 채널×월·월 합계에는 대분류 단위 행도 넣는다(실제 수량이므로). 대분류 합계 = 대분류 단위 행 + 그 대분류 모델 행
+  var byCM = {}, byM = {}, byCat = {}, catOrder = [];
+  function catTot(r) {
+    var k = [r.ym, r.channelId, r.category].join(OFF_KEY_SEP);
+    if (!byCat[k]) { byCat[k] = emptyTot(); byCat[k].hasCategoryRow = false; catOrder.push(k); }
+    return byCat[k];
+  }
+  list.concat(clist).forEach(function (r) {
     var k = r.ym + OFF_KEY_SEP + r.channelId;
     add(byCM[k] = byCM[k] || emptyTot(), r);
     add(byM[r.ym] = byM[r.ym] || emptyTot(), r);
+    if (r.category) add(catTot(r), r);
+  });
+  clist.forEach(function (r) { catTot(r).hasCategoryRow = true; });
+  // 중복 경고 — 같은 연월·채널·대분류·항목에 대분류 단위(이관) 값과 **직접 입력한** 모델 단위 값이 둘 다 있으면
+  // 대분류 합계에 둘 다 더해진다(예: 이관된 "건조기" 합계가 있는 달에 미니 건조기 PRO를 따로 입력).
+  // 이관된 모델 행(원본의 "더에어드라이" 행 등)은 원본에서 이미 별도 품목이라 겹침으로 보지 않는다.
+  var FIELDS = [['in', 'target', 'IN 목표'], ['in', 'actual', 'IN 실적'], ['out', 'target', 'OUT 목표'], ['out', 'actual', 'OUT 실적']];
+  clist.forEach(function (c) {
+    var both = FIELDS.filter(function (f) {
+      if (c[f[0]][f[1]] == null) return false;
+      return list.some(function (r) { return r.ym === c.ym && r.channelId === c.channelId && r.category === c.category && r.inputFields && r.inputFields[f[0] + '.' + f[1]]; });
+    });
+    if (both.length) {
+      c.duplicateFields = both.map(function (f) { return f[2]; });
+      warn('dup' + OFF_KEY_SEP + c.ym + OFF_KEY_SEP + c.channelId + OFF_KEY_SEP + c.category,
+        '중복 가능: ' + c.channelId + ' ' + c.ym + ' ' + c.category + ' — 대분류 단위(이관) 값과 모델 단위 값이 함께 있어 대분류 합계에 둘 다 더해졌습니다(' + c.duplicateFields.join('·') + ').');
+    }
   });
   unmatchedList.forEach(function (u) {
     var k = u.ym + OFF_KEY_SEP + u.channelId;
@@ -229,14 +296,24 @@ function _offMonthlyCompute(input) {
   function finish(t) { t['in'].rate = _offRate(t['in'].actual, t['in'].target); t.out.rate = _offRate(t.out.actual, t.out.target); return t; }
   var byChannelMonth = Object.keys(byCM).sort().map(function (k) {
     var p = k.split(OFF_KEY_SEP), t = finish(byCM[k]);
-    return { ym: p[0], channelId: p[1], 'in': t['in'], out: t.out };
+    // 그 달·채널에 "대분류 합계로만 존재하는 수치"가 있는 대분류(모델 행만 보면 빠져 보이는 몫)
+    var catOnly = clist.filter(function (c) { return c.ym === p[0] && c.channelId === p[1]; }).map(function (c) { return c.category; });
+    return { ym: p[0], channelId: p[1], 'in': t['in'], out: t.out, categoryOnly: catOnly };
   });
   var byMonth = Object.keys(byM).sort().map(function (ym) { var t = finish(byM[ym]); return { ym: ym, 'in': t['in'], out: t.out }; });
+  var byCategory = catOrder.map(function (k) {
+    var p = k.split(OFF_KEY_SEP), t = finish(byCat[k]);
+    return { ym: p[0], channelId: p[1], category: p[2], 'in': t['in'], out: t.out, hasCategoryRow: byCat[k].hasCategoryRow };
+  }).sort(function (a, b) {
+    return (a.ym < b.ym ? -1 : a.ym > b.ym ? 1 : 0) || ((Number(chInfo[a.channelId].order) || 99) - (Number(chInfo[b.channelId].order) || 99)) ||
+      (OFFLINE_CATEGORIES.indexOf(a.category) - OFFLINE_CATEGORIES.indexOf(b.category));
+  });
   if (unmatchedList.length) {
     var q = unmatchedList.reduce(function (s, u) { return s + u.qty; }, 0);
     warnings.push('매핑 안 된 코드 ' + unmatchedList.length + '건(수량 ' + q + ')은 OUT 실적 합계에 들어가지 않았습니다 — 코드 매핑에서 연결하세요.');
   }
-  return { months: months, channels: channels, rows: list, totals: { byChannelMonth: byChannelMonth, byMonth: byMonth },
+  return { months: months, channels: channels, rows: list, categoryRows: clist,
+    totals: { byChannelMonth: byChannelMonth, byMonth: byMonth, byCategory: byCategory },
     unmatched: unmatchedList, warnings: warnings };
 }
 
@@ -264,7 +341,9 @@ function _offGetMonthly(data) {
 // ── 목표·실적 입력 (목표실적_월) ──
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-function _offTargetKey(ym, ch, line, model, type) { return [ym, ch, line, model, type].join(OFF_KEY_SEP); }
+// 목표실적_월 키 (연월, channel_id, 대분류, 품목군, 모델, 구분) — 대분류 단위 행은 품목군·모델이 빈칸
+function _offTargetKey(ym, ch, cat, line, model, type) { return [ym, ch, cat, line, model, type].join(OFF_KEY_SEP); }
+function _offRowKey(r) { return _offTargetKey(r[0], r[1], r[11] || OFFLINE_LINE_CATEGORY[r[2]] || '', r[2], r[3], r[4]); }
 function _offQty(v, what) {
   if (v === '' || v == null) return '';
   var n = Number(v);
@@ -293,7 +372,7 @@ function _offSaveTargets(data, auth) {
     var def = OFF_TABS.targets, sheet = _offSheet(ss, 'targets');
     var rows = _offReadRows(sheet, def), prev = rows.length;
     var idx = {};
-    rows.forEach(function (r) { idx[_offTargetKey(r[0], r[1], r[2], r[3], r[4])] = r; });
+    rows.forEach(function (r) { idx[_offRowKey(r)] = r; });
     var today = _offToday();
     items.forEach(function (it, i) {
       var what = (i + 1) + '번째 항목';
@@ -306,10 +385,11 @@ function _offSaveTargets(data, auth) {
       if (it.type === 'OUT' && actual !== '' && _offIsYm(ch[5]) && it.ym >= ch[5]) {
         throw new Error(what + ': ' + it.channelId + ' ' + it.ym + ' OUT 실적은 판매원장에서 집계됩니다(업로드시작월 ' + ch[5] + ' 이후) — 입력할 수 없습니다.');
       }
-      var k = _offTargetKey(it.ym, it.channelId, it.line, model, it.type);
+      var cat = OFFLINE_LINE_CATEGORY[it.line] || '';
+      var k = _offTargetKey(it.ym, it.channelId, cat, it.line, model, it.type);
       var row = idx[k];
-      if (!row) { row = [it.ym, it.channelId, it.line, model, it.type, '', '', '', '', '', '']; rows.push(row); idx[k] = row; }
-      row[5] = target; row[6] = actual; row[7] = 'input'; row[8] = today; row[9] = (auth && auth.email) || '';
+      if (!row) { row = [it.ym, it.channelId, it.line, model, it.type, '', '', '', '', '', '', cat]; rows.push(row); idx[k] = row; }
+      row[5] = target; row[6] = actual; row[7] = 'input'; row[8] = today; row[9] = (auth && auth.email) || ''; row[11] = cat;
       if (it.note !== undefined) row[10] = String(it.note || '').trim();
     });
     _offWriteAll(sheet, def, rows, prev);
@@ -392,8 +472,8 @@ var LEGACY_PROGRESS_TAB = '26년 진행현황';
 var LEGACY_PRICE_TAB = '납품가 수수료';
 // 진행현황의 품목 행 중 이관하지 않는 합계 행
 var LEGACY_SKIP_PRODUCTS = { '소계': true, '합계': true, '총계': true, 'total': true };
-// 모델 정보가 없는 품목명 → 품목군만(모델은 사용자가 고른다)
-var LEGACY_LINE_SYNONYMS = { '건조기': '미니건조기', '식세기': '미니식기세척기', '식기세척기': '미니식기세척기' };
+// 대분류 이름과 같은 품목명(건조기·식세기 등)은 여러 모델을 합친 수치 → 대분류 단위로 이관. 대분류 이름이 아닌 별칭만 여기에
+var LEGACY_CATEGORY_SYNONYMS = { '식기세척기': '식세기', '음처기': '음식물처리기' };
 
 function _offLegacySS() {
   var id = PropertiesService.getScriptProperties().getProperty(LEGACY_PROGRESS_SHEET_ID_PROP);
@@ -509,27 +589,40 @@ function _offSuggestChannel(name, channelRows) {
   });
   return best;
 }
-/* 품목명 → { line, model, ambiguous } 제안(대소문자·띄어쓰기 무시)
-   · 모델 label과 같음 → 확정 제안 ('더플렌더 MAX' → 더플렌더 / 더 플렌더 MAX)
-   · 모델 label이 그 이름으로 끝남 → 품목군이 모델 하나뿐이면 확정, 여럿이면 품목군만('건조기' → 미니건조기, 모델 빈칸)
-   · 동의어('식세기') → 품목군만 */
-function _offSuggestProduct(name) {
-  var n = _offNorm(name);
-  if (!n) return { line: '', model: '', ambiguous: true };
+/* 품목명 → 제안(대소문자·띄어쓰기 무시). 두 단계 중 하나로 연결한다:
+     (a) 모델 단위 { level:'model', line, model, category }
+     (b) 대분류 단위 { level:'category', category } — 모델 구분 없는 합계(예: 진행현황의 "건조기" 행)
+   · 모델 label과 같음 → (a) 확정 ('더플렌더 MAX' → 더 플렌더 MAX)
+   · 대분류 이름·별칭과 같음 → (b) ('건조기' → 대분류 건조기, '식세기'·'식기세척기' → 식세기)
+   · 모델 label이 그 이름으로 끝남 → 품목군에 모델이 하나뿐이면 (a) 확정('에어드라이' → 더 에어드라이), 여럿이면 (b)
+   modelOnly(단가처럼 모델 단위만 받는 곳) — (b) 대신 품목군만 채우고 모델은 빈칸(모호) */
+function _offSuggestProduct(name, modelOnly) {
+  var n = _offNorm(name), none = { level: '', line: '', model: '', category: '', ambiguous: true };
+  if (!n) return none;
   var cands = [];
   for (var i = 0; i < _OFF_LINE_ORDER.length; i++) {
     var ln = _OFF_LINE_ORDER[i], ms = OFFLINE_PRODUCT_MODELS[ln];
     for (var j = 0; j < ms.length; j++) {
       var mn = _offNorm(ms[j]);
-      if (mn === n) return { line: ln, model: ms[j], ambiguous: false };
+      if (mn === n) return { level: 'model', line: ln, model: ms[j], category: OFFLINE_LINE_CATEGORY[ln], ambiguous: false };
       if (n.length >= 2 && mn.slice(-n.length) === n) cands.push({ line: ln, model: ms[j] });
     }
   }
-  var line = cands.length ? cands[0].line : (LEGACY_LINE_SYNONYMS[n] || '');
-  if (cands.some(function (c) { return c.line !== line; })) return { line: '', model: '', ambiguous: true };
-  if (!line) return { line: '', model: '', ambiguous: true };
+  var cat = '';
+  OFFLINE_CATEGORIES.forEach(function (c) { if (_offNorm(c) === n) cat = c; });
+  cat = cat || LEGACY_CATEGORY_SYNONYMS[n] || '';
+  if (cat && !modelOnly) return { level: 'category', line: '', model: '', category: cat, ambiguous: false };
+  var line = cands.length ? cands[0].line : '';
+  if (cands.some(function (c) { return c.line !== line; })) return none;
+  if (!line && cat) { // 단가용: 대분류에 품목군이 하나뿐이면 그 품목군
+    var lines = _OFF_LINE_ORDER.filter(function (l) { return OFFLINE_LINE_CATEGORY[l] === cat; });
+    if (lines.length === 1) line = lines[0];
+  }
+  if (!line) return none;
   var models = OFFLINE_PRODUCT_MODELS[line];
-  return models.length === 1 ? { line: line, model: models[0], ambiguous: false } : { line: line, model: '', ambiguous: true };
+  if (models.length === 1) return { level: 'model', line: line, model: models[0], category: OFFLINE_LINE_CATEGORY[line], ambiguous: false };
+  if (modelOnly) return { level: '', line: line, model: '', category: OFFLINE_LINE_CATEGORY[line], ambiguous: true };
+  return { level: 'category', line: '', model: '', category: OFFLINE_LINE_CATEGORY[line], ambiguous: false };
 }
 
 function _offMigrationLog(ss, auth, target, range, count, unmapped, status) {
@@ -549,9 +642,10 @@ function _offRecentMigrationLog(ss) {
 }
 
 /* 진행현황 → 목표실적_월 이관 계획. mapping 없으면 제안값을 쓴다.
-   mapping = { channels: {원문 채널명: channel_id}, products: {원문 품목명: {line, model}} }
+   mapping = { channels: {원문 채널명: channel_id}, products: {원문 품목명: {line, model} | {category}} }
+   ({category}만 주면 대분류 단위 행 — 품목군·모델 빈칸)
    이관 대상: 모든 월의 IN 목표·IN 실적·OUT 목표 + OUT 실적은 채널 업로드시작월 이전 달만(업로드 없는 채널은 전부).
-   같은 키(연월·채널·품목군·모델·구분)로 모이는 원문 행은 합산한다. */
+   같은 키(연월·채널·대분류·품목군·모델·구분)로 모이는 원문 행은 합산한다. */
 function _offProgressPlan(parsed, channelRows, mapping) {
   var chById = {};
   channelRows.forEach(function (c) { chById[c[0]] = c; });
@@ -575,18 +669,28 @@ function _offProgressPlan(parsed, channelRows, mapping) {
     p.suggest = s; p.ambiguous = s.ambiguous;
     var m = mp ? (mp[k] || {}) : s;
     p.line = m.line || ''; p.model = m.model || '';
-    if (p.line && OFFLINE_PRODUCT_LINES.indexOf(p.line) < 0) throw new Error('품목명 "' + k + '": 품목군이 올바르지 않습니다: ' + p.line);
-    if (p.line && p.model) p.model = _offCatalogModel(p.line, p.model, '품목명 "' + k + '"');
+    p.category = m.category && !p.line ? m.category : '';
+    if (p.category) {
+      if (OFFLINE_CATEGORIES.indexOf(p.category) < 0) throw new Error('품목명 "' + k + '": 대분류가 올바르지 않습니다: ' + p.category);
+      p.level = 'category';
+    } else {
+      if (p.line && OFFLINE_PRODUCT_LINES.indexOf(p.line) < 0) throw new Error('품목명 "' + k + '": 품목군이 올바르지 않습니다: ' + p.line);
+      if (p.line && p.model) p.model = _offCatalogModel(p.line, p.model, '품목명 "' + k + '"');
+      p.level = p.line && p.model ? 'model' : '';
+      if (p.level) p.category = OFFLINE_LINE_CATEGORY[p.line];
+    }
     return p;
   });
   var chMap = {}, prMap = {};
   channels.forEach(function (c) { chMap[c.legacy] = c.channelId; });
-  products.forEach(function (p) { if (p.line && p.model) prMap[p.legacy] = { line: p.line, model: p.model }; });
+  products.forEach(function (p) {
+    if (p.level) prMap[p.legacy] = { line: p.level === 'model' ? p.line : '', model: p.level === 'model' ? p.model : '', category: p.category };
+  });
   var agg = {}, order = [], unmapped = [], seenUnmapped = {}, outSkipped = 0;
-  function put(ym, ch, line, model, type, target, actual) {
+  function put(ym, ch, cat, line, model, type, target, actual) {
     if (target == null && actual == null) return;
-    var k = _offTargetKey(ym, ch, line, model, type);
-    if (!agg[k]) { agg[k] = [ym, ch, line, model, type, null, null]; order.push(k); }
+    var k = _offTargetKey(ym, ch, cat, line, model, type);
+    if (!agg[k]) { agg[k] = [ym, ch, line, model, type, null, null, cat]; order.push(k); }
     if (target != null) agg[k][5] = (agg[k][5] || 0) + target;
     if (actual != null) agg[k][6] = (agg[k][6] || 0) + actual;
   }
@@ -600,28 +704,32 @@ function _offProgressPlan(parsed, channelRows, mapping) {
     var start = _offIsYm(chById[ch][5]) ? chById[ch][5] : '';
     parsed.months.forEach(function (mo) {
       var o = r.values[mo.ym];
-      put(mo.ym, ch, pm.line, pm.model, 'IN', o.inT, o.inA);
+      put(mo.ym, ch, pm.category, pm.line, pm.model, 'IN', o.inT, o.inA);
       var outA = o.outA;
       if (outA != null && start && mo.ym >= start) { outA = null; outSkipped++; }
-      put(mo.ym, ch, pm.line, pm.model, 'OUT', o.outT, outA);
+      put(mo.ym, ch, pm.category, pm.line, pm.model, 'OUT', o.outT, outA);
     });
   });
   return { channels: channels, products: products, rows: order.map(function (k) { return agg[k]; }), unmapped: unmapped, outSkipped: outSkipped };
 }
 
-/* 업로드시작월 대조 리포트 — 업로드 채널의 그 달 OUT 실적: 진행현황 값 vs 원장 집계(이관하지 않는다) */
+/* 업로드시작월 대조 리포트 — 업로드 채널의 그 달 OUT 실적: 진행현황 값 vs 원장 집계(이관하지 않는다)
+   원본을 대분류 단위로 연결한 품목(예: "건조기")이 있는 채널·대분류는, 원장도 그 대분류의 모델을 모두 더해
+   "대분류 합계" 한 줄로 비교한다(원본에 모델 구분이 없으니 모델별로는 비교할 수 없다). */
 function _offCompareUploadStart(ss, parsed, plan, channelRows) {
   var chMap = {}, prMap = {};
   plan.channels.forEach(function (c) { chMap[c.legacy] = c.channelId; });
-  plan.products.forEach(function (p) { if (p.line && p.model) prMap[p.legacy] = p; });
+  plan.products.forEach(function (p) { if (p.level) prMap[p.legacy] = p; });
   var targets = {}, months = {};
   parsed.months.forEach(function (m) { months[m.ym] = true; });
   channelRows.forEach(function (c) { if (_offIsYm(c[5]) && months[c[5]]) targets[c[0]] = c[5]; });
-  var legacy = {};
+  var legacy = {}, catFold = {};
+  var keyOf = function (ch, line, model, cat) { return [ch, line, model, cat].join(OFF_KEY_SEP); };
   parsed.rows.forEach(function (r) {
     var ch = chMap[r.channel], pm = prMap[r.product];
     if (!ch || !pm || !targets[ch]) return;
-    var k = [ch, pm.line, pm.model].join(OFF_KEY_SEP);
+    if (pm.level === 'category') catFold[ch + OFF_KEY_SEP + pm.category] = true;
+    var k = pm.level === 'category' ? keyOf(ch, '', '', pm.category) : keyOf(ch, pm.line, pm.model, pm.category);
     legacy[k] = _offSumOrNull(legacy[k] == null ? null : legacy[k], r.values[targets[ch]].outA);
   });
   var read = function (k) { return _offReadRows(_offSheet(ss, k), OFF_TABS[k]); };
@@ -630,20 +738,25 @@ function _offCompareUploadStart(ss, parsed, plan, channelRows) {
   Object.keys(targets).forEach(function (ch) {
     var ym = targets[ch];
     var mon = _offMonthlyCompute({ from: ym, to: ym, channelId: ch, channels: channelRows, targets: [], prices: [], sales: sales, mappings: mappings, skus: skus });
-    var ledger = {};
-    mon.rows.forEach(function (r) { ledger[[ch, r.line, r.model].join(OFF_KEY_SEP)] = r.out.actual; });
+    var L = {}, D = {};
+    // 대분류로 접을 채널·대분류는 모델 키를 대분류 키로 합친다
+    var fold = function (k) { var p = k.split(OFF_KEY_SEP); return catFold[ch + OFF_KEY_SEP + p[3]] ? keyOf(ch, '', '', p[3]) : k; };
+    Object.keys(legacy).forEach(function (k) { if (k.indexOf(ch + OFF_KEY_SEP) === 0) { var f = fold(k); L[f] = _offSumOrNull(L[f] == null ? null : L[f], legacy[k]); } });
+    mon.rows.forEach(function (r) { var f = fold(keyOf(ch, r.line, r.model, r.category)); D[f] = (D[f] || 0) + (r.out.actual || 0); });
     var keys = [];
-    Object.keys(legacy).concat(Object.keys(ledger)).forEach(function (k) { if (k.indexOf(ch + OFF_KEY_SEP) === 0 && keys.indexOf(k) < 0) keys.push(k); });
+    Object.keys(L).concat(Object.keys(D)).forEach(function (k) { if (keys.indexOf(k) < 0) keys.push(k); });
     if (!keys.length) return; // 원본에도 원장에도 없는 채널은 대조할 게 없다
-    keys.sort(function (a, b) {
-      var pa = a.split(OFF_KEY_SEP), pb = b.split(OFF_KEY_SEP);
-      return (_OFF_LINE_ORDER.indexOf(pa[1]) - _OFF_LINE_ORDER.indexOf(pb[1])) ||
-        ((OFFLINE_PRODUCT_MODELS[pa[1]] || []).indexOf(pa[2]) - (OFFLINE_PRODUCT_MODELS[pb[1]] || []).indexOf(pb[2]));
-    });
+    var idx = function (k) {
+      var p = k.split(OFF_KEY_SEP);
+      return [OFFLINE_CATEGORIES.indexOf(p[3]), p[1] ? _OFF_LINE_ORDER.indexOf(p[1]) : -1, p[1] ? (OFFLINE_PRODUCT_MODELS[p[1]] || []).indexOf(p[2]) : -1];
+    };
+    keys.sort(function (a, b) { var x = idx(a), y = idx(b); return (x[0] - y[0]) || (x[1] - y[1]) || (x[2] - y[2]); });
     var sumL = null, sumD = 0;
     keys.forEach(function (k) {
-      var p = k.split(OFF_KEY_SEP), l = legacy[k] == null ? null : legacy[k], d = ledger[k] == null ? 0 : ledger[k];
-      out.push({ ym: ym, channelId: ch, line: p[1], model: p[2], legacy: l, ledger: d, diff: d - (l || 0) });
+      var p = k.split(OFF_KEY_SEP), l = L[k] == null ? null : L[k], d = D[k] == null ? 0 : D[k];
+      var isCat = !p[1];
+      out.push({ ym: ym, channelId: ch, category: p[3], line: p[1], model: isCat ? '(대분류) ' + p[3] + ' 합계' : p[2], level: isCat ? 'category' : 'model',
+        legacy: l, ledger: d, diff: d - (l || 0) });
       sumL = _offSumOrNull(sumL, l); sumD += d;
     });
     var um = mon.totals.byChannelMonth.length ? mon.totals.byChannelMonth[0].out.unmatchedQty : 0;
@@ -667,12 +780,13 @@ function _offMigrateProgress(data, auth) {
     var def = OFF_TABS.targets, sheet = _offSheet(ss, 'targets');
     var existing = _offReadRows(sheet, def);
     var inputKeys = {};
-    existing.forEach(function (r) { if (r[7] === 'input') inputKeys[_offTargetKey(r[0], r[1], r[2], r[3], r[4])] = true; });
+    existing.forEach(function (r) { if (r[7] === 'input') inputKeys[_offRowKey(r)] = true; });
     var today = _offToday(), email = (auth && auth.email) || '';
     var newRows = [], skippedInput = 0;
     plan.rows.forEach(function (r) {
-      if (inputKeys[_offTargetKey(r[0], r[1], r[2], r[3], r[4])]) { skippedInput++; return; }
-      newRows.push([r[0], r[1], r[2], r[3], r[4], r[5] == null ? '' : r[5], r[6] == null ? '' : r[6], 'migration', today, email, '진행현황 이관']);
+      if (inputKeys[_offTargetKey(r[0], r[1], r[7], r[2], r[3], r[4])]) { skippedInput++; return; }
+      newRows.push([r[0], r[1], r[2], r[3], r[4], r[5] == null ? '' : r[5], r[6] == null ? '' : r[6], 'migration', today, email,
+        r[2] ? '진행현황 이관' : '진행현황 이관(모델 구분 없음)', r[7]]);
     });
     var monthSet = {};
     months.forEach(function (m) { monthSet[m] = true; });
@@ -710,7 +824,7 @@ function _offMigratePrices(data, auth) {
     });
     var rows = parsed.rows.map(function (r) {
       var byCode = byModelCode[String(r.modelCode || '').toUpperCase()];
-      var s = byCode ? { line: byCode.line, model: byCode.model, ambiguous: false, from: 'model-code' } : _offSuggestProduct(r.product);
+      var s = byCode ? { line: byCode.line, model: byCode.model, ambiguous: false, from: 'model-code' } : _offSuggestProduct(r.product, true); // 단가는 모델 단위만
       return { rowNo: r.rowNo, legacyChannel: r.channel, product: r.product, modelCode: r.modelCode, salePrice: r.salePrice, supplyPrice: r.supplyPrice,
         suggest: { channelId: _offSuggestChannel(r.channel, channelRows), line: s.line, model: s.model, ambiguous: !!s.ambiguous, from: s.from || 'name' } };
     });

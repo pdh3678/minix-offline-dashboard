@@ -18,6 +18,9 @@
            st    품목별 실적 페이지의 ST.prod 값(= 사이드바 data-prod, filteredProd의 분기 키)
            slug  해시 라우팅용 ASCII 슬러그(#product-<slug>) — 한글 슬러그는 퍼센트 인코딩돼 읽을 수 없어짐
            label 표시 이름 · icon 사이드바 아이콘
+           category 대분류(오프라인 집계·이관용 — 음식물처리기·김치냉장고·청소기·건조기·식세기). 품목군 위 단계라
+                 더 에어드라이와 미니 건조기가 같은 '건조기'에 묶이지만, 품목군은 그대로 따로다(공구 화면 무관).
+                 GAS apps-script-offline-targets.js 의 OFFLINE_CATALOG 와 같아야 한다(테스트가 대조).
    모델    key   배지 색·집계 키(productColorKey 결과와 같아야 함)
            label 표시 이름
            sheet 시트 C열 데이터 확인 규칙 표기 — 아래 PRODUCT_SHEET_NAME 주석 참고. 표시 이름과 지금은
@@ -30,7 +33,7 @@
    더 플렌더 NEXT/더 시프트 PRO는 아직 출시 전이라 실제 데이터는 없지만, 미리 등록해두면 출시 후
    데이터가 들어오는 순간 별도 코드 수정 없이 모든 필터/집계에 자동으로 나타남. */
 const PRODUCT_CATALOG=[
-  {key:'더플렌더', st:'플렌더', slug:'TheFlender', label:'더 플렌더', icon:'🌀', gongu:true, models:[
+  {key:'더플렌더', st:'플렌더', slug:'TheFlender', label:'더 플렌더', icon:'🌀', category:'음식물처리기', gongu:true, models:[
     {key:'플렌더Basic', label:'더 플렌더 Basic', gongu:false}, // 오프라인 코드 매핑용
     {key:'플렌더PRO', label:'더 플렌더 PRO',  sheet:'더 플렌더 PRO',  option:'더플렌더PRO',  tab:'PRO',  color:{bg:'#F3E8FF',fg:'#7C3AED'}, gongu:true},
     {key:'플렌더MAX',  label:'더 플렌더 MAX',  sheet:'더 플렌더 MAX',  option:'더플렌더MAX',  tab:'MAX',  color:{bg:'#DBEAFE',fg:'#2563EB'}, gongu:true},
@@ -38,27 +41,29 @@ const PRODUCT_CATALOG=[
     {key:'플렌더NEXT', label:'더 플렌더 NEXT', sheet:'더 플렌더 NEXT', option:'더플렌더NEXT', tab:'NEXT', color:{bg:'#FEF9C3',fg:'#CA8A04'}, gongu:true}, // 출시 예정
     {key:'플렌더PLUS', label:'더 플렌더 PLUS', gongu:false}, // 오프라인 코드 매핑용
   ]},
-  {key:'더시프트', st:'시프트', slug:'TheShift', label:'더 시프트', icon:'📦', gongu:true, models:[
+  {key:'더시프트', st:'시프트', slug:'TheShift', label:'더 시프트', icon:'📦', category:'김치냉장고', gongu:true, models:[
     {key:'시프트',    label:'더 시프트',     sheet:'더 시프트',     option:'더시프트',    tab:'기본', tabLabel:'더 시프트', color:{bg:'#FFEDD5',fg:'#EA580C'}, gongu:true},
     {key:'시프트PRO', label:'더 시프트 PRO', sheet:'더 시프트 PRO', option:'더시프트PRO', tab:'PRO', color:{bg:'#FFE1B8',fg:'#C2410C'}, gongu:true}, // 출시 예정
   ]},
-  {key:'더슬림', st:'슬림', slug:'TheSlim', label:'더 슬림', icon:'🧹', gongu:true, models:[
+  {key:'더슬림', st:'슬림', slug:'TheSlim', label:'더 슬림', icon:'🧹', category:'청소기', gongu:true, models:[
     {key:'슬림', label:'더 슬림', sheet:'더 슬림', color:{bg:'#CCFBF1',fg:'#0D9488'}, gongu:true},
   ]},
-  {key:'더에어드라이', st:'에어드라이', slug:'TheAirDry', label:'더 에어드라이', icon:'💨', gongu:true, models:[
+  {key:'더에어드라이', st:'에어드라이', slug:'TheAirDry', label:'더 에어드라이', icon:'💨', category:'건조기', gongu:true, models:[
     {key:'에어드라이', label:'더 에어드라이', sheet:'더 에어드라이', color:{bg:'#FFE4E6',fg:'#E11D48'}, gongu:true},
   ]},
   // 오프라인 코드 매핑용 품목군 — 공구 화면에는 나타나지 않음
-  {key:'미니건조기', label:'미니 건조기', gongu:false, models:[
+  {key:'미니건조기', label:'미니 건조기', category:'건조기', gongu:false, models:[
     {key:'미니건조기', label:'미니 건조기', gongu:false},
     {key:'미니건조기PRO', label:'미니 건조기 PRO', gongu:false},
     {key:'미니건조기PRO+', label:'미니 건조기 PRO+', gongu:false},
   ]},
-  {key:'미니식기세척기', label:'미니 식기세척기', gongu:false, models:[
+  {key:'미니식기세척기', label:'미니 식기세척기', category:'식세기', gongu:false, models:[
     {key:'미니식기세척기', label:'미니 식기세척기', gongu:false},
     {key:'미니식기세척기PRO', label:'미니 식기세척기 PRO', gongu:false},
   ]},
 ];
+// 대분류 목록(카탈로그 등장 순) — 오프라인 목표 관리 표·이관 매핑이 쓴다. 공구 화면은 쓰지 않는다.
+const PRODUCT_CATEGORIES=[...new Set(PRODUCT_CATALOG.map(l=>l.category))];
 // 공구 화면에 노출되는 품목군과 그 모델만(순서 유지)
 const _GONGU_LINES=PRODUCT_CATALOG.filter(l=>l.gongu).map(l=>({line:l,models:l.models.filter(m=>m.gongu)}));
 

@@ -295,6 +295,11 @@ function captureRender(ctx, fn) {
     check('  ↳ 추가 모델은 전부 공구 비노출, 배지 색·집계 키·저장 표기에 없음',
       added.every(m => m && m.gongu === false && !m.option && !m.tab && !X.PRODUCT_TAXONOMY.some(t => t.key === m.key) && !(m.key in X.PRODUCT_SHEET_NAME)), added);
     check('  ↳ 모델 key가 카탈로그 전체에서 겹치지 않음', (() => { const ks = cat.flatMap(l => l.models.map(m => m.key)); return ks.length === new Set(ks).size; })());
+    // 2026-09-27 대분류 — 품목군 위 단계(오프라인 집계·이관용). 품목군은 그대로다
+    check('모든 품목군에 대분류: 더 플렌더=음식물처리기, 더 시프트=김치냉장고, 더 슬림=청소기, 더 에어드라이·미니 건조기=건조기, 미니 식기세척기=식세기',
+      JSON.stringify(cat.map(l => l.key + '=' + l.category)) === JSON.stringify(['더플렌더=음식물처리기', '더시프트=김치냉장고', '더슬림=청소기', '더에어드라이=건조기', '미니건조기=건조기', '미니식기세척기=식세기']), cat.map(l => l.category));
+    check('더 에어드라이는 공구에서 여전히 독립 품목군(사이드바·해시·모델 탭 없음 그대로)', X.PRODUCT_LINES.some(l => l.key === '더에어드라이' && l.slug === 'TheAirDry') &&
+      X.HASH_PRODUCT_TO_ST['TheAirDry'] === '에어드라이' && !X.PRODUCT_MODEL_TABS['에어드라이']);
     // 공구 화면이 보는 파생 상수 — 카탈로그 전환(2026-09-25) 이전의 리터럴 값과 똑같아야 한다
     check('더 시프트 모델 탭이 전과 동일(전체/더 시프트/PRO)',
       JSON.stringify(X.PRODUCT_MODEL_TABS['시프트']) ===

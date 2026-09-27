@@ -30,7 +30,7 @@ const EXPECT = [
   ['하이마트_누적스냅샷', ['기준일', '점포코드', '원본코드', '당월실판매', '당월판매', '금주판매', '당일판매', '잔여재고', 'upload_id']],
   ['업로드로그', ['upload_id', '업로드시각', '업로더', '파일명', '파일유형', 'channel_id', '기준일/기간', '원본행수', '반영행수', '미매칭코드수', '경고', '상태']],
   ['미매칭코드', ['channel_id', '원본코드', '원본상품명', '최초발견일', '최근발견일', '발견횟수']],
-  ['목표실적_월', ['연월', 'channel_id', '품목군', '모델', '구분', '목표수량', '실적수량', '출처', '수정일', '수정자', '비고']],
+  ['목표실적_월', ['연월', 'channel_id', '품목군', '모델', '구분', '목표수량', '실적수량', '출처', '수정일', '수정자', '비고', '대분류']],
   ['단가마스터', ['channel_id', '품목군', '모델', '공급가', '적용시작일', '비고', '수정일', '수정자']],
   ['이관로그', ['실행시각', '실행자', '대상', '월 범위', '반영 행수', '미매핑 항목', '상태']]
 ];
@@ -174,6 +174,22 @@ function textColsFromFormats(sheet) {
     const rep2 = ctx.offline_setupSheets();
     check('다시 실행하면 확장 없이 확인만', rep2.extended.length === 0 && rep2.verified.length === 14, rep2);
     check('  ↳ 사람이 비운 업로드시작월을 다시 채우지 않음', dataRows(ch)[0][5] === '');
+  }
+
+  console.log('\n[10] 2-A 목표실적_월(11열)에 실행 — 대분류 열을 덧붙이고 기존 행은 품목군으로 채움');
+  {
+    const { ctx, tab } = loadOfflineGas({ setup: true });
+    const t = tab('목표실적_월');
+    t._grid[0].length = 11;
+    ctx._offWriteBlock(t, { headers: ctx.OFF_TABS.targets.headers.slice(0, 11), text: [0, 1, 2, 3, 4, 7, 8, 9, 10] }, 2, [
+      ['2026-02', 'himart', '더에어드라이', '더 에어드라이', 'IN', 5, 4, 'migration', '2026-09-27', 'a', ''],
+      ['2026-02', 'himart', '더플렌더', '더 플렌더 MAX', 'OUT', 10, 9, 'input', '2026-09-27', 'a', '메모']]);
+    const rep = ctx.offline_setupSheets();
+    check('목표실적_월 확장 보고(대분류 추가)', rep.extended.some(e => e.tab === '목표실적_월' && e.added.join() === '대분류'), rep.extended);
+    const rows = dataRows(t);
+    check('기존 행 대분류 = 품목군의 대분류(더 에어드라이 → 건조기, 더 플렌더 → 음식물처리기)', rows[0][11] === '건조기' && rows[1][11] === '음식물처리기', rows.map(x => x[11]));
+    check('다른 값은 그대로(비고·출처)', rows[1][10] === '메모' && rows[1][7] === 'input' && rows[0][5] === 5);
+    check('다시 실행하면 확인만', ctx.offline_setupSheets().verified.indexOf('목표실적_월') >= 0);
   }
 
   console.log('\n[8] 날짜 산술 — 타임존 영향 없음');
