@@ -44,7 +44,7 @@ var OFF_FILE_TYPES = {
 var OFF_TABS = {
   readme:     { name: 'README', headers: ['탭', '설명'], text: [0, 1] },
   sku:        { name: '제품마스터', headers: ['sku_id', '표준명', '품목군', '모델', '옵션', '활성', '정렬순서', '비고'], text: [0, 1, 2, 3, 4, 5, 7] },
-  channel:    { name: '채널마스터', headers: ['channel_id', '채널명', '유형', '활성', '정렬순서'], text: [0, 1, 2, 3] },
+  channel:    { name: '채널마스터', headers: ['channel_id', '채널명', '유형', '활성', '정렬순서', '업로드시작월'], text: [0, 1, 2, 3, 5] },
   mapping:    { name: '코드매핑', headers: ['channel_id', '원본코드', 'sku_id', '재고구분', '원본상품명', '등록일', '등록자', '비고'], text: [0, 1, 2, 3, 4, 5, 6, 7] },
   store:      { name: '점포마스터', headers: ['channel_id', '점포코드', '점포명', '지역', '최초등록일', '최근확인일'], text: [0, 1, 2, 3, 4, 5] },
   sales:      { name: '판매원장', headers: ['기간시작', '기간종료', '단위', 'channel_id', '점포코드', '원본코드', '수량', '설치완료수량', '출처', 'upload_id'], text: [0, 1, 2, 3, 4, 5, 8, 9] },
@@ -52,18 +52,25 @@ var OFF_TABS = {
   stockStore: { name: '재고_점포최신', headers: ['기준일', 'channel_id', '점포코드', '원본코드', '재고수량', '이동중수량', '예약수량', '당월입고', '당월판매', 'upload_id'], text: [0, 1, 2, 3, 9] },
   himartSnap: { name: '하이마트_누적스냅샷', headers: ['기준일', '점포코드', '원본코드', '당월실판매', '당월판매', '금주판매', '당일판매', '잔여재고', 'upload_id'], text: [0, 1, 2, 8] },
   uploadLog:  { name: '업로드로그', headers: ['upload_id', '업로드시각', '업로더', '파일명', '파일유형', 'channel_id', '기준일/기간', '원본행수', '반영행수', '미매칭코드수', '경고', '상태'], text: [0, 1, 2, 3, 4, 5, 6, 10, 11] },
-  unmatched:  { name: '미매칭코드', headers: ['channel_id', '원본코드', '원본상품명', '최초발견일', '최근발견일', '발견횟수'], text: [0, 1, 2, 3, 4] }
+  unmatched:  { name: '미매칭코드', headers: ['channel_id', '원본코드', '원본상품명', '최초발견일', '최근발견일', '발견횟수'], text: [0, 1, 2, 3, 4] },
+  // 2-A단계(2026-09-27) — 목표·Sell-in 입력, 단가, 과거 실적 이관 (로직은 apps-script-offline-targets.js)
+  targets:    { name: '목표실적_월', headers: ['연월', 'channel_id', '품목군', '모델', '구분', '목표수량', '실적수량', '출처', '수정일', '수정자', '비고'], text: [0, 1, 2, 3, 4, 7, 8, 9, 10] },
+  prices:     { name: '단가마스터', headers: ['channel_id', '품목군', '모델', '공급가', '적용시작일', '비고', '수정일', '수정자'], text: [0, 1, 2, 4, 5, 6, 7] },
+  migrationLog: { name: '이관로그', headers: ['실행시각', '실행자', '대상', '월 범위', '반영 행수', '미매핑 항목', '상태'], text: [0, 1, 2, 3, 5, 6] }
 };
-var OFF_TAB_ORDER = ['readme', 'sku', 'channel', 'mapping', 'store', 'sales', 'stockDaily', 'stockStore', 'himartSnap', 'uploadLog', 'unmatched'];
+var OFF_TAB_ORDER = ['readme', 'sku', 'channel', 'mapping', 'store', 'sales', 'stockDaily', 'stockStore', 'himartSnap', 'uploadLog', 'unmatched',
+  'targets', 'prices', 'migrationLog'];
 
+// 업로드시작월 = 포털 업로드로 판매(OUT)를 집계하기 시작한 달. 비어 있으면 업로드 없는 채널(OUT 실적은 입력·이관 값).
+var OFF_UPLOAD_START_SEED = { himart: '2026-09', etland: '2026-09', emart: '2026-09' };
 var OFF_CHANNEL_SEED = [
-  ['himart', '하이마트', '전문점', 'Y', 1],
-  ['etland', '전자랜드', '전문점', 'Y', 2],
-  ['emart', '이마트', '할인점', 'Y', 3],
-  ['traders', '트레이더스', '창고형', 'N', 4],
-  ['shinsegae', '신세계', '백화점', 'N', 5],
-  ['theablen', '디에이블앤', '폐쇄몰', 'N', 6],
-  ['special', '기타 특판', '특판', 'N', 7]
+  ['himart', '하이마트', '전문점', 'Y', 1, '2026-09'],
+  ['etland', '전자랜드', '전문점', 'Y', 2, '2026-09'],
+  ['emart', '이마트', '할인점', 'Y', 3, '2026-09'],
+  ['traders', '트레이더스', '창고형', 'N', 4, ''],
+  ['shinsegae', '신세계', '백화점', 'N', 5, ''],
+  ['theablen', '디에이블앤', '폐쇄몰', 'N', 6, ''],
+  ['special', '기타 특판', '특판', 'N', 7, '']
 ];
 
 // 하이마트 누적 스냅샷 보관 기간 — 차이 계산에는 "바로 이전 스냅샷"만 필요하다
@@ -80,10 +87,12 @@ var OFF_KEY_SEP = '\u0001';
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 /* 편집기에서 직접 실행. 탭이 없으면 헤더와 함께 만들고, 있으면 헤더만 검증한다(데이터는 건드리지 않음).
-   여러 번 실행해도 안전하다. 반환값(과 실행 로그)에 만든 탭 / 확인한 탭 / 헤더가 다른 탭이 나온다. */
+   여러 번 실행해도 안전하다. 반환값(과 실행 로그)에 만든 탭 / 확인한 탭 / 헤더가 다른 탭이 나온다.
+   열이 뒤에 새로 붙은 탭(2-A: 채널마스터 업로드시작월)은 기존 헤더가 앞부분과 같고 뒤가 비어 있을 때만
+   헤더를 덧붙이고 초기값을 채운다(extended). README 본문은 대시보드가 관리하는 설명이라 매번 새로 쓴다. */
 function offline_setupSheets() {
   var ss = _offSS();
-  var report = { created: [], verified: [], mismatched: [] };
+  var report = { created: [], verified: [], extended: [], mismatched: [] };
   OFF_TAB_ORDER.forEach(function (key) {
     var def = OFF_TABS[key];
     var sheet = ss.getSheetByName(def.name);
@@ -95,8 +104,18 @@ function offline_setupSheets() {
     } else {
       var W = def.headers.length;
       var actual = sheet.getRange(1, 1, 1, W).getValues()[0].map(function (v) { return String(v || '').trim(); });
-      if (actual.join('|') === def.headers.join('|')) report.verified.push(def.name);
-      else report.mismatched.push({ tab: def.name, expected: def.headers, actual: actual });
+      var n = 0;
+      while (n < W && actual[n] === def.headers[n]) n++;
+      var restBlank = actual.slice(n).every(function (v) { return v === ''; });
+      if (n === W) report.verified.push(def.name);
+      else if (n > 0 && restBlank) {
+        _offExtendTab(sheet, def, n);
+        report.extended.push({ tab: def.name, added: def.headers.slice(n) });
+      } else report.mismatched.push({ tab: def.name, expected: def.headers, actual: actual });
+      if (key === 'readme') {
+        var prevRows = Math.max(0, sheet.getLastRow() - 1);
+        _offWriteAll(sheet, def, _offReadmeRows(), prevRows);
+      }
     }
     // 채널마스터 초기 데이터 — 데이터 행이 하나도 없을 때만(사람이 고친 값을 덮어쓰지 않는다)
     if (key === 'channel' && sheet.getLastRow() < 2) _offWriteBlock(sheet, def, 2, OFF_CHANNEL_SEED);
@@ -104,6 +123,18 @@ function offline_setupSheets() {
   _offInvalidateCache();
   Logger.log('[offline_setupSheets] ' + JSON.stringify(report));
   return report;
+}
+
+// 기존 탭 뒤에 새 열(from부터)을 붙인다 — 헤더·텍스트 서식, 채널마스터면 업로드시작월 초기값
+function _offExtendTab(sheet, def, from) {
+  var W = def.headers.length;
+  sheet.getRange(1, from + 1, 1, W - from).setValues([def.headers.slice(from)]).setFontWeight('bold');
+  def.text.forEach(function (c) { if (c >= from) sheet.getRange(1, c + 1, sheet.getMaxRows(), 1).setNumberFormat('@'); });
+  if (def === OFF_TABS.channel) {
+    var rows = _offReadRows(sheet, def);
+    rows.forEach(function (r) { if (!r[5] && OFF_UPLOAD_START_SEED[r[0]]) r[5] = OFF_UPLOAD_START_SEED[r[0]]; });
+    _offWriteAll(sheet, def, rows, rows.length);
+  }
 }
 
 function _offFormatNewTab(sheet, def) {
@@ -119,7 +150,7 @@ function _offReadmeRows() {
   return [
     ['⚠ 원장 탭은 직접 수정 금지', '판매원장·재고_채널일별·재고_점포최신·하이마트_누적스냅샷·업로드로그는 대시보드(데이터 업로드)에서만 반영한다. 손으로 고치면 다음 업로드가 그 범위를 다시 덮어쓴다.'],
     ['제품마스터', '표준 SKU. sku_id(SKU-0001)는 자동 부여. 품목군은 대시보드 품목 분류 상수의 값만 허용. 대시보드 코드 매핑 화면에서 만든다.'],
-    ['채널마스터', '채널 목록. 활성=N 채널은 업로드 대상이 아니다.'],
+    ['채널마스터', '채널 목록. 업로드시작월(YYYY-MM) = 포털 업로드로 판매(OUT)를 집계하기 시작한 달 — 비어 있으면 업로드 없는 채널이라 OUT 실적은 목표 관리에서 입력·이관한 값을 쓴다. 활성=N 채널은 목표 관리 화면에 데이터가 있을 때만 보인다.'],
     ['코드매핑', '(channel_id, 원본코드) → sku_id·재고구분(정상/전시/리퍼). 한 SKU에 여러 코드 가능. sku_id가 빈 행은 비활성화된 매핑.'],
     ['점포마스터', '업로드 때 자동 추가·갱신. 지역 = 지부·지사.'],
     ['판매원장', '판매 수량. 단위 day = 하루치(기간시작=기간종료), period = 여러 날 합. 원본코드만 저장하고 SKU는 읽을 때 코드매핑으로 해석. 설치완료수량은 하이마트만.'],
@@ -127,7 +158,10 @@ function _offReadmeRows() {
     ['재고_점포최신', '채널별 최신 기준일 1벌만 유지(0 재고 포함). 당월입고·당월판매는 파일에 있을 때만.'],
     ['하이마트_누적스냅샷', '하이마트 당월 누적 판매 스냅샷(판매 값이 있는 행만). 일별 판매 = 이웃 스냅샷의 차이. 최근 45일만 보관.'],
     ['업로드로그', '업로드 1건 = 1행. 반영 행수·미매칭 코드 수·경고.'],
-    ['미매칭코드', '코드매핑이 없는 원본코드. 매핑하면 목록에서 빠진다.']
+    ['미매칭코드', '코드매핑이 없는 원본코드. 매핑하면 목록에서 빠진다.'],
+    ['목표실적_월', '채널×품목군×모델×월 목표·실적(구분 IN=Sell-in, OUT=Sell-out). 출처 input = 대시보드 목표 관리에서 입력(이관이 덮어쓰지 않음), migration = 기존 진행현황에서 이관. OUT 실적은 업로드시작월 이전 달·업로드 없는 채널만 쓰고, 그 뒤로는 판매원장에서 집계한다.'],
+    ['단가마스터', '채널×품목군×모델 공급가 이력. 금액 = 수량 × 그 달 1일 기준 가장 최근 적용시작일의 공급가.'],
+    ['이관로그', '기존 스프레드시트(진행현황·납품가 수수료) 이관 1회 = 1행.']
   ];
 }
 
@@ -593,7 +627,7 @@ function _offGetMasters() {
     success: true,
     skus: _offReadRows(_offSheet(ss, 'sku'), OFF_TABS.sku).filter(function (r) { return r[0]; }).map(_offSkuObj),
     channels: _offReadRows(_offSheet(ss, 'channel'), OFF_TABS.channel).filter(function (r) { return r[0]; }).map(function (r) {
-      return { channelId: r[0], name: r[1], type: r[2], active: r[3], order: r[4] };
+      return { channelId: r[0], name: r[1], type: r[2], active: r[3], order: r[4], uploadStartMonth: r[5] || '' };
     }),
     mappings: _offReadRows(_offSheet(ss, 'mapping'), OFF_TABS.mapping).filter(function (r) { return r[0] && r[1]; }).map(_offMappingObj),
     stores: _offReadRows(_offSheet(ss, 'store'), OFF_TABS.store).filter(function (r) { return r[0] && r[1]; }).map(function (r) {

@@ -59,7 +59,8 @@ function env(today) {
     const m1 = g.call('offline_getMasters');
     check('채널 7개·빈 제품/매핑/점포·품목군·재고구분', m1.channels.length === 7 && !m1.skus.length && !m1.mappings.length && !m1.stores.length &&
       m1.productLines.length === 6 && m1.stockTypes.join() === '정상,전시,리퍼', m1);
-    check('채널 객체 모양', JSON.stringify(m1.channels[0]) === JSON.stringify({ channelId: 'himart', name: '하이마트', type: '전문점', active: 'Y', order: 1 }), m1.channels[0]);
+    check('채널 객체 모양(업로드시작월 포함)', JSON.stringify(m1.channels[0]) === JSON.stringify({ channelId: 'himart', name: '하이마트', type: '전문점', active: 'Y', order: 1, uploadStartMonth: '2026-09' }), m1.channels[0]);
+    check('업로드 없는 채널은 업로드시작월 빈칸', m1.channels.find(c => c.channelId === 'traders').uploadStartMonth === '');
     check('두 번째는 캐시', g.call('offline_getMasters').cached === true);
     g.call('offline_saveSku', { sku: { name: '더 플렌더 MAX 그레이지', line: '더플렌더', model: '더 플렌더 MAX', option: '그레이지' } });
     const m3 = g.call('offline_getMasters');
