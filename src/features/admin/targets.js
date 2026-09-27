@@ -60,11 +60,14 @@ function _tgIsUpload(ch,ym){
   return !!(c&&c.uploadStartMonth&&ym>=c.uploadStartMonth);
 }
 
-// ── 표 모델: 채널 × 품목군 × 모델(품목 상수) + 데이터에만 있는 모델 ──
+// ── 표 모델: 채널 × 대분류 × 품목군 × 모델(품목 상수) + 데이터에만 있는 모델 ──
+// 대분류 단위 행(이관 전용, 모델 구분 없는 과거 수치)은 _TG.catRows[채널|대분류]로 따로 — 읽기 전용
 function _tgBuildView(){
   const m=OFFLINE_MASTERS||{},d=_TG.data||{rows:[]};
   const byKey={};(d.rows||[]).forEach(r=>{byKey[_tgKey(r.channelId,r.line,r.model)]=r;});
-  const hasData=ch=>(d.rows||[]).some(r=>r.channelId===ch);
+  const catRows={};(d.categoryRows||[]).forEach(c=>{catRows[c.channelId+'|'+c.category]=c;});
+  _TG.catRows=catRows;
+  const hasData=ch=>(d.rows||[]).some(r=>r.channelId===ch)||(d.categoryRows||[]).some(c=>c.channelId===ch);
   const chans=(m.channels||[]).slice().sort((a,b)=>(Number(a.order)||99)-(Number(b.order)||99))
     .filter(c=>_TG.ch?c.channelId===_TG.ch:(c.active==='Y'||hasData(c.channelId)));
   const view=[];
@@ -75,7 +78,7 @@ function _tgBuildView(){
       models.forEach(model=>{
         const k=_tgKey(c.channelId,line.key,model),r=byKey[k];
         const orig={inT:r?r.in.target:null,inA:r?r.in.actual:null,outT:r?r.out.target:null,outA:r?r.out.actual:null};
-        view.push({key:k,ch:c.channelId,chName:c.name,line:line.key,lineLabel:line.label,model,orig,
+        view.push({key:k,ch:c.channelId,chName:c.name,category:line.category,line:line.key,lineLabel:line.label,model,orig,
           outSource:r?r.out.source:'',byType:r?r.out.byType:null,upload:_tgIsUpload(c.channelId,_TG.ym)});
       });
     });
@@ -83,6 +86,8 @@ function _tgBuildView(){
   _TG.view=view;
   return {chans,view};
 }
+// 대분류 단위 행 값(읽기 전용) — 없으면 null
+function _tgCatVal(cr,f){if(!cr)return '';const v=f==='inT'?cr.in.target:f==='inA'?cr.in.actual:f==='outT'?cr.out.target:cr.out.actual;return v==null?'':v;}
 // 화면에 보이는 값(고친 값 우선) — 숫자 | '' | NaN(잘못된 입력)
 function _tgVal(row,f){
   const e=_TG.edits[row.key];
@@ -98,17 +103,39 @@ function _tgChangedCount(){return _TG.view.reduce((n,r)=>n+_TG_FIELDS.filter(f=>
 function _tgInvalidCount(){return _TG.view.reduce((n,r)=>n+_TG_FIELDS.filter(f=>{const v=_tgVal(r,f);return v!==''&&!isFinite(v);}).length,0);}
 function _tgEditable(row,f){return !(f==='outA'&&row.upload);}
 
-// 합계: 품목군(ln:ch|line) · 채널(ch:ch) · 전체(all)
+// 합계: 대분류(cat:ch|대분류) · 품목군(ln:ch|line) · 채널(ch:ch) · 전체(all)
+// 대분류·채널·전체 합계에는 대분류 단위(이관) 행도 더한다 — 대분류 합계 = 대분류 단위 행 + 그 대분류 모델 행
 function _tgTotals(){
   const t={};
+  const bucket=scope=>t[scope]||(t[scope]={inT:null,inA:null,outT:null,outA:null,inAAmt:null,outAAmt:null});
   const add=(scope,row)=>{
-    const s=t[scope]||(t[scope]={inT:null,inA:null,outT:null,outA:null,inAAmt:null,outAAmt:null});
+    const s=bucket(scope);
     _TG_FIELDS.forEach(f=>{const v=_tgVal(row,f);if(v!==''&&isFinite(v))s[f]=(s[f]||0)+v;});
     const p=_tgPriceFor(row.ch,row.line,row.model,_TG.ym);
     if(p!=null){const a=_tgVal(row,'inA'),o=_tgVal(row,'outA');if(a!==''&&isFinite(a))s.inAAmt=(s.inAAmt||0)+a*p;if(o!==''&&isFinite(o))s.outAAmt=(s.outAAmt||0)+o*p;}
   };
-  _TG.view.forEach(r=>{add('ln:'+r.ch+'|'+r.line,r);add('ch:'+r.ch,r);add('all',r);});
+  const addCat=(scope,cr)=>{const s=bucket(scope);_TG_FIELDS.forEach(f=>{const v=_tgCatVal(cr,f);if(v!=='')s[f]=(s[f]||0)+v;});};
+  _TG.view.forEach(r=>{add('cat:'+r.ch+'|'+r.category,r);add('ln:'+r.ch+'|'+r.line,r);add('ch:'+r.ch,r);add('all',r);});
+  const shown={};_TG.view.forEach(r=>{shown[r.ch]=true;});
+  Object.keys(_TG.catRows||{}).forEach(k=>{
+    const cr=_TG.catRows[k];if(!shown[cr.channelId])return;
+    addCat('cat:'+k,cr);addCat('ch:'+cr.channelId,cr);addCat('all',cr);
+  });
   return t;
+}
+// 대분류 단위(이관) 값이 있는 칸에 같은 대분류의 모델 값을 새로 입력했는지 — 합계가 중복된다
+function _tgDupEdits(){
+  const out=[];
+  _TG.view.forEach(r=>{
+    const cr=(_TG.catRows||{})[r.ch+'|'+r.category];if(!cr)return;
+    _TG_FIELDS.forEach(f=>{
+      if(_tgChanged(r,f)&&_tgVal(r,f)!==''&&_tgCatVal(cr,f)!==''){
+        const lb={inT:'IN 목표',inA:'IN 실적',outT:'OUT 목표',outA:'OUT 실적'}[f];
+        const s=_offlineChannelName(r.ch)+' '+r.category+'('+lb+')';if(out.indexOf(s)<0)out.push(s);
+      }
+    });
+  });
+  return out;
 }
 
 // ── 그리기 ──
@@ -145,8 +172,10 @@ function _tgMonthlyHtml(){
   }
   const priceWarn=(d.warnings||[]).filter(w=>/^단가 없음/.test(w));
   if(priceWarn.length)warn.push(`<details class="tg-warn"><summary>단가 없는 모델 ${priceWarn.length}개 — 금액이 계산되지 않습니다(단가 탭에서 추가)</summary>${priceWarn.map(w=>'<div>'+_escHtml(w)+'</div>').join('')}</details>`);
+  const dupWarn=(d.warnings||[]).filter(w=>/^중복 가능/.test(w));
+  if(dupWarn.length)warn.push(`<div class="up-err">${dupWarn.map(w=>'⚠ '+_escHtml(w)).join('<br>')}</div>`);
   const {chans}=_tgBuildView();
-  return head+`<div class="card">${warn.join('')}<div class="tbl-wrap"><table class="tg-tbl"><thead><tr>
+  return head+`<div class="card">${warn.join('')}<div class="up-err" id="tgDupWarn" style="display:none"></div><div class="tbl-wrap"><table class="tg-tbl"><thead><tr>
       <th>채널 / 품목</th><th class="num-col">IN 목표</th><th class="num-col">IN 실적</th><th class="num-col">IN 달성률</th>
       <th class="num-col">OUT 목표</th><th class="num-col">OUT 실적</th><th class="num-col">OUT 달성률</th><th class="num-col">금액(실적 환산)</th></tr></thead>
     <tbody>${chans.map(_tgChannelHtml).join('')}${_tgTotalRowHtml('all','전체 합계','tg-grand')}</tbody></table></div></div>`;
@@ -155,17 +184,35 @@ function _tgChannelHtml(c){
   const rows=_TG.view.filter(r=>r.ch===c.channelId);
   const up=c.uploadStartMonth&&_TG.ym>=c.uploadStartMonth;
   let html=`<tr class="tg-ch"><td colspan="8">${_escHtml(c.name)} ${up?`<span class="up-chip ready">OUT 실적 = 업로드 원장(${_escHtml(c.uploadStartMonth)}~)</span>`:(c.uploadStartMonth?`<span class="up-chip">업로드 ${_escHtml(c.uploadStartMonth)}부터 — 이 달은 입력값</span>`:'<span class="up-chip">업로드 없는 채널 — OUT 실적 입력</span>')}</td></tr>`;
-  PRODUCT_CATALOG.forEach(line=>{
-    const lr=rows.filter(r=>r.line===line.key);
-    if(!lr.length)return;
-    const ck=c.channelId+'|'+line.key;
-    const has=lr.some(r=>_TG_FIELDS.some(f=>_tgVal(r,f)!==''));
-    const closed=_TG.collapsed[ck]!=null?_TG.collapsed[ck]:!has;
-    html+=_tgTotalRowHtml('ln:'+ck,`<button type="button" class="tg-fold" onclick="_tgFold('${_escAttr(ck)}')">${closed?'▸':'▾'}</button> ${_escHtml(line.label)}`,'tg-line');
+  // 대분류 → 품목군 → 모델. 접기는 대분류 단위(데이터 없는 대분류는 접힌 채로 시작).
+  // 품목군이 둘 이상인 대분류(건조기 = 더 에어드라이 + 미니 건조기)만 품목군 합계 줄을 따로 보여 준다.
+  PRODUCT_CATEGORIES.forEach(cat=>{
+    const lines=PRODUCT_CATALOG.filter(l=>l.category===cat);
+    const cr=(_TG.catRows||{})[c.channelId+'|'+cat];
+    const ck=c.channelId+'|'+cat;
+    const closed=_tgCatClosed(ck);
+    html+=_tgTotalRowHtml('cat:'+ck,`<button type="button" class="tg-fold" onclick="_tgFold('${_escAttr(ck)}')">${closed?'▸':'▾'}</button> ${_escHtml(cat)}${cr?' <span class="up-chip">이관 대분류 합계 포함</span>':''}`,'tg-cat');
     if(closed)return;
-    lr.forEach(r=>{html+=_tgRowHtml(r,_TG.view.indexOf(r));});
+    if(cr)html+=_tgCatRowHtml(cr);
+    lines.forEach(line=>{
+      const lr=rows.filter(r=>r.line===line.key);
+      if(lines.length>1)html+=_tgTotalRowHtml('ln:'+c.channelId+'|'+line.key,_escHtml(line.label),'tg-line');
+      lr.forEach(r=>{html+=_tgRowHtml(r,_TG.view.indexOf(r));});
+    });
   });
   return html+_tgTotalRowHtml('ch:'+c.channelId,_escHtml(c.name)+' 합계','tg-chtot');
+}
+function _tgCatHas(ck){
+  const [ch,cat]=ck.split('|');
+  return !!(_TG.catRows||{})[ck]||_TG.view.some(r=>r.ch===ch&&r.category===cat&&_TG_FIELDS.some(f=>_tgVal(r,f)!==''));
+}
+function _tgCatClosed(ck){return _TG.collapsed[ck]!=null?_TG.collapsed[ck]:!_tgCatHas(ck);}
+// 대분류 단위 이관 행 — 모델 구분 없는 과거 수치(예: 진행현황 "건조기" 행). 읽기 전용
+function _tgCatRowHtml(cr){
+  const v=f=>_tgCatVal(cr,f),c=f=>`<td class="num-col tg-ro">${_tgFmt(v(f))}</td>`;
+  const src=cr.out.source&&cr.out.source!=='upload'?` <span class="tg-src">${_escHtml(cr.out.source)}</span>`:'';
+  return `<tr class="tg-catrow"><td class="tg-model">이관(모델 구분 없음)${cr.duplicateFields&&cr.duplicateFields.length?' <span class="up-chip applying">중복 가능</span>':''}</td>${c('inT')}${c('inA')}<td class="num-col">${_tgRate(v('inA'),v('inT'))}</td>
+    ${c('outT')}<td class="num-col tg-ro">${_tgFmt(v('outA'))}${src}</td><td class="num-col">${_tgRate(v('outA'),v('outT'))}</td><td class="num-col tg-amt"><span class="off-muted" title="대분류 단위라 모델 단가를 적용할 수 없음">—</span></td></tr>`;
 }
 function _tgRowHtml(r,i){
   const cell=f=>{
@@ -203,15 +250,13 @@ function _tgRefreshNumbers(rowIdx){
     set(_tgTotalId(scope,'amt'),s.inAAmt==null&&s.outAAmt==null?'—':`IN ${_tgWon(s.inAAmt)}<br>OUT ${_tgWon(s.outAAmt)}`);
   });
   const n=_tgChangedCount(),bad=_tgInvalidCount();
+  const dup=_tgDupEdits(),dw=document.getElementById('tgDupWarn');
+  if(dw){dw.style.display=dup.length?'':'none';dw.innerHTML=dup.length?'⚠ 대분류 단위(이관) 값이 있는 달에 같은 대분류의 모델 값을 입력했습니다 — 대분류 합계에 둘 다 더해져 중복됩니다: '+dup.map(_escHtml).join(', '):'';}
   set('tgDirty',n?`고친 칸 ${n}개${bad?` · 숫자가 아닌 칸 ${bad}개`:''}`:'');
   const b=document.getElementById('tgSaveBtn');if(b)b.textContent=n?`저장 (${n})`:'저장';
 }
-function _tgFold(ck){
-  const lr=_TG.view.filter(r=>r.ch+'|'+r.line===ck);
-  const has=lr.some(r=>_TG_FIELDS.some(f=>_tgVal(r,f)!==''));
-  const cur=_TG.collapsed[ck]!=null?_TG.collapsed[ck]:!has;
-  _TG.collapsed[ck]=!cur;_tgRender();
-}
+// ck = 채널|대분류
+function _tgFold(ck){_TG.collapsed[ck]=!_tgCatClosed(ck);_tgRender();}
 function _tgSetEdit(r,f,raw){(_TG.edits[r.key]=_TG.edits[r.key]||{})[f]=raw;}
 function _tgInput(el){
   const i=+el.dataset.r,f=el.dataset.f,r=_TG.view[i];
@@ -253,7 +298,7 @@ async function _tgCopyPrev(){
       [['inT',p.in.target],['outT',p.out.target]].forEach(([f,v])=>{if(v!=null&&_tgVal(r,f)===''){_tgSetEdit(r,f,String(v));n++;}});
     });
     // 복사한 값이 들어간 품목군은 펼쳐서 보여 준다
-    _TG.view.forEach(r=>{if(_TG_FIELDS.some(f=>_tgChanged(r,f)))_TG.collapsed[r.ch+'|'+r.line]=false;});
+    _TG.view.forEach(r=>{if(_TG_FIELDS.some(f=>_tgChanged(r,f)))_TG.collapsed[r.ch+'|'+r.category]=false;});
     _tgRender();
     showToast(n?`${prev} 목표 ${n}칸을 비어 있는 목표에 채웠습니다(저장 전).`:`${prev}에서 채울 목표가 없습니다(이미 값이 있는 칸은 그대로).`);
   }catch(e){showToast('전월 목표를 불러오지 못했습니다: '+e.message,{type:'error'});}
@@ -397,7 +442,8 @@ function _tgProgMapFrom(pv){
   const cur=_TG.mig.progMap||{channels:{},products:{}};
   const m={channels:{},products:{}};
   pv.channels.forEach(c=>{m.channels[c.legacy]=c.legacy in cur.channels?cur.channels[c.legacy]:c.channelId;});
-  pv.products.forEach(p=>{m.products[p.legacy]=cur.products[p.legacy]||{line:p.line,model:p.model};});
+  // 품목 연결: (a) 품목군+모델 {line, model} / (b) 대분류 합계 {category} — 모델 구분 없는 원본 행(건조기·식세기)
+  pv.products.forEach(p=>{m.products[p.legacy]=cur.products[p.legacy]||(p.level==='category'?{category:p.category}:{line:p.line,model:p.model});});
   return m;
 }
 async function _tgProgPreview(withMap){
@@ -410,7 +456,7 @@ async function _tgProgPreview(withMap){
   g.progBusy=false;_tgRender();
 }
 function _tgProgSetCh(legacy,v){_TG.mig.progMap.channels[legacy]=v;_TG.mig.progConfirm=false;}
-function _tgProgSetLine(legacy,v){_TG.mig.progMap.products[legacy]={line:v,model:''};_TG.mig.progConfirm=false;_tgRender();}
+function _tgProgSetLine(legacy,v){_TG.mig.progMap.products[legacy]=v.indexOf('cat:')===0?{category:v.slice(4)}:{line:v,model:''};_TG.mig.progConfirm=false;_tgRender();}
 function _tgProgSetModel(legacy,v){_TG.mig.progMap.products[legacy].model=v;_TG.mig.progConfirm=false;}
 async function _tgProgApply(){
   const g=_TG.mig;
@@ -430,10 +476,11 @@ function _tgProgPreviewHtml(pv){
     <td><select class="f-sel" onchange="_tgProgSetCh('${_escAttr(c.legacy)}',this.value)">${_tgChOpts(m.channels[c.legacy],true)}</select>${c.suggest&&c.suggest!==m.channels[c.legacy]?` <span class="off-muted">제안 ${_escHtml(c.suggest)}</span>`:''}</td></tr>`).join('');
   const prRows=pv.products.map(p=>{
     const cur=m.products[p.legacy]||{line:'',model:''};
-    const miss=!cur.line||!cur.model;
-    return `<tr class="${miss?'tg-miss':''}"><td>${_escHtml(p.legacy)}${p.ambiguous?' <span class="up-chip applying">모델 선택 필요</span>':''}</td><td class="cm-reg">${_escHtml(p.channels.join(' · '))}</td>
-      <td><select class="f-sel" onchange="_tgProgSetLine('${_escAttr(p.legacy)}',this.value)"><option value="">— 품목군 —</option>${_tgLineOpts(cur.line)}</select></td>
-      <td><select class="f-sel" onchange="_tgProgSetModel('${_escAttr(p.legacy)}',this.value)">${_tgModelOpts(cur.line,cur.model)}</select></td></tr>`;
+    const isCat=!!cur.category,miss=!isCat&&(!cur.line||!cur.model);
+    const catOpts=`<optgroup label="모델 구분 없음 — 대분류 합계">${PRODUCT_CATEGORIES.map(c=>`<option value="cat:${_escAttr(c)}"${cur.category===c?' selected':''}>${_escHtml(c)} (대분류 합계)</option>`).join('')}</optgroup>`;
+    return `<tr class="${miss?'tg-miss':''}"><td>${_escHtml(p.legacy)}${miss?' <span class="up-chip applying">연결 필요</span>':''}${isCat?' <span class="up-chip">대분류</span>':''}</td><td class="cm-reg">${_escHtml(p.channels.join(' · '))}</td>
+      <td><select class="f-sel" onchange="_tgProgSetLine('${_escAttr(p.legacy)}',this.value)"><option value="">— 품목군 —</option>${_tgLineOpts(isCat?'':cur.line)}${catOpts}</select></td>
+      <td>${isCat?'<span class="off-muted">모델 구분 없음 — 대분류 합계</span>':`<select class="f-sel" onchange="_tgProgSetModel('${_escAttr(p.legacy)}',this.value)">${_tgModelOpts(cur.line,cur.model)}</select>`}</td></tr>`;
   }).join('');
   const cmp=(pv.compare||[]).map(x=>`<tr class="${x.total?'tg-chtot':''}"><td>${_escHtml(_offlineChannelName(x.channelId))}</td><td>${_escHtml(x.model)}</td>
     <td class="num-col">${x.legacy==null?'—':_tgFmt(x.legacy)}</td><td class="num-col">${_tgFmt(x.ledger)}</td>
@@ -442,7 +489,7 @@ function _tgProgPreviewHtml(pv){
       반영 예정 <b>${pv.planRows}</b>행${pv.skippedInput?` · 입력값 보존 ${pv.skippedInput}`:''} · 업로드 달이라 제외한 OUT 실적 ${pv.outSkippedUploadMonths}칸${pv.badCells?` · 오류 칸 ${pv.badCells}개(빈칸 처리)`:''}</div>
     ${pv.unmapped&&pv.unmapped.length?`<div class="up-err">미매핑(이관하지 않음): ${_escHtml(pv.unmapped.join(', '))}</div>`:''}
     <div class="tg-2col"><div><div class="f-lbl">채널 연결</div><table class="cm-tbl"><tbody>${chRows}</tbody></table></div>
-      <div><div class="f-lbl">품목 연결 (모델 모호한 항목은 직접 선택 → [매핑으로 다시 계산])</div><table class="cm-tbl"><thead><tr><th>원본 품목명</th><th>나오는 채널</th><th>품목군</th><th>모델</th></tr></thead><tbody>${prRows}</tbody></table></div></div>
+      <div><div class="f-lbl">품목 연결 — 품목군+모델, 또는 여러 모델을 합친 원본 행은 "대분류 합계(모델 구분 없음)" → [매핑으로 다시 계산]</div><table class="cm-tbl"><thead><tr><th>원본 품목명</th><th>나오는 채널</th><th>품목군</th><th>모델</th></tr></thead><tbody>${prRows}</tbody></table></div></div>
     <div class="f-lbl" style="margin-top:14px">업로드시작월 대조 — 진행현황 OUT 실적 vs 원장 집계 (이관하지 않음)</div>
     ${cmp?`<div class="tbl-wrap"><table class="cm-tbl"><thead><tr><th>채널</th><th>모델</th><th class="num-col">진행현황</th><th class="num-col">원장</th><th class="num-col">차이</th><th></th></tr></thead><tbody>${cmp}</tbody></table></div>`:'<div class="mp-empty">대조할 업로드 채널·월이 없습니다.</div>'}`;
 }

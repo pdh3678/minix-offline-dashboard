@@ -104,3 +104,8 @@
 .tg-diff{color:#B91C1C;font-weight:700}
 .tg-2col>div{min-width:0;overflow-x:auto}
 .tg-2col .cm-tbl .f-sel{min-width:130px;max-width:100%}
+/* 목표 관리 — 대분류 합계 줄, 대분류 단위 이관 줄(모델 구분 없음, 읽기 전용) */
+.tg-cat td{font-weight:800;background:var(--surface-2)}
+.tg-catrow td{color:var(--text-2)}
+.tg-catrow .tg-model{font-style:italic}
+.tg-line td:first-child{padding-left:20px!important}

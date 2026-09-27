@@ -184,7 +184,8 @@ function setup() {
     await ctx._tgProgPreview(false); await settle();
     let h = page();
     check('미리보기: 월 범위·행 수·미매핑·대조 리포트', h.indexOf('2026-01 ~ 2026-09') >= 0 && h.indexOf('반영 예정 <b>12</b>행') >= 0 && h.indexOf('미매핑(이관하지 않음): 품목 건조기(하이마트)') >= 0 && h.indexOf('미매칭 45') >= 0);
-    check('모델 모호 표시 + 선택 필요 줄 강조', h.indexOf('모델 선택 필요') >= 0 && /tg-miss/.test(h));
+    check('연결 안 된 품목 표시 + 줄 강조', h.indexOf('연결 필요') >= 0 && /tg-miss/.test(h));
+    check('품목군 선택지에 "대분류 합계(모델 구분 없음)" 묶음', h.indexOf('<optgroup label="모델 구분 없음 — 대분류 합계">') >= 0 && h.indexOf('value="cat:건조기"') >= 0);
     check('대조 차이 강조(−2)', /tg-diff">-2/.test(h));
     ctx._tgProgSetModel('건조기', '미니 건조기 PRO');
     await ctx._tgProgPreview(true); await settle();
@@ -211,6 +212,47 @@ function setup() {
     check('단가 반영: 적용시작일·행별 매핑', pa && pa.data.startDate === '2026-01-01' && J(pa.data.rows) === J([
       { rowNo: 3, channelId: 'himart', line: '미니건조기', model: '미니 건조기 PRO+' }, { rowNo: 4, channelId: 'himart', line: '미니식기세척기', model: '미니 식기세척기 PRO' }]), pa && pa.data);
     check('이관로그 표시', page().indexOf('이관로그') >= 0 && page().indexOf('2026-09-27 10:00:00') >= 0);
+  }
+
+  console.log('\n[6] 대분류 — 대분류 → 품목군 → 모델 묶음, 이관(모델 구분 없음) 줄, 중복 경고, 이관 연결');
+  {
+    const { ctx, X, el, calls, replies, page } = setup();
+    replies.offline_getMonthly = () => { const m = JSON.parse(J(MONTHLY)); m.categoryRows = [
+      { ym: '2026-09', channelId: 'traders', category: '건조기', in: { target: 20, actual: 18 }, out: { target: 15, actual: 12, source: 'migration' } }];
+      m.warnings = []; return m; };
+    X.TG.ym = '2026-09'; await ctx._tgLoad(); await settle();
+    const h = page();
+    check('대분류 합계 줄(음식물처리기·김치냉장고·청소기·건조기·식세기)', ['음식물처리기', '김치냉장고', '청소기', '건조기', '식세기'].every(c => h.indexOf('</button> ' + c) >= 0));
+    check('대분류 단위 이관 값이 있으면 "이관(모델 구분 없음)" 읽기 전용 줄 + 표시', h.indexOf('이관(모델 구분 없음)') >= 0 && h.indexOf('이관 대분류 합계 포함') >= 0);
+    check('품목군이 둘인 대분류(건조기)만 품목군 합계 줄(더 에어드라이·미니 건조기)', h.indexOf('<td>더 에어드라이</td>') >= 0 && h.indexOf('<td>미니 건조기</td>') >= 0 && h.indexOf('<td>더 플렌더</td>') < 0);
+    const id = (scope, f) => el(ctx._tgTotalId(scope, f)).innerHTML;
+    check('건조기 대분류 합계 = 이관 대분류 값(IN 20/18, OUT 15/12)', id('cat:traders|건조기', 'inT') === '20' && id('cat:traders|건조기', 'outA') === '12', [id('cat:traders|건조기', 'inT'), id('cat:traders|건조기', 'outA')]);
+    check('채널·전체 합계에도 포함(트레이더스 IN 목표 10+20 = 30)', id('ch:traders', 'inT') === '30' && id('all', 'inT') === '130', [id('ch:traders', 'inT'), id('all', 'inT')]);
+    const i = X.TG.view.findIndex(r => r.ch === 'traders' && r.model === '미니 건조기 PRO');
+    ctx._tgInput({ dataset: { r: String(i), f: 'inT' }, value: '4', classList: { toggle() {} } });
+    check('이관 값이 있는 대분류·항목에 모델 값을 입력하면 즉시 중복 경고', el('tgDupWarn').style.display === '' && /트레이더스 건조기\(IN 목표\)/.test(el('tgDupWarn').innerHTML), el('tgDupWarn').innerHTML);
+    check('  ↳ 대분류 합계에는 둘 다 더해짐(20+4 = 24)', id('cat:traders|건조기', 'inT') === '24');
+    ctx._tgRevert();
+    check('되돌리면 경고 사라짐', el('tgDupWarn').style.display === 'none');
+    const c0 = 'traders|청소기';
+    check('데이터 없는 대분류(청소기)는 접힘, 펼치면 모델 줄', ctx._tgCatClosed(c0) === true && (ctx._tgFold(c0), page().indexOf('>더 슬림</td>') >= 0));
+
+    // 이관 탭 — 대분류 연결
+    replies.offline_migrateProgress = d => ({ success: true, sheetName: '26년 진행현황', months: ['2026-01'], legacyRows: 1, planRows: 3, skippedInput: 0, outSkippedUploadMonths: 0, badCells: 0, unmapped: [], compare: [], recentLog: [],
+      channels: [{ legacy: '하이마트', group: '오프라인', rows: 2, suggest: 'himart', channelId: 'himart' }],
+      products: [{ legacy: '건조기', channels: ['하이마트'], level: 'category', category: '건조기', line: '', model: '' },
+        { legacy: '에어드라이', channels: ['하이마트'], level: 'model', category: '건조기', line: '더에어드라이', model: '더 에어드라이' }] });
+    ctx._tgSetTab('migrate');
+    await ctx._tgProgPreview(false); await settle();
+    const mh = page();
+    check('제안된 대분류 연결이 선택돼 있음(cat:건조기) + 모델 칸 "모델 구분 없음 — 대분류 합계"', mh.indexOf('value="cat:건조기" selected') >= 0 && mh.indexOf('모델 구분 없음 — 대분류 합계</span>') >= 0);
+    check('에어드라이는 모델 연결 유지', X.TG.mig.progMap.products['에어드라이'].model === '더 에어드라이' && !X.TG.mig.progMap.products['에어드라이'].category);
+    ctx._tgProgSetLine('에어드라이', 'cat:건조기');
+    check('품목군 칸에서 대분류 합계를 고르면 {category}', J(X.TG.mig.progMap.products['에어드라이']) === J({ category: '건조기' }));
+    ctx._tgProgSetLine('에어드라이', '더에어드라이'); ctx._tgProgSetModel('에어드라이', '더 에어드라이');
+    await ctx._tgProgApply(); await ctx._tgProgApply(); await settle();
+    const ap = calls.find(c => c.action === 'offline_migrateProgress' && c.data.mode === 'apply');
+    check('반영 요청: 건조기 {category}, 에어드라이 {line, model}', ap && J(ap.data.mapping.products['건조기']) === J({ category: '건조기' }) && ap.data.mapping.products['에어드라이'].model === '더 에어드라이', ap && ap.data.mapping);
   }
 
   console.log('\n' + '─'.repeat(50));
