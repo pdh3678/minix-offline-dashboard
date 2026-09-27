@@ -77,3 +77,30 @@
 .cm-off td{color:var(--text-3)}
 .cm-acts{display:flex;gap:6px;flex-wrap:wrap;min-width:84px}
 .cm-danger{border-color:#FCA5A5!important;color:#B91C1C!important}
+
+/* 목표 관리(#admin/targets) */
+.tg-help{font-size:11px;margin-top:6px;line-height:1.6}
+.tg-tbl td{padding:5px 8px}
+.tg-tbl tbody tr{cursor:default}
+.tg-tbl tbody tr:hover td{background:inherit}
+.tg-inp{width:78px;padding:4px 6px;border:1px solid var(--border);border-radius:5px;font-size:12px;font-family:inherit;text-align:right;background:var(--surface);font-variant-numeric:tabular-nums}
+.tg-inp:focus{outline:2px solid var(--minix);outline-offset:0;border-color:transparent}
+.tg-inp.changed{background:#FEF9C3;border-color:#EAB308}
+.tg-inp.bad{border-color:#DC2626;background:#FEE2E2}
+.tg-ro{color:var(--text-2);background:var(--surface-2)}
+.tg-src{display:inline-block;margin-left:3px;font-size:9px;font-weight:700;color:var(--text-3);text-transform:uppercase}
+.tg-ch td{background:var(--nbg);font-weight:800;padding-top:10px}
+.tg-line td{font-weight:700;color:var(--text-2)}
+.tg-chtot td{font-weight:800;border-top:2px solid var(--border)}
+.tg-grand td{font-weight:800;background:var(--minix-lt);color:var(--minix)}
+.tg-model{padding-left:30px!important;white-space:nowrap}
+.tg-fold{border:none;background:none;cursor:pointer;font-size:11px;color:var(--text-2);padding:0 4px;font-family:inherit}
+.tg-amt{font-size:11px;line-height:1.4;color:var(--text-2)}
+.tg-warn{font-size:12px;color:var(--warn);margin-bottom:10px}
+.tg-warn summary{cursor:pointer;font-weight:700}
+.tg-2col{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,2fr);gap:16px;margin-top:10px}
+@media(max-width:900px){.tg-2col{grid-template-columns:minmax(0,1fr)}}
+.tg-miss td{background:#FFF7ED}
+.tg-diff{color:#B91C1C;font-weight:700}
+.tg-2col>div{min-width:0;overflow-x:auto}
+.tg-2col .cm-tbl .f-sel{min-width:130px;max-width:100%}
