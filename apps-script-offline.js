@@ -295,8 +295,16 @@ function _offWithLock(fn) {
 }
 
 function _offInvalidateCache() {
-  try { CacheService.getScriptCache().removeAll(OFF_CACHE_KEYS.map(function (k) { return k + ':meta'; })); }
+  try {
+    var cache = CacheService.getScriptCache();
+    cache.removeAll(OFF_CACHE_KEYS.map(function (k) { return k + ':meta'; }));
+    cache.put('offline:gen', String(Date.now()), 21600);
+  }
   catch (e) { Logger.log('오프라인 캐시 무효화 실패 (무시): ' + e); }
+}
+// 조회 인자가 붙는 캐시(월별 집계 등)는 키를 다 알 수 없어서, 키에 "세대"를 넣고 무효화 때 세대를 바꾼다
+function _offCacheGen() {
+  try { return CacheService.getScriptCache().get('offline:gen') || '0'; } catch (e) { return '0'; }
 }
 
 // 활성 매핑(sku_id가 있는 행)의 (channel_id, 원본코드) 집합

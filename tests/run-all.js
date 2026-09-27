@@ -31,7 +31,8 @@ const SUITES = [
   ['../scripts/test-offline-parsers.js','오프라인 파서 — 5종 판별·헤더 탐색·숫자/날짜/코드 정규화(합성 픽스처)'],
   ['offline-ledger.test.js',  '오프라인 원장 반영 — 기간 교체·스냅샷·하이마트 누적 차이, 재업로드·순서 무관 동일'],
   ['offline-api.test.js',     '오프라인 API — doPost 라우팅·세션, 마스터 캐시, SKU·매핑 저장, 미매칭·로그·상태, 프론트 클라이언트'],
-  ['offline-ui.test.js',      '데이터 업로드 화면 — 진입 훅, 파일 카드, 기준일·교체기간 수정, 하이마트 순서, 카드에서 바로 매핑']
+  ['offline-ui.test.js',      '데이터 업로드 화면 — 진입 훅, 파일 카드, 기준일·교체기간 수정, 하이마트 순서, 카드에서 바로 매핑'],
+  ['offline-monthly.test.js', '월별 실적 해석(2-A) — 업로드 전후 OUT 원천, 원장 집계·미매칭, 모델 정규화, 단가·달성률·합계']
 ];
 
 let failed = 0;
