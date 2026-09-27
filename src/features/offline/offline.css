@@ -1,0 +1,132 @@
+/* 오프라인 화면 — 채널 현황·채널 상세·재고 현황. 색·간격은 index.html :root 토큰을 그대로 쓴다(새 색 토큰을 만들지 않음).
+   경보·달성률 색은 기존 상태 색(ok / warn / 오류 빨강 #B91C1C·#FEE2E2)만 쓴다. */
+
+/* 상단 필터 바 · 데이터 기준일 */
+.of-bar{display:flex;align-items:center;gap:10px 14px;flex-wrap:wrap;padding:12px 16px}
+.of-fl{display:flex;align-items:center;gap:6px;font-size:11px;font-weight:700;color:var(--text-2)}
+.of-month{width:auto;padding:5px 9px;font-size:12px}
+.of-bar .axis-toggle{margin-left:0}
+.of-range{font-size:12px;font-weight:700;color:var(--minix)}
+.of-bar .of-bar-r{margin-left:auto;display:flex;align-items:center;gap:8px}
+.of-fresh{display:flex;align-items:center;gap:6px 8px;flex-wrap:wrap;font-size:11.5px;color:var(--text-2)}
+.of-fresh-lb{font-weight:700;color:var(--text-3);font-size:11px}
+.of-fresh-chip{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:3px 10px;white-space:nowrap}
+.of-fresh-chip.stale{border-color:var(--warn);background:var(--warn-bg)}
+.of-fresh-ch{font-weight:800;color:var(--text)}
+.of-stale{color:var(--warn);font-weight:800}
+.of-link{color:var(--minix);font-weight:700;cursor:pointer;text-decoration:none;white-space:nowrap}
+.of-link:hover{text-decoration:underline}
+.of-note{font-size:11.5px;color:var(--text-2);background:var(--surface-2);border:1px solid var(--border);border-radius:6px;padding:7px 11px;line-height:1.55}
+.of-note-warn{color:var(--warn);background:var(--warn-bg);border-color:#FDE68A}
+.of-inc{color:var(--warn);font-weight:800;margin-left:1px;cursor:help}
+.of-sub{font-size:11px;color:var(--text-3);font-weight:500}
+
+/* 경보 배지 */
+.of-badge{display:inline-flex;align-items:center;font-size:10.5px;font-weight:800;padding:2px 8px;border-radius:10px;white-space:nowrap}
+.of-b-over{background:var(--warn-bg);color:var(--warn)}
+.of-b-risk{background:#FEE2E2;color:#B91C1C}
+.of-b-out{background:#FCE7F3;color:#9D174D}
+.of-badges{display:flex;gap:4px;flex-wrap:wrap}
+
+/* 달성률 색(셀 배경) */
+.of-r-good{background:var(--ok-bg);color:var(--ok)}
+.of-r-mid{background:var(--warn-bg);color:var(--warn)}
+.of-r-bad{background:#FEE2E2;color:#B91C1C}
+.of-r-none{color:var(--text-3)}
+.of-t-bad{color:#B91C1C}
+
+/* 채널 카드 */
+.of-cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(310px,1fr));gap:12px}
+.of-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--r);padding:15px 16px;box-shadow:var(--sh);cursor:pointer;transition:border-color .12s,box-shadow .12s;display:flex;flex-direction:column;gap:10px;min-width:0}
+.of-card:hover{border-color:var(--minix);box-shadow:0 2px 10px rgba(59,86,229,.12)}
+.of-card:focus-visible{outline:2px solid var(--minix);outline-offset:2px}
+.of-card-hd{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.of-card-name{font-size:15px;font-weight:800;letter-spacing:-.3px}
+.of-card-type{font-size:10.5px;color:var(--text-3);font-weight:700}
+.of-card-hd .of-badges{margin-left:auto}
+.of-meter-row{display:grid;grid-template-columns:34px minmax(0,1fr) auto;align-items:center;gap:8px;font-size:11.5px}
+.of-meter-lb{font-weight:800;color:var(--text-2);font-size:11px}
+.of-meter{height:8px;background:var(--nbg);border-radius:4px;position:relative;overflow:hidden}
+.of-meter-fill{position:absolute;left:0;top:0;bottom:0;border-radius:4px;background:var(--minix)}
+.of-meter-fill.over{background:var(--ok)}
+.of-meter-fill.low{background:#DC2626}
+.of-meter-val{font-variant-numeric:tabular-nums;font-weight:800;min-width:48px;text-align:right}
+.of-meter-sub{grid-column:2/4;font-size:10.5px;color:var(--text-3);margin-top:-5px;font-variant-numeric:tabular-nums}
+.of-kv{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;border-top:1px dashed var(--border);padding-top:9px}
+.of-kv>div{min-width:0}
+.of-kv-lb{font-size:10px;font-weight:700;color:var(--text-3);letter-spacing:.2px}
+.of-kv-v{font-size:14px;font-weight:800;font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.of-kv-v small{font-size:11px;font-weight:600;color:var(--text-3)}
+.of-gap{font-size:11.5px;color:var(--text-2)}
+.of-gap b{font-variant-numeric:tabular-nums}
+.of-gap-pos{color:var(--warn)}
+.of-nodata{font-size:12px;color:var(--text-3);border-top:1px dashed var(--border);padding-top:9px}
+.of-card-foot{font-size:10.5px;color:var(--text-3)}
+
+/* 공용 표 */
+.of-tbl td,.of-tbl th{padding:6px 9px}
+.of-tbl tbody tr{cursor:default}
+.of-tbl tbody tr:hover td{background:inherit}
+.of-tbl td.num-col,.of-tbl th.num-col{font-variant-numeric:tabular-nums}
+.of-tbl .of-lv-cat td{font-weight:800;background:var(--surface-2)}
+.of-tbl .of-lv-line td{font-weight:700;color:var(--text-2)}
+.of-tbl .of-lv-line td:first-child{padding-left:20px}
+.of-tbl .of-lv-model td:first-child{padding-left:30px}
+.of-tbl .of-lv-sku td{color:var(--text-2);font-size:12px}
+.of-tbl .of-lv-sku td:first-child{padding-left:46px}
+.of-tbl .of-lv-note td{font-size:11.5px;color:var(--warn);background:var(--warn-bg);padding-left:30px}
+.of-tbl .of-lv-total td{font-weight:800;border-top:2px solid var(--border);background:var(--minix-lt);color:var(--minix)}
+.of-tbl .of-lv-um td{color:var(--warn)}
+.of-fold{border:none;background:none;cursor:pointer;font-size:11px;color:var(--text-2);padding:0 4px 0 0;font-family:inherit}
+.of-cell-rate{border-radius:4px;padding:1px 6px;font-weight:800;display:inline-block;min-width:48px;text-align:right}
+.of-dim{color:var(--text-3)}
+.of-out td{background:#FEF2F2}
+.of-out td:first-child{box-shadow:inset 3px 0 0 #DC2626}
+.of-tbl tr.of-focus td{background:var(--minix-lt)}
+
+/* 채널 × 대분류 매트릭스 · SKU × 채널 재고 매트릭스 */
+.of-mx td{text-align:center;vertical-align:middle}
+.of-mx td:first-child,.of-mx th:first-child{text-align:left}
+.of-mx-cell{display:inline-flex;flex-direction:column;align-items:center;gap:1px;border-radius:5px;padding:5px 8px;min-width:78px;line-height:1.25}
+.of-mx-main{font-weight:800;font-size:12.5px;font-variant-numeric:tabular-nums}
+.of-mx-sub{font-size:10px;color:var(--text-3);font-variant-numeric:tabular-nums}
+.of-mx-cell.of-a-over{background:var(--warn-bg)}
+.of-mx-cell.of-a-over .of-mx-main{color:var(--warn)}
+.of-mx-cell.of-a-risk{background:#FEE2E2}
+.of-mx-cell.of-a-risk .of-mx-main{color:#B91C1C}
+.of-mx-cell.clickable{cursor:pointer}
+.of-mx-cell.clickable:hover{outline:1px solid var(--minix)}
+
+/* 차트 */
+.of-chart{position:relative;width:100%;height:280px}
+.of-chart-sm{height:240px}
+.of-chart-empty{padding:44px 10px;text-align:center;color:var(--text-3);font-size:12px}
+.of-row2{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:16px}
+@media(max-width:1100px){.of-row2{grid-template-columns:minmax(0,1fr)}}
+.of-ctl{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px;font-size:11.5px}
+.of-ctl .f-inp,.of-ctl .f-sel{width:auto;padding:5px 9px;font-size:12px}
+.of-ctl .f-sel{padding-right:28px}
+
+/* 채널 상세 탭 */
+.of-tabs{display:flex;gap:6px;flex-wrap:wrap}
+.of-tab{padding:6px 16px;border-radius:16px;border:1px solid var(--border);background:var(--surface);color:var(--text-2);font-size:12.5px;font-weight:700;cursor:pointer;font-family:inherit}
+.of-tab:hover{background:var(--surface-2)}
+.of-tab.on{background:var(--navy);border-color:var(--navy);color:#fff}
+.of-tab .of-sub{margin-left:4px}
+.of-tab.on .of-sub{color:rgba(255,255,255,.7)}
+
+/* 경보 목록 탭 */
+.of-atabs{display:inline-flex;border:1px solid var(--border);border-radius:6px;overflow:hidden}
+.of-atabs button{border:none;background:var(--surface-2);color:var(--text-2);font-family:inherit;font-size:11.5px;font-weight:700;padding:5px 12px;cursor:pointer}
+.of-atabs button+button{border-left:1px solid var(--border)}
+.of-atabs button.on{background:var(--minix);color:#fff}
+
+/* 설정 모달 */
+.of-set-grid{display:grid;grid-template-columns:minmax(0,1fr) 110px;gap:10px 14px;align-items:center}
+.of-set-grid .f-inp{text-align:right}
+.of-set-desc{font-size:11px;color:var(--text-3);line-height:1.5;margin-top:2px}
+
+@media(max-width:600px){
+  .of-cards{grid-template-columns:minmax(0,1fr)}
+  .of-kv{grid-template-columns:repeat(2,minmax(0,1fr))}
+}

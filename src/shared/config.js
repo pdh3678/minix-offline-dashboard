@@ -4,7 +4,7 @@
 // 배포본 확인용 버전 문자열 — 프론트를 수정할 때마다(순수 프론트 전용 변경 포함) 바꿔서, 콘솔에서
 // "이 브라우저가 최신 프론트를 받았는지"를 바로 확인 가능. apps-script.js의 SCRIPT_VERSION과는
 // 더 이상 짝을 맞추지 않음 — 아래 REQUIRED_SCRIPT_VERSION이 그 역할을 대신함(이유는 그 주석 참고).
-const DASHBOARD_VERSION='dash-offline-category-2026-09-27-01';
+const DASHBOARD_VERSION='dash-offline-inventory-2026-09-27-01';
 console.log('[dashboard] 프론트 버전:',DASHBOARD_VERSION);
 /* 임베드 여부 단일 창구 — 화면 숨김은 head에서 붙인 html.embed 클래스가 CSS로 처리하고,
    여기서는 JS 동작 분기가 필요할 때 이 상수를 본다(둘의 판정 기준은 같아야 함). */

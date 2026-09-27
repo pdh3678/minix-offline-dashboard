@@ -27,7 +27,23 @@ async function _offlineCall(action,data){
     if(/_off(GetInventory|GetDailySales|GetInventoryTrend|SaveSettings|DeletePrice) is not defined/.test(j.error))throw new Error('Apps Script 배포본에 재고 지표 기능이 아직 없습니다 — apps-script-offline-inventory.js(offline_inventory) 추가와 offline·offline_targets 갱신 후 새 버전 배포가 필요합니다.');
     throw new Error(j.error);
   }
+  // 쓰기가 성공하면 조회 메모를 비운다 — 서버 캐시 세대가 바뀌는 것과 같은 시점
+  if(!/^offline_get/.test(action))Object.keys(_OFFLINE_MEMO).forEach(k=>{delete _OFFLINE_MEMO[k];});
   return j;
+}
+
+/* 조회 메모 — 채널 현황·채널 상세·재고 현황을 오갈 때 같은 조회를 또 기다리지 않게(서버 캐시가 있어도 왕복이 1~3초).
+   같은 액션·인자는 2분 동안 같은 응답을 쓰고, force면 다시 받는다. 실패한 조회는 메모하지 않는다. */
+const _OFFLINE_MEMO={};
+const OFFLINE_MEMO_MS=120000;
+function _offlineCached(action,data,force){
+  const k=action+'|'+JSON.stringify(data||{});
+  const m=_OFFLINE_MEMO[k];
+  if(!force&&m&&Date.now()-m.at<OFFLINE_MEMO_MS)return m.p;
+  const p=_offlineCall(action,data);
+  _OFFLINE_MEMO[k]={at:Date.now(),p};
+  p.catch(()=>{if(_OFFLINE_MEMO[k]&&_OFFLINE_MEMO[k].p===p)delete _OFFLINE_MEMO[k];});
+  return p;
 }
 
 /* 마스터(제품·채널·코드매핑·점포) — 오프라인 화면들이 공유한다. 저장하면 force로 다시 받는다

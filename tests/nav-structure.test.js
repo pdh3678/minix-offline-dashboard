@@ -180,7 +180,7 @@ function fakeEl(extra) {
     // 로드 시점엔 스텁 DOM에 그려졌으므로, 빈 틀 페이지 파일만 받아 적는 DOM 위에서 다시 실행한다(함수 호출뿐인 파일).
     // 실제 기능이 들어온 페이지(1단계 데이터 업로드·코드 매핑, 2-A 목표 관리)와 오프라인 공용 모듈은 빈 틀이 아니라서 제외한다 —
     // 그쪽은 최상위 const가 있어 같은 컨텍스트에서 두 번 실행할 수도 없다(offline-ui.test.js가 따로 검증).
-    const NOT_PLACEHOLDER = /^src\/features\/(offline\/(parsers|resolver|sheetjs|api)|admin\/(mapping-panel|upload|code-mapping|targets))\.js$/;
+    const NOT_PLACEHOLDER = /^src\/features\/(offline\/(parsers|resolver|sheetjs|api|common)|admin\/(mapping-panel|upload|code-mapping|targets))\.js$/;
     const files = scriptEntries(PROJ).filter(e => /^src\/features\/(home|offline|admin|monthly-review)\//.test(e.name) && !NOT_PLACEHOLDER.test(e.name));
     check('빈 틀 페이지 파일 ' + Object.keys(PLAN).length + '개가 index.html에 실림', files.length === Object.keys(PLAN).length, files.map(f => f.name));
     files.forEach(f => vm.runInContext(f.code, ctx, { filename: f.name }));
