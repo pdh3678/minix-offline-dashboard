@@ -1,6 +1,7 @@
 'use strict';
 /* 목표 관리(#admin/targets) — 오프라인 채널 월별 목표(Sell-in IN·Sell-out OUT)와 실적 입력, 단가, 과거 실적 이관.
-   탭 3개: [월별 입력] offline_getMonthly + offline_saveTargets / [단가] offline_getPrices·savePrices /
+   탭 4개: [월별 입력] offline_getMonthly + offline_saveTargets / [연간 보기] targets-annual.js /
+          [단가] offline_getPrices·savePrices·deletePrice /
           [이관] offline_migrateProgress·migratePrices(미리보기 → 매핑 확인 → 반영)
 
    월별 입력 표는 칸을 고칠 때 표를 다시 그리지 않는다 — 다시 그리면 Tab으로 옮겨 간 입력칸이 사라져
@@ -39,6 +40,7 @@ function _tgSetTab(t){
   // 단가·이관을 반영하면 월별 데이터를 비워 두므로 돌아올 때 다시 받는다
   if(t==='monthly'&&!_TG.data&&!_TG.loading)_tgLoad();
   if(t==='prices'&&!_TG.prices)_tgLoadPrices();
+  if(t==='annual'&&!_TGA.data)_tgaLoad();
 }
 function _tgSetYm(v){
   if(!/^\d{4}-\d{2}$/.test(v))return;
@@ -142,10 +144,11 @@ function _tgDupEdits(){
 function _tgRender(){
   const host=document.getElementById('page-admin-targets');
   if(!host)return;
-  const tabs=[['monthly','월별 입력'],['prices','단가'],['migrate','이관']];
+  const tabs=[['monthly','월별 입력'],['annual','연간 보기'],['prices','단가'],['migrate','이관']];
   host.innerHTML=`<div class="subtabs open">${tabs.map(([k,l])=>`<button type="button" class="stab${_TG.tab===k?' sam':''}" onclick="_tgSetTab('${k}')">${l}</button>`).join('')}</div>`+
-    (_TG.tab==='monthly'?_tgMonthlyHtml():_TG.tab==='prices'?_tgPricesHtml():_tgMigrateHtml());
+    (_TG.tab==='monthly'?_tgMonthlyHtml():_TG.tab==='annual'?_tgaHtml():_TG.tab==='prices'?_tgPricesHtml():_tgMigrateHtml());
   if(_TG.tab==='monthly'&&_TG.data&&!_TG.err)_tgRefreshNumbers();
+  if(_TG.tab==='annual')_tgaRefresh(); // 연간 보기(targets-annual.js)
 }
 
 function _tgMonthlyHtml(){
@@ -362,7 +365,9 @@ function _tgPricesHtml(){
     return `<tr class="${cur?'':'cm-off'}"><td>${_escHtml(_offlineChannelName(p.channelId))}</td><td>${_escHtml(lineLabel(p.line))}</td><td>${_escHtml(p.model)}</td>
       <td class="num-col">${_tgFmt(p.price)}</td><td>${_escHtml(p.startDate)} ${cur?'<span class="up-chip ready">현재 적용</span>':(p.startDate>today?'<span class="up-chip">예정</span>':'')}</td>
       <td class="cm-wrap cm-reg">${_escHtml(p.note)}</td><td class="cm-reg">${_escHtml(p.updatedAt)}<br>${_escHtml(p.updatedBy)}</td>
-      <td><button type="button" class="btn-cancel up-btn" onclick="_tgPriceStartEdit('${_escAttr(k)}')">수정</button></td></tr>`;
+      <td><div class="cm-acts"><button type="button" class="btn-cancel up-btn" onclick="_tgPriceStartEdit('${_escAttr(k)}')">수정</button>
+        <button type="button" class="btn-cancel up-btn${_TG.priceDelKey===k?' cm-danger':''}" ${_TG.priceBusy?'disabled':''} onclick="_tgPriceDelete('${_escAttr(k)}')">${_TG.priceDelKey===k?'삭제 확인':'삭제'}</button></div>
+        ${_TG.priceDelKey===k?'<div class="cm-reg">한 번 더 누르면 삭제 — 이관로그에 삭제자·값이 남습니다</div>':''}</td></tr>`;
   }).join('');
   return `<div class="card"><div class="card-hd">단가 추가<span class="card-hd-r">금액 = 수량 × 그 달 1일 기준 가장 최근 적용시작일의 공급가</span></div>
     <div class="cm-filters">
@@ -384,6 +389,19 @@ function _tgPriceStartEdit(k){
   _TG.priceEditKey=k;_TG.priceEdit={price:String(p.price),startDate:p.startDate,note:p.note||'',orig:p};_tgRender();
 }
 function _tgPriceCancel(){_TG.priceEditKey=null;_TG.priceEdit=null;_tgRender();}
+// 단가 행 삭제 — 두 번 눌러야 한다(브라우저 확인창 대신 버튼이 "삭제 확인"으로 바뀜). 서버가 이관로그에 삭제자·원래 값을 남긴다
+async function _tgPriceDelete(k){
+  const p=(_TG.prices||[]).find(x=>_tgPriceKey(x)===k);if(!p||_TG.priceBusy)return;
+  if(_TG.priceDelKey!==k){_TG.priceDelKey=k;_tgRender();return;}
+  _TG.priceBusy=true;_tgRender();
+  try{
+    await _offlineCall('offline_deletePrice',{channelId:p.channelId,line:p.line,model:p.model,startDate:p.startDate});
+    showToast(`단가를 삭제했습니다 — ${_offlineChannelName(p.channelId)} ${p.model} ${p.startDate}`,{type:'success'});
+    _TG.prices=(await _offlineCall('offline_getPrices')).items;
+    _TG.data=null; // 월별 금액이 바뀌므로 월별 입력은 다시 받는다
+  }catch(e){showToast('단가 삭제 실패: '+e.message,{type:'error'});}
+  finally{_TG.priceBusy=false;_TG.priceDelKey=null;_tgRender();}
+}
 async function _tgPriceSend(items,ok){
   _TG.priceBusy=true;_tgRender();
   let done=false;

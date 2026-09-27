@@ -4,7 +4,7 @@
    아래: 전체 매핑 표 — 채널·품목군·재고구분 필터, 검색, 수정, 비활성화(sku_id 비움 → 미매칭으로 복귀)
    저장하면 마스터(offline: 캐시는 서버가 무효화)와 미매칭 목록을 다시 받는다. */
 
-const _CM={unmatched:null,err:'',filter:{ch:'',line:'',type:'',q:''},editKey:null,edit:null,confirmKey:null,busy:false};
+const _CM={tab:'mapping',unmatched:null,err:'',filter:{ch:'',line:'',type:'',q:''},editKey:null,edit:null,confirmKey:null,busy:false};
 const _cmKey=m=>m.channelId+'\u0001'+m.code;
 
 function mountCodeMappingPage(){
@@ -25,8 +25,11 @@ function _cmRender(){
   const host=document.getElementById('page-admin-code-mapping');
   if(!host)return;
   if(_CM.err&&!OFFLINE_MASTERS){host.innerHTML=`<div class="card"><div class="card-hd">코드 매핑</div><div class="up-err">${_escHtml(_CM.err)}</div></div>`;return;}
+  // [코드 매핑 | 제품마스터] — 제품마스터 탭은 sku-master.js
+  const tabs=`<div class="subtabs open">${[['mapping','코드 매핑'],['skus','제품마스터']].map(([k,l])=>`<button type="button" class="stab${_CM.tab===k?' sam':''}" onclick="_cmSetTab('${k}')">${l}</button>`).join('')}</div>`;
+  if(_CM.tab==='skus'){host.innerHTML=tabs+_skmHtml();return;}
   const n=_CM.unmatched?_CM.unmatched.length:null;
-  host.innerHTML=`
+  host.innerHTML=tabs+`
   <div class="card"><div class="card-hd">미매칭 코드${n!=null?' '+n+'개':''}<span class="card-hd-r">제안 = 같은 모델명이 이미 매핑된 SKU · 확정은 저장 버튼으로</span></div>
     ${_CM.err?`<div class="up-err">${_escHtml(_CM.err)}</div>`:''}
     <div id="cmUnmatched">${_CM.unmatched?'':'<div class="mp-empty">불러오는 중…</div>'}</div></div>
@@ -38,6 +41,8 @@ function _cmRender(){
   }
   _cmRenderTable();
 }
+
+function _cmSetTab(t){_CM.tab=t;_cmRender();}
 
 function _cmFiltersHtml(){
   const f=_CM.filter,m=OFFLINE_MASTERS||{};

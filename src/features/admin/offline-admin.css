@@ -109,3 +109,13 @@
 .tg-catrow td{color:var(--text-2)}
 .tg-catrow .tg-model{font-style:italic}
 .tg-line td:first-child{padding-left:20px!important}
+
+/* 코드 매핑 [제품마스터] 탭 — 편집 줄 입력칸이 열 폭을 밀어내지 않게 */
+.skm-tbl .f-inp{min-width:0;width:100%;padding:4px 7px}
+.skm-tbl .f-sel{min-width:112px}
+.skm-tbl td:nth-child(2){min-width:190px}
+.skm-tbl .cm-acts{flex-wrap:nowrap}
+/* 목표 관리 [연간 보기] — 12달 + 연 합계가 한 화면에 들어가게 좁은 칸 */
+.tga-tbl td,.tga-tbl th{padding:4px 5px}
+.tga-tbl .tga-inp{width:58px}
+.tga-tbl .tg-model{padding-left:22px!important}
