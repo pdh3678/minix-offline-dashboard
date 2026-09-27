@@ -23,6 +23,8 @@ async function _offlineCall(action,data){
     if(/presence 전용|_offlineHandle is not defined/.test(j.error))throw new Error('Apps Script 배포본에 오프라인 기능이 아직 없습니다 — apps-script-offline.js 추가 후 재배포가 필요합니다.');
     // 2-A 파일(offline_targets)을 추가하기 전 배포본
     if(/_off(GetMonthly|SaveTargets|GetPrices|SavePrices|MigrateProgress|MigratePrices) is not defined/.test(j.error))throw new Error('Apps Script 배포본에 목표·단가·이관 기능이 아직 없습니다 — apps-script-offline-targets.js(offline_targets) 추가 후 재배포가 필요합니다.');
+    // 2-B 파일(offline_inventory)을 추가하기 전 배포본 — 단가 삭제는 offline_targets 갱신분이라 같이 안내한다
+    if(/_off(GetInventory|GetDailySales|GetInventoryTrend|SaveSettings|DeletePrice) is not defined/.test(j.error))throw new Error('Apps Script 배포본에 재고 지표 기능이 아직 없습니다 — apps-script-offline-inventory.js(offline_inventory) 추가와 offline·offline_targets 갱신 후 새 버전 배포가 필요합니다.');
     throw new Error(j.error);
   }
   return j;

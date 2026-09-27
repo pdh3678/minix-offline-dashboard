@@ -323,8 +323,10 @@ function _offGetMonthly(data) {
   if (!_offIsYm(from) || !_offIsYm(to) || from > to) throw new Error('연월 범위가 올바르지 않습니다: ' + from + ' ~ ' + to);
   if (_offYmList(from, to).length > 36) throw new Error('한 번에 36개월까지만 조회할 수 있습니다.');
   var ch = String(data.channelId || '');
+  // totalsOnly — 합계(totals·unmatched·warnings)만. 채널 현황처럼 여러 달 합계만 쓰는 화면이 행 목록(수백 KB)을 받지 않게
+  var totalsOnly = !!data.totalsOnly;
   var cache = CacheService.getScriptCache();
-  var key = 'offline:monthly:' + _offCacheGen() + ':' + from + ':' + to + ':' + ch;
+  var key = 'offline:monthly:' + _offCacheGen() + ':' + from + ':' + to + ':' + ch + (totalsOnly ? ':t' : '');
   var hit = _cacheGetJSON(cache, key);
   if (hit) { hit.cached = true; return hit; }
   var ss = _offSS();
@@ -332,6 +334,7 @@ function _offGetMonthly(data) {
   var out = _offMonthlyCompute({ from: from, to: to, channelId: ch,
     channels: read('channel'), targets: read('targets'), prices: read('prices'),
     sales: read('sales'), mappings: read('mapping'), skus: read('sku') });
+  if (totalsOnly) { out.rows = []; out.categoryRows = []; out.totalsOnly = true; }
   out.success = true;
   _cachePutJSON(cache, key, out, OFF_CACHE_TTL_SEC);
   return out;
@@ -360,7 +363,8 @@ function _offCatalogModel(line, model, what) {
 }
 
 /* 목표실적_월 upsert — 대시보드 입력은 출처 input(이관이 덮어쓰지 않는다).
-   items: [{ ym, channelId, line, model, type:'IN'|'OUT', target, actual, note }] — 빈칸('')은 값 지우기.
+   items: [{ ym, channelId, line, model, type:'IN'|'OUT', target, actual, note }] — 빈칸('')은 값 지우기,
+   키가 아예 없으면(undefined) 그 칸은 그대로 둔다(연간 보기는 목표만 보낸다 — 실적을 지우지 않게).
    업로드시작월 이후의 OUT 실적은 원장에서 집계하므로 입력을 받지 않는다. */
 function _offSaveTargets(data, auth) {
   var items = data.items || [];
@@ -389,7 +393,9 @@ function _offSaveTargets(data, auth) {
       var k = _offTargetKey(it.ym, it.channelId, cat, it.line, model, it.type);
       var row = idx[k];
       if (!row) { row = [it.ym, it.channelId, it.line, model, it.type, '', '', '', '', '', '', cat]; rows.push(row); idx[k] = row; }
-      row[5] = target; row[6] = actual; row[7] = 'input'; row[8] = today; row[9] = (auth && auth.email) || ''; row[11] = cat;
+      if (it.target !== undefined) row[5] = target;
+      if (it.actual !== undefined) row[6] = actual;
+      row[7] = 'input'; row[8] = today; row[9] = (auth && auth.email) || ''; row[11] = cat;
       if (it.note !== undefined) row[10] = String(it.note || '').trim();
     });
     _offWriteAll(sheet, def, rows, prev);
@@ -461,6 +467,30 @@ function _offUpsertPrices(ss, items, auth) {
   });
   _offWriteAll(sheet, def, rows, prev);
   return clean.length;
+}
+
+/* offline_deletePrice — 단가마스터 행 하나 삭제. 키 (channel_id, 품목군, 모델, 적용시작일).
+   행이 없어지므로 누가 무엇을 지웠는지는 이관로그(대상 '단가 삭제')에 남긴다. */
+function _offDeletePrice(data, auth) {
+  var ch = String(data.channelId || ''), line = String(data.line || ''), start = String(data.startDate || '');
+  if (!ch || OFFLINE_PRODUCT_LINES.indexOf(line) < 0 || !_offIsDate(start)) throw new Error('삭제할 단가(채널·품목군·모델·적용시작일)가 올바르지 않습니다.');
+  var model = _offCanonModel(line, data.model).model;
+  return _offWithLock(function () {
+    var ss = _offSS();
+    var def = OFF_TABS.prices, sheet = _offSheet(ss, 'prices');
+    var rows = _offReadRows(sheet, def), prev = rows.length;
+    var k = [ch, line, model, start].join(OFF_KEY_SEP), hit = null;
+    var kept = rows.filter(function (r) {
+      var same = [r[0], r[1], _offCanonModel(r[1], r[2]).model, r[4]].join(OFF_KEY_SEP) === k;
+      if (same && !hit) { hit = r; return false; }
+      return true;
+    });
+    if (!hit) throw new Error('단가마스터에 없는 행입니다: ' + ch + ' / ' + model + ' / ' + start);
+    _offWriteAll(sheet, def, kept, prev);
+    _offMigrationLog(ss, auth, '단가 삭제', start, 1, ch + ' / ' + line + ' / ' + model + ' / 공급가 ' + hit[3] + (hit[5] ? ' / 비고 ' + hit[5] : ''), '성공');
+    _offInvalidateCache();
+    return { success: true, deleted: _offPriceObj(hit) };
+  });
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

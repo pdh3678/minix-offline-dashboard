@@ -661,6 +661,12 @@ function _offlineHandle(action, data, auth) {
     else if (action === 'offline_savePrices') out = _offSavePrices(data || {}, auth);
     else if (action === 'offline_migrateProgress') out = _offMigrateProgress(data || {}, auth);
     else if (action === 'offline_migratePrices') out = _offMigratePrices(data || {}, auth);
+    else if (action === 'offline_deletePrice') out = _offDeletePrice(data || {}, auth);
+    // 2-B (apps-script-offline-inventory.js)
+    else if (action === 'offline_getInventory') out = _offGetInventory(data || {});
+    else if (action === 'offline_getDailySales') out = _offGetDailySales(data || {});
+    else if (action === 'offline_getInventoryTrend') out = _offGetInventoryTrend(data || {});
+    else if (action === 'offline_saveSettings') out = _offSaveSettings(data || {}, auth);
     else throw new Error('알 수 없는 오프라인 액션: ' + action);
     return _json(out);
   } catch (err) {
@@ -746,21 +752,7 @@ function _offGetStatus() {
   var yesterday = _offAddDays(today, -1);
   var byCh = {};
   channels.forEach(function (r) { byCh[r[0]] = { channelId: r[0], name: r[1], active: r[3], order: r[4], salesLast: '', stockLast: '', covered: {} }; });
-  logRows.forEach(function (r) {
-    var ft = OFF_FILE_TYPES[r[4]];
-    var st = byCh[r[5]];
-    if (!ft || !st || r[11] !== '성공') return;
-    var parts = String(r[6] || '').split('~');
-    var a = parts[0], b = parts[1] || parts[0];
-    if (!_offIsDate(a) || !_offIsDate(b)) return;
-    if (ft.kind === 'period' || ft.kind === 'himart') {
-      if (b > st.salesLast) st.salesLast = b;
-      for (var d = a; d <= b; d = _offAddDays(d, 1)) st.covered[d] = true;
-    }
-    if (ft.kind === 'snapshot' || ft.kind === 'himart') {
-      if (a > st.stockLast) st.stockLast = a;
-    }
-  });
+  _offLogCoverage(logRows, byCh);
   var out = { success: true, today: today, month: today.slice(0, 7), channels: [] };
   Object.keys(byCh).forEach(function (id) {
     var st = byCh[id];
@@ -772,6 +764,27 @@ function _offGetStatus() {
   out.channels.sort(function (x, y) { return (Number(x.order) || 99) - (Number(y.order) || 99); });
   _cachePutJSON(cache, 'offline:status', out, OFF_CACHE_TTL_SEC);
   return out;
+}
+
+/* 업로드로그(성공 행) → byCh[채널]의 salesLast(판매 업로드가 덮은 마지막 날)·stockLast(재고 마지막 기준일)·covered{날짜}.
+   byCh에 없는 채널은 건너뛴다. 데이터 현황(_offGetStatus)과 재고 지표(판매 최신 기준일)가 같이 쓴다. */
+function _offLogCoverage(logRows, byCh) {
+  logRows.forEach(function (r) {
+    var ft = OFF_FILE_TYPES[r[4]];
+    var st = byCh[r[5]];
+    if (!ft || !st || r[11] !== '성공') return;
+    var parts = String(r[6] || '').split('~');
+    var a = parts[0], b = parts[1] || parts[0];
+    if (!_offIsDate(a) || !_offIsDate(b)) return;
+    if (ft.kind === 'period' || ft.kind === 'himart') {
+      if (b > st.salesLast) st.salesLast = b;
+      if (st.covered) for (var d = a; d <= b; d = _offAddDays(d, 1)) st.covered[d] = true;
+    }
+    if (ft.kind === 'snapshot' || ft.kind === 'himart') {
+      if (a > st.stockLast) st.stockLast = a;
+    }
+  });
+  return byCh;
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -789,7 +802,10 @@ function _offNextSkuId(rows) {
   return 'SKU-' + n;
 }
 
-// 제품마스터 추가(sku.skuId 없음) / 수정(sku.skuId 있음)
+/* 제품마스터 추가(sku.skuId 없음) / 수정(sku.skuId 있음)
+   수정할 때 보내지 않은 필드(undefined)는 그대로 둔다 — 제품마스터 화면이 비고를 안 보내도 지워지지 않게.
+   삭제는 없다: 활성=N(비활성)이면 새 매핑 드롭다운에서만 숨고, 과거 집계에는 그대로 쓰인다.
+   응답의 mappedCodes = 이 SKU에 연결된 활성 매핑 수(품목군을 바꾸면 그만큼의 코드 집계가 옮겨 간다). */
 function _offSaveSku(data, auth) {
   var s = data.sku || {};
   var line = String(s.line || '').trim();
@@ -798,6 +814,7 @@ function _offSaveSku(data, auth) {
   if (!name) throw new Error('표준명이 비었습니다.');
   var order = (s.order === '' || s.order == null) ? '' : Number(s.order);
   if (order !== '' && !isFinite(order)) throw new Error('정렬순서는 숫자여야 합니다.');
+  if (s.active !== undefined && s.active !== 'Y' && s.active !== 'N') throw new Error('활성은 Y 또는 N 이어야 합니다: ' + s.active);
   return _offWithLock(function () {
     var ss = _offSS();
     var def = OFF_TABS.sku;
@@ -805,7 +822,7 @@ function _offSaveSku(data, auth) {
     var rows = _offReadRows(sheet, def);
     var prev = rows.length;
     var id = String(s.skuId || '').trim();
-    var row = null;
+    var row = null, isNew = !id;
     if (id) {
       for (var i = 0; i < rows.length; i++) if (rows[i][0] === id) { row = rows[i]; break; }
       if (!row) throw new Error('없는 sku_id 입니다: ' + id);
@@ -814,13 +831,19 @@ function _offSaveSku(data, auth) {
       row = [id, '', '', '', '', '', '', ''];
       rows.push(row);
     }
+    var prevLine = row[2];
+    var keep = function (v) { return !isNew && v === undefined; };
     row[1] = name; row[2] = line;
-    row[3] = String(s.model || '').trim(); row[4] = String(s.option || '').trim();
-    row[5] = s.active === 'N' ? 'N' : 'Y'; row[6] = order; row[7] = String(s.note || '').trim();
+    if (!keep(s.model)) row[3] = String(s.model || '').trim();
+    if (!keep(s.option)) row[4] = String(s.option || '').trim();
+    if (!keep(s.active)) row[5] = s.active === 'N' ? 'N' : 'Y';
+    if (!keep(s.order)) row[6] = order;
+    if (!keep(s.note)) row[7] = String(s.note || '').trim();
     _offWriteAll(sheet, def, rows, prev);
+    var mappedCodes = _offReadRows(_offSheet(ss, 'mapping'), OFF_TABS.mapping).filter(function (m) { return m[0] && m[1] && m[2] === id; }).length;
     _offInvalidateCache();
-    Logger.log('[오프라인] SKU 저장 ' + id + ' by ' + auth.email);
-    return { success: true, sku: _offSkuObj(row) };
+    Logger.log('[오프라인] SKU 저장 ' + id + ' by ' + auth.email + (!isNew && prevLine !== line ? ' (품목군 ' + prevLine + ' → ' + line + ')' : ''));
+    return { success: true, sku: _offSkuObj(row), mappedCodes: mappedCodes, lineChanged: !isNew && prevLine !== line };
   });
 }
 
