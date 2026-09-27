@@ -35,7 +35,8 @@ const SUITES = [
   ['offline-monthly.test.js', '월별 실적 해석(2-A) — 업로드 전후 OUT 원천, 원장 집계·미매칭, 모델 정규화, 단가·달성률·합계'],
   ['offline-targets.test.js', '목표·단가·이관 API(2-A) — 진행현황 파싱·제안·반영(멱등, input 보존)·9월 대조, 납품가 이관, 원본 읽기 전용'],
   ['offline-targets-ui.test.js','목표 관리 화면(2-A) — 월별 입력(원장 읽기 전용·부분 갱신·붙여넣기·전월 복사), 단가, 이관 미리보기→반영'],
-  ['offline-inventory.test.js', '재고·판매 지표(2-B) — 정상재고·일평균·재고일수·점포·결품·미매칭, 일별 판매·재고 추이, 설정·단가 삭제·SKU 수정']
+  ['offline-inventory.test.js', '재고·판매 지표(2-B) — 정상재고·일평균·재고일수·점포·결품·미매칭, 일별 판매·재고 추이, 설정·단가 삭제·SKU 수정'],
+  ['offline-screens-ui.test.js', '오프라인 화면(2-B) — 채널 현황 KPI·카드·매트릭스, 채널 상세 표·일별·점포·CSV, 재고 현황 매트릭스·경보·설정, 메모']
 ];
 
 let failed = 0;
