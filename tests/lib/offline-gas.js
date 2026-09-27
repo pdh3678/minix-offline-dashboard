@@ -47,7 +47,39 @@ function formatDate(d, tz, fmt) {
     .replace('HH', p.hour).replace('mm', p.minute).replace('ss', p.second);
 }
 
+/* 기존(원본) 스프레드시트 목 — **읽기 메서드만** 있다. 코드가 원본에 쓰기를 시도하면 "is not a function"으로
+   바로 실패한다(원본은 절대 수정하지 않는다는 원칙을 테스트로 고정). calls에 호출한 메서드를 기록한다.
+   tabs: { 탭이름: { grid: 2차원 배열(1행부터), merges: [[행, 열, 행수, 열수]] (1-based) } } */
+const LEGACY_ID = 'LEGACY-TEST-ID';
+function makeLegacySS(tabs) {
+  const calls = [];
+  const sheets = {};
+  Object.keys(tabs).forEach(name => {
+    const { grid, merges } = tabs[name];
+    const width = grid.reduce((m, r) => Math.max(m, r.length), 0);
+    sheets[name] = {
+      getName: () => name,
+      getLastRow: () => { calls.push('getLastRow'); return grid.length; },
+      getLastColumn: () => { calls.push('getLastColumn'); return width; },
+      getRange: (r, c, nr, nc) => ({
+        getValues() {
+          calls.push('getValues');
+          const out = [];
+          for (let i = 0; i < nr; i++) { const row = grid[r - 1 + i] || []; const o = []; for (let j = 0; j < nc; j++) { const v = row[c - 1 + j]; o.push(v === undefined ? '' : v); } out.push(o); }
+          return out;
+        },
+        getMergedRanges() {
+          calls.push('getMergedRanges');
+          return (merges || []).map(([mr, mc, mnr, mnc]) => ({ getRow: () => mr, getColumn: () => mc, getNumRows: () => mnr, getNumColumns: () => mnc }));
+        }
+      })
+    };
+  });
+  return { _calls: calls, getSheetByName: n => { calls.push('getSheetByName'); return sheets[n] || null; } };
+}
+
 /* opts.today   — _offToday() 고정값('YYYY-MM-DD')
+   opts.legacy  — 기존 스프레드시트 탭 목({탭: {grid, merges}}) — 주면 LEGACY_PROGRESS_SHEET_ID로 연결
    opts.noSheetId — OFFLINE_SHEET_ID를 비운 상태
    opts.setup   — true면 offline_setupSheets까지 실행해 둔다 */
 function loadOfflineGas(opts) {
@@ -55,11 +87,14 @@ function loadOfflineGas(opts) {
   const main = { '실적통합': makeSheet('실적통합', [[], []]) };
   const scriptProps = { SESSION_SECRET_V1: 'test-secret-v1-0123456789' };
   if (!opts.noSheetId) scriptProps.OFFLINE_SHEET_ID = OFFLINE_ID;
+  if (opts.legacy) scriptProps.LEGACY_PROGRESS_SHEET_ID = LEGACY_ID;
   const cacheStore = installGlobals(main, { scriptProps });
   const off = makeOfflineSS();
+  const legacy = opts.legacy ? makeLegacySS(opts.legacy) : null;
   global.SpreadsheetApp.openById = id => {
-    if (id !== OFFLINE_ID) throw new Error('openById: 모르는 ID ' + id);
-    return off;
+    if (id === OFFLINE_ID) return off;
+    if (legacy && id === LEGACY_ID) return legacy;
+    throw new Error('openById: 모르는 ID ' + id);
   };
   const locks = { taken: 0 };
   global.LockService.getDocumentLock = () => ({
@@ -73,7 +108,7 @@ function loadOfflineGas(opts) {
   if (fs.existsSync(targets)) vm.runInContext(fs.readFileSync(targets, 'utf8'), ctx, { filename: 'apps-script-offline-targets.js' });
   if (opts.today) ctx._offToday = () => opts.today;
   if (opts.setup) ctx.offline_setupSheets();
-  return { ctx, off, cacheStore, locks, tab: name => off.getSheetByName(name) };
+  return { ctx, off, legacy, cacheStore, locks, tab: name => off.getSheetByName(name) };
 }
 
 // 탭의 데이터 행(헤더 제외, 값 있는 행까지)

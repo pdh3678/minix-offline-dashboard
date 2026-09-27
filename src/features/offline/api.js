@@ -8,17 +8,21 @@
    재시도·세션 연장·AUTH_REQUIRED 처리는 공용 _gasFetch를 그대로 탄다. */
 const OFFLINE_UPLOAD_TIMEOUT_MS=300000; // 하이마트 1개 파일 반영이 수십 초까지 걸릴 수 있다
 const OFFLINE_CALL_TIMEOUT_MS=45000;
+// 원장·원본 스프레드시트를 통째로 읽고 쓰는 액션 — 업로드와 같은 긴 타임아웃
+const OFFLINE_LONG_ACTIONS={offline_upload:true,offline_migrateProgress:true,offline_migratePrices:true};
 
 async function _offlineCall(action,data){
   if(!_getToken())throw new Error('로그인이 필요합니다.');
   const body=JSON.stringify({action,session:_getToken(),data:data||{}});
   const j=await _gasFetch(_getGasUrl(),{method:'POST',body,
-    _timeoutMs:action==='offline_upload'?OFFLINE_UPLOAD_TIMEOUT_MS:OFFLINE_CALL_TIMEOUT_MS});
+    _timeoutMs:OFFLINE_LONG_ACTIONS[action]?OFFLINE_UPLOAD_TIMEOUT_MS:OFFLINE_CALL_TIMEOUT_MS});
   if(!j)throw new Error('서버 응답이 비었습니다.');
   if(j.error){
     if(j.error==='AUTH_REQUIRED')throw new Error('세션이 만료되었습니다. 다시 로그인해주세요.');
     // 오프라인 파일(offline.gs)을 추가하기 전 배포본은 offline_ 액션을 모른다
     if(/presence 전용|_offlineHandle is not defined/.test(j.error))throw new Error('Apps Script 배포본에 오프라인 기능이 아직 없습니다 — apps-script-offline.js 추가 후 재배포가 필요합니다.');
+    // 2-A 파일(offline_targets)을 추가하기 전 배포본
+    if(/_off(GetMonthly|SaveTargets|GetPrices|SavePrices|MigrateProgress|MigratePrices) is not defined/.test(j.error))throw new Error('Apps Script 배포본에 목표·단가·이관 기능이 아직 없습니다 — apps-script-offline-targets.js(offline_targets) 추가 후 재배포가 필요합니다.');
     throw new Error(j.error);
   }
   return j;

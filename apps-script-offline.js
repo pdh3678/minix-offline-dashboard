@@ -611,6 +611,13 @@ function _offlineHandle(action, data, auth) {
     else if (action === 'offline_getUnmatched') out = _offGetUnmatched();
     else if (action === 'offline_getUploadLog') out = _offGetUploadLog();
     else if (action === 'offline_getStatus') out = _offGetStatus();
+    // 2-A (apps-script-offline-targets.js)
+    else if (action === 'offline_getMonthly') out = _offGetMonthly(data || {});
+    else if (action === 'offline_saveTargets') out = _offSaveTargets(data || {}, auth);
+    else if (action === 'offline_getPrices') out = _offGetPrices();
+    else if (action === 'offline_savePrices') out = _offSavePrices(data || {}, auth);
+    else if (action === 'offline_migrateProgress') out = _offMigrateProgress(data || {}, auth);
+    else if (action === 'offline_migratePrices') out = _offMigratePrices(data || {}, auth);
     else throw new Error('알 수 없는 오프라인 액션: ' + action);
     return _json(out);
   } catch (err) {
