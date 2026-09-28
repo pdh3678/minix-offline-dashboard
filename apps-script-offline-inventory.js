@@ -30,20 +30,22 @@
 var OFF_INV_LEVELS = ['channel', 'category', 'line', 'model', 'sku'];
 
 /* (channel_id, 원본코드) → { sku: {skuId, name, line, model, category, active, order}, stockType } | null
-   _offMonthlyCompute와 같은 규칙: 활성 매핑(sku_id 있음) + 품목군이 있는 SKU만 해석한다. 비활성 SKU도 과거 집계에는 쓴다. */
-function _offCodeResolver(skuRows, mappingRows) {
+   _offMonthlyCompute와 같은 규칙: 활성 매핑(sku_id 있음) + 품목군이 있는 SKU만 해석한다. 비활성 SKU도 과거 집계에는 쓴다.
+   매핑은 코드체계채널로 찾는다 — channelRows(채널마스터 행)를 주면 트레이더스 코드도 이마트 매핑으로 해석된다. */
+function _offCodeResolver(skuRows, mappingRows, channelRows) {
   var skus = {};
   skuRows.forEach(function (s) {
     if (!s[0] || !s[2]) return;
     skus[s[0]] = { skuId: s[0], name: s[1], line: s[2], model: _offCanonModel(s[2], s[3]).model, category: OFFLINE_LINE_CATEGORY[s[2]] || '',
       option: s[4], active: s[5] || 'Y', order: s[6] };
   });
+  var cs = _offCodeSystem(channelRows);
   var byKey = {};
-  mappingRows.forEach(function (m) { if (m[0] && m[1] && m[2] && skus[m[2]]) byKey[m[0] + OFF_KEY_SEP + m[1]] = m; });
+  mappingRows.forEach(function (m) { if (m[0] && m[1] && m[2] && skus[m[2]]) byKey[cs(m[0]) + OFF_KEY_SEP + m[1]] = m; });
   return {
     skus: skus,
     resolve: function (ch, code) {
-      var m = byKey[ch + OFF_KEY_SEP + code];
+      var m = byKey[cs(ch) + OFF_KEY_SEP + code];
       if (!m) return null;
       return { sku: skus[m[2]], stockType: OFF_STOCK_TYPES.indexOf(m[3]) >= 0 ? m[3] : '정상' };
     }
@@ -92,7 +94,7 @@ function _offInventoryCompute(input) {
   var N = Math.max(1, Math.round(S['재고일수_판매기준일수']));
   var OVER = S['재고경보_과다일수'], RISK = S['재고경보_결품위험일수'], STALE = S['데이터지연_경고일수'];
   var today = input.today, storeFor = input.storeChannel || '';
-  var R = _offCodeResolver(input.skus, input.mappings);
+  var R = _offCodeResolver(input.skus, input.mappings, input.channels);
 
   // 채널 — 재고 최신 기준일(재고_채널일별), 판매 최신 기준일(업로드로그)
   var chans = _offChannelInfo(input.channels), chIdx = {};
@@ -250,10 +252,11 @@ function _offInventoryCompute(input) {
   });
   groups.forEach(function (g) { delete g._rank; });
 
-  var names = {};
-  (input.unmatchedTab || []).forEach(function (r) { if (r[0] && r[1] && r[2]) names[r[0] + OFF_KEY_SEP + r[1]] = r[2]; });
-  input.mappings.forEach(function (m) { var k = m[0] + OFF_KEY_SEP + m[1]; if (m[4] && !names[k]) names[k] = m[4]; });
-  var unmatched = umOrder.map(function (k) { var u = UM[k]; u.name = names[k] || ''; return u; })
+  // 상품명 — 미매칭코드·코드매핑은 코드체계채널(트레이더스 → emart) 이름으로 쌓여 있다
+  var names = {}, csN = _offCodeSystem(input.channels);
+  (input.unmatchedTab || []).forEach(function (r) { if (r[0] && r[1] && r[2]) names[csN(r[0]) + OFF_KEY_SEP + r[1]] = r[2]; });
+  input.mappings.forEach(function (m) { var k = csN(m[0]) + OFF_KEY_SEP + m[1]; if (m[4] && !names[k]) names[k] = m[4]; });
+  var unmatched = umOrder.map(function (k) { var u = UM[k]; u.name = names[csN(u.channelId) + OFF_KEY_SEP + u.code] || ''; return u; })
     .filter(function (u) { return u.stock || u.windowQty; })
     .sort(function (a, b) { return (chRank[a.channelId] - chRank[b.channelId]) || (b.stock - a.stock) || (a.code < b.code ? -1 : 1); });
 
@@ -318,7 +321,7 @@ function _offDailySalesCompute(input) {
   var onlyCh = input.channelId || '';
   var chans = _offChannelInfo(input.channels), chIdx = {};
   chans.forEach(function (c) { chIdx[c.channelId] = c; });
-  var R = _offCodeResolver(input.skus, input.mappings);
+  var R = _offCodeResolver(input.skus, input.mappings, input.channels);
   var keys = {}, days = {}, periods = {}, um = {}, hasInst = {};
   var tot = { qty: 0, inst: 0, unmatchedQty: 0 };
   input.sales.forEach(function (r) {
@@ -384,7 +387,7 @@ function _offGetDailySales(data) {
 function _offInventoryTrendCompute(input) {
   var chans = _offChannelInfo(input.channels), chIdx = {};
   chans.forEach(function (c) { chIdx[c.channelId] = c; });
-  var R = _offCodeResolver(input.skus, input.mappings);
+  var R = _offCodeResolver(input.skus, input.mappings, input.channels);
   var f = { skuId: input.skuId || '', model: input.model || '', line: input.line || '', category: input.category || '' };
   var filtered = !!(f.skuId || f.model || f.line || f.category);
   var pts = {}, dates = {};

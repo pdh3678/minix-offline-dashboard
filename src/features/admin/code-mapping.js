@@ -34,7 +34,7 @@ function _cmRender(){
     ${_CM.err?`<div class="up-err">${_escHtml(_CM.err)}</div>`:''}
     <div id="cmUnmatched">${_CM.unmatched?'':'<div class="mp-empty">불러오는 중…</div>'}</div></div>
   <div class="card"><div class="card-hd">전체 매핑<span class="card-hd-r" id="cmCount"></span></div>
-    ${_cmFiltersHtml()}<div id="cmTable"></div></div>`;
+    ${_cmSharedNoteHtml()}${_cmFiltersHtml()}<div id="cmTable"></div></div>`;
   if(_CM.unmatched){
     renderMappingPanel('cmUnmatched',_CM.unmatched.map(u=>({channelId:u.channelId,code:u.code,name:u.name,count:u.count,lastSeen:u.lastSeen})),
       {showChannel:true,showStats:true,onSaved:()=>_cmLoad()});
@@ -44,11 +44,20 @@ function _cmRender(){
 
 function _cmSetTab(t){_CM.tab=t;_cmRender();}
 
+// 매핑의 주인 채널만(코드체계채널 = 자기 자신) — 트레이더스처럼 다른 채널 매핑을 빌려 쓰는 채널은 따로 보이지 않는다
+function _cmOwnChannels(){return ((OFFLINE_MASTERS&&OFFLINE_MASTERS.channels)||[]).filter(c=>!c.codeSystem||c.codeSystem===c.channelId);}
+function _cmSharedNoteHtml(){
+  const chs=(OFFLINE_MASTERS&&OFFLINE_MASTERS.channels)||[];
+  const shared=chs.filter(c=>c.codeSystem&&c.codeSystem!==c.channelId);
+  if(!shared.length)return '';
+  return `<div class="off-muted tg-help" style="margin:0 0 8px">${shared.map(c=>`<b>${_escHtml(c.name)}</b>는 <b>${_escHtml(_offlineChannelName(c.codeSystem))}</b>`).join(', ')} 코드 매핑을 그대로 씁니다 — ${_escHtml(_offlineChannelName(shared[0].codeSystem))} 매핑 하나가 두 채널에 같이 적용되고, 미매칭 코드도 ${_escHtml(_offlineChannelName(shared[0].codeSystem))} 이름으로 한 번만 뜹니다.</div>`;
+}
+
 function _cmFiltersHtml(){
-  const f=_CM.filter,m=OFFLINE_MASTERS||{};
+  const f=_CM.filter;
   const opt=(v,label,cur)=>`<option value="${_escAttr(v)}"${v===cur?' selected':''}>${_escHtml(label)}</option>`;
   return `<div class="cm-filters">
-    <select class="f-sel" onchange="_cmSetFilter('ch',this.value)">${opt('','전체 채널',f.ch)}${(m.channels||[]).map(c=>opt(c.channelId,c.name,f.ch)).join('')}</select>
+    <select class="f-sel" onchange="_cmSetFilter('ch',this.value)">${opt('','전체 채널',f.ch)}${_cmOwnChannels().map(c=>opt(c.channelId,c.name,f.ch)).join('')}</select>
     <select class="f-sel" onchange="_cmSetFilter('line',this.value)">${opt('','전체 품목군',f.line)}${PRODUCT_CATALOG.map(l=>opt(l.key,l.label,f.line)).join('')}${opt('-','비활성(SKU 없음)',f.line)}</select>
     <select class="f-sel" onchange="_cmSetFilter('type',this.value)">${opt('','전체 재고구분',f.type)}${OfflineResolver.STOCK_TYPES.map(t=>opt(t,t,f.type)).join('')}</select>
     <input class="f-inp" type="search" placeholder="원본코드·상품명·SKU 검색" value="${_escAttr(f.q)}" oninput="_cmSetFilter('q',this.value,true)">

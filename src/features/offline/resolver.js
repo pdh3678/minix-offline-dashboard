@@ -13,24 +13,34 @@
   const SEP = '\u0001';
   const STOCK_TYPES = ['정상', '전시', '리퍼'];
 
-  // masters = offline_getMasters 응답({skus, mappings, ...})
+  /* 코드체계채널 — 코드매핑을 빌려 쓰는 채널(트레이더스 → emart). 매핑은 코드체계채널 한 벌이 두 채널에 같이 적용된다.
+     masters.channels[].codeSystem(GAS offline_getMasters)이 없으면 자기 자신 */
+  function codeSystemOf(masters) {
+    const m = {};
+    ((masters && masters.channels) || []).forEach(c => { if (c.channelId) m[c.channelId] = c.codeSystem || c.channelId; });
+    return ch => m[ch] || ch;
+  }
+
+  // masters = offline_getMasters 응답({skus, mappings, channels, ...})
   function createResolver(masters) {
     const skuById = {};
     ((masters && masters.skus) || []).forEach(s => { skuById[s.skuId] = s; });
+    const cs = codeSystemOf(masters);
     const byKey = {};
     ((masters && masters.mappings) || []).forEach(m => {
-      if (m.channelId && m.code && m.skuId) byKey[m.channelId + SEP + m.code] = m;
+      if (m.channelId && m.code && m.skuId) byKey[cs(m.channelId) + SEP + m.code] = m;
     });
     return {
       // → { skuId, stockType, sku, mapping } | null(미매칭)
       resolve(channelId, code) {
-        const m = byKey[channelId + SEP + String(code == null ? '' : code)];
+        const m = byKey[cs(channelId) + SEP + String(code == null ? '' : code)];
         if (!m) return null;
         return { skuId: m.skuId, stockType: m.stockType || '정상', sku: skuById[m.skuId] || null, mapping: m };
       },
-      isMapped(channelId, code) { return !!byKey[channelId + SEP + code]; },
+      isMapped(channelId, code) { return !!byKey[cs(channelId) + SEP + code]; },
       // 코드 목록 중 매핑 없는 것만(순서 유지)
-      unmatched(channelId, codes) { return (codes || []).filter(c => !byKey[channelId + SEP + c]); }
+      unmatched(channelId, codes) { return (codes || []).filter(c => !byKey[cs(channelId) + SEP + c]); },
+      codeSystem: cs
     };
   }
 
@@ -64,5 +74,5 @@
     return Object.keys(hits).sort((a, b) => hits[b] - hits[a] || (a < b ? -1 : 1)).map(id => ({ skuId: id, model, hits: hits[id] }));
   }
 
-  return { createResolver, extractModel, guessStockType, suggestSkus, STOCK_TYPES };
+  return { createResolver, codeSystemOf, extractModel, guessStockType, suggestSkus, STOCK_TYPES };
 });

@@ -85,6 +85,19 @@ console.log('\n[5] SKU 제안 — 같은 모델이 이미 매핑된 SKU');
   check('비활성화 매핑은 제안 근거가 아님', R.suggestSkus(masters, 'MNVC-100G_OFF', '').length === 0);
 }
 
+console.log('\n[5-2] 코드체계채널 — 트레이더스는 이마트 매핑을 그대로 쓴다');
+{
+  const m = { skus: masters.skus, channels: [{ channelId: 'emart', codeSystem: 'emart' }, { channelId: 'traders', codeSystem: 'emart' }, { channelId: 'etland', codeSystem: 'etland' }],
+    mappings: [{ channelId: 'emart', code: '8809770080968', skuId: 'SKU-0001', stockType: '정상' }, { channelId: 'emart', code: '2790198885265', skuId: 'SKU-0001', stockType: '전시' }] };
+  const r = R.createResolver(m);
+  check('트레이더스 코드 → 이마트 매핑(SKU·재고구분)', r.resolve('traders', '8809770080968').skuId === 'SKU-0001' && r.resolve('traders', '2790198885265').stockType === '전시');
+  check('이마트는 그대로', r.resolve('emart', '8809770080968').skuId === 'SKU-0001');
+  check('다른 코드체계(전자랜드)는 이마트 매핑을 보지 않음', r.resolve('etland', '8809770080968') === null);
+  check('미매칭 판정도 코드체계 기준', r.isMapped('traders', '8809770080968') && JSON.stringify(r.unmatched('traders', ['8809770080968', 'X'])) === '["X"]');
+  check('codeSystem 함수', r.codeSystem('traders') === 'emart' && r.codeSystem('etland') === 'etland' && r.codeSystem('모르는채널') === '모르는채널');
+  check('channels가 없는 옛 응답이면 자기 자신', R.createResolver({ mappings: m.mappings }).resolve('traders', '8809770080968') === null);
+}
+
 console.log('\n[6] 브라우저 로드 — 전역 OfflineResolver');
 {
   const sandbox = {};

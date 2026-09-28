@@ -364,10 +364,21 @@ function _offCacheGen() {
   try { return CacheService.getScriptCache().get('offline:gen') || '0'; } catch (e) { return '0'; }
 }
 
-// 활성 매핑(sku_id가 있는 행)의 (channel_id, 원본코드) 집합
-function _offMappedKeys(mappingRows) {
+/* 코드체계채널 — 코드매핑을 빌려 쓰는 채널(트레이더스 → emart)을 매핑의 주인 채널로 바꾼다.
+   코드매핑·미매칭코드는 코드체계채널 기준 한 벌만 둔다(같은 이마트 상품코드가 트레이더스로 두 번 뜨지 않게).
+   channelRows = 채널마스터 _offReadRows 행. 열이 없거나 빈칸이면 자기 자신 */
+function _offCodeSystem(channelRows) {
+  var m = {};
+  (channelRows || []).forEach(function (r) { if (r[0]) m[r[0]] = String(r[8] == null ? '' : r[8]).trim() || r[0]; });
+  return function (ch) { return m[ch] || ch; };
+}
+function _offCodeSystemOf(ss) { return _offCodeSystem(_offReadRows(_offSheet(ss, 'channel'), OFF_TABS.channel)); }
+
+// 활성 매핑(sku_id가 있는 행)의 (코드체계채널, 원본코드) 집합
+function _offMappedKeys(mappingRows, codeSys) {
+  var cs = codeSys || function (c) { return c; };
   var set = {};
-  mappingRows.forEach(function (r) { if (r[0] && r[1] && r[2]) set[r[0] + OFF_KEY_SEP + r[1]] = true; });
+  mappingRows.forEach(function (r) { if (r[0] && r[1] && r[2]) set[cs(r[0]) + OFF_KEY_SEP + r[1]] = true; });
   return set;
 }
 
@@ -615,14 +626,17 @@ function _offCodesOf(rec) {
   return out;
 }
 
-// 미매칭코드 갱신 — 이번 업로드에서 매핑 없는 코드를 누적(발견횟수 = 나온 업로드 수), 매핑된 코드는 정리
+// 미매칭코드 갱신 — 이번 업로드에서 매핑 없는 코드를 누적(발견횟수 = 나온 업로드 수), 매핑된 코드는 정리.
+// ch가 다른 채널의 코드체계를 빌려 쓰면(트레이더스) 그 코드체계채널(emart) 이름으로 쌓는다
 function _offUpdateUnmatched(ctx, ch, codes) {
-  var mapped = _offMappedKeys(_offReadRows(_offSheet(ctx.ss, 'mapping'), OFF_TABS.mapping));
+  var cs = _offCodeSystemOf(ctx.ss);
+  ch = cs(ch);
+  var mapped = _offMappedKeys(_offReadRows(_offSheet(ctx.ss, 'mapping'), OFF_TABS.mapping), cs);
   var def = OFF_TABS.unmatched, sheet = _offSheet(ctx.ss, 'unmatched');
   var rows = _offReadRows(sheet, def);
   var prev = rows.length;
   var idx = {};
-  rows.forEach(function (r) { idx[r[0] + OFF_KEY_SEP + r[1]] = r; });
+  rows.forEach(function (r) { idx[cs(r[0]) + OFF_KEY_SEP + r[1]] = r; });
   var list = [];
   Object.keys(codes).sort().forEach(function (code) {
     var k = ch + OFF_KEY_SEP + code;
@@ -638,7 +652,7 @@ function _offUpdateUnmatched(ctx, ch, codes) {
       rows.push(row); idx[k] = row;
     }
   });
-  _offWriteAll(sheet, def, rows.filter(function (r) { return !mapped[r[0] + OFF_KEY_SEP + r[1]]; }), prev);
+  _offWriteAll(sheet, def, rows.filter(function (r) { return !mapped[cs(r[0]) + OFF_KEY_SEP + r[1]]; }), prev);
   return list;
 }
 
@@ -722,9 +736,10 @@ function _offGetMasters() {
 
 function _offGetUnmatched() {
   var ss = _offSS();
-  var mapped = _offMappedKeys(_offReadRows(_offSheet(ss, 'mapping'), OFF_TABS.mapping));
+  var cs = _offCodeSystemOf(ss);
+  var mapped = _offMappedKeys(_offReadRows(_offSheet(ss, 'mapping'), OFF_TABS.mapping), cs);
   var items = _offReadRows(_offSheet(ss, 'unmatched'), OFF_TABS.unmatched)
-    .filter(function (r) { return r[0] && r[1] && !mapped[r[0] + OFF_KEY_SEP + r[1]]; })
+    .filter(function (r) { return r[0] && r[1] && !mapped[cs(r[0]) + OFF_KEY_SEP + r[1]]; })
     .map(function (r) { return { channelId: r[0], code: r[1], name: r[2], firstSeen: r[3], lastSeen: r[4], count: Number(r[5]) || 0 }; });
   items.sort(function (a, b) { return (b.count - a.count) || (b.lastSeen < a.lastSeen ? -1 : b.lastSeen > a.lastSeen ? 1 : 0); });
   return { success: true, items: items };
@@ -864,7 +879,8 @@ function _offSaveSku(data, auth) {
 
 /* 코드매핑 추가·수정·비활성화 (여러 건 한 번에).
    items: [{ op: 'upsert'|'deactivate', channelId, code, skuId, stockType, name, note }]
-   비활성화 = sku_id를 비우고 비고에 기록 — 행(이력)은 남기고, 코드는 다시 미매칭 목록으로 올린다. */
+   비활성화 = sku_id를 비우고 비고에 기록 — 행(이력)은 남기고, 코드는 다시 미매칭 목록으로 올린다.
+   channelId는 코드체계채널로 바꿔 저장한다(트레이더스로 와도 emart 매핑 한 벌 — 두 채널에 같이 적용된다). */
 function _offSaveMapping(data, auth) {
   var items = data.items || [];
   if (!items.length) throw new Error('저장할 매핑이 없습니다.');
@@ -873,18 +889,21 @@ function _offSaveMapping(data, auth) {
     var today = _offToday();
     var skuIds = {}, channelIds = {};
     _offReadRows(_offSheet(ss, 'sku'), OFF_TABS.sku).forEach(function (r) { if (r[0]) skuIds[r[0]] = true; });
-    _offReadRows(_offSheet(ss, 'channel'), OFF_TABS.channel).forEach(function (r) { if (r[0]) channelIds[r[0]] = true; });
+    var chRows = _offReadRows(_offSheet(ss, 'channel'), OFF_TABS.channel);
+    chRows.forEach(function (r) { if (r[0]) channelIds[r[0]] = true; });
+    var cs = _offCodeSystem(chRows);
 
     var mDef = OFF_TABS.mapping, mSheet = _offSheet(ss, 'mapping');
     var mRows = _offReadRows(mSheet, mDef);
     var mPrev = mRows.length;
     var idx = {};
-    mRows.forEach(function (r) { idx[r[0] + OFF_KEY_SEP + r[1]] = r; });
+    mRows.forEach(function (r) { idx[cs(r[0]) + OFF_KEY_SEP + r[1]] = r; });
     var mappedNow = {}, deactivated = [];
     items.forEach(function (it) {
       var ch = String(it.channelId || '').trim(), code = String(it.code || '').trim();
       if (!channelIds[ch]) throw new Error('채널마스터에 없는 channel_id 입니다: ' + ch);
       if (!code) throw new Error('원본코드가 비었습니다.');
+      ch = cs(ch);
       var k = ch + OFF_KEY_SEP + code;
       var row = idx[k];
       if (it.op === 'deactivate') {
@@ -911,11 +930,11 @@ function _offSaveMapping(data, auth) {
     var uDef = OFF_TABS.unmatched, uSheet = _offSheet(ss, 'unmatched');
     var uRows = _offReadRows(uSheet, uDef);
     var uPrev = uRows.length;
-    var kept = uRows.filter(function (r) { return !mappedNow[r[0] + OFF_KEY_SEP + r[1]]; });
+    var kept = uRows.filter(function (r) { return !mappedNow[cs(r[0]) + OFF_KEY_SEP + r[1]]; });
     var inList = {};
-    kept.forEach(function (r) { inList[r[0] + OFF_KEY_SEP + r[1]] = true; });
+    kept.forEach(function (r) { inList[cs(r[0]) + OFF_KEY_SEP + r[1]] = true; });
     deactivated.forEach(function (r) {
-      if (!inList[r[0] + OFF_KEY_SEP + r[1]]) kept.push([r[0], r[1], r[4], today, today, 0]);
+      if (!inList[cs(r[0]) + OFF_KEY_SEP + r[1]]) kept.push([cs(r[0]), r[1], r[4], today, today, 0]);
     });
     _offWriteAll(uSheet, uDef, kept, uPrev);
     _offInvalidateCache();

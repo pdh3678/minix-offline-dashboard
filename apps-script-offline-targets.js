@@ -166,17 +166,19 @@ function _offMonthlyCompute(input) {
   });
 
   // 2) 판매원장 → OUT 실적(업로드 달만). day는 그 날, period는 기간종료일이 속한 달
+  //    코드는 코드체계채널로 찾는다(트레이더스 판매 → 이마트 매핑)
   var skuById = {};
   input.skus.forEach(function (s) { if (s[0]) skuById[s[0]] = s; });
+  var cs = _offCodeSystem(input.channels);
   var mapByKey = {};
-  input.mappings.forEach(function (m) { if (m[0] && m[1] && m[2]) mapByKey[m[0] + OFF_KEY_SEP + m[1]] = m; });
+  input.mappings.forEach(function (m) { if (m[0] && m[1] && m[2]) mapByKey[cs(m[0]) + OFF_KEY_SEP + m[1]] = m; });
   var unmatched = {};
   input.sales.forEach(function (s) {
     var ch = s[3], ym = String(s[1] || '').slice(0, 7);
     if (!inRange[ym] || !chInfo[ch] || !isUploadMonth(ch, ym)) return;
     var qty = Number(s[6]) || 0;
     if (!qty) return;
-    var m = mapByKey[ch + OFF_KEY_SEP + s[5]];
+    var m = mapByKey[cs(ch) + OFF_KEY_SEP + s[5]];
     var sku = m && skuById[m[2]];
     if (!sku || !sku[2]) {
       var uk = [ym, ch, s[5]].join(OFF_KEY_SEP);
