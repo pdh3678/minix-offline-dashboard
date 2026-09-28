@@ -69,6 +69,9 @@ const LEGACY = () => ({ '26년 진행현황': progressGrid(), '납품가 수수�
 
 function env() {
   const g = loadOfflineGas({ setup: true, today: TODAY, legacy: LEGACY() });
+  // 2-A 시점의 채널마스터 — 트레이더스는 업로드 없는 채널이었다(이 테스트가 "업로드 없는 채널" 예시로 쓴다).
+  // 트레이더스 분리(2026-09-28) 이후 초기값은 활성·업로드시작월 2026-09라 여기서 되돌린다.
+  const tr = g.tab('채널마스터')._grid.find(r => r[0] === 'traders'); tr[3] = 'N'; tr[5] = '';
   const w = (tab, key, rows) => g.ctx._offWriteBlock(g.tab(tab), g.ctx.OFF_TABS[key], g.tab(tab).getLastRow() + 1, rows);
   w('제품마스터', 'sku', [['SKU-0001', '더 플렌더 MAX', '더플렌더', '더 플렌더 MAX', '', 'Y', '', ''], ['SKU-0002', '더 플렌더 mini', '더플렌더', '더 플렌더 mini', '', 'Y', '', ''],
     ['SKU-0003', '미니 건조기 PRO+', '미니건조기', '미니 건조기 PRO+', '', 'Y', '', '']]);

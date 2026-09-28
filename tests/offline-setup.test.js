@@ -21,7 +21,7 @@ function check(l, c, extra) {
 const EXPECT = [
   ['README', ['탭', '설명']],
   ['제품마스터', ['sku_id', '표준명', '품목군', '모델', '옵션', '활성', '정렬순서', '비고']],
-  ['채널마스터', ['channel_id', '채널명', '유형', '활성', '정렬순서', '업로드시작월']],
+  ['채널마스터', ['channel_id', '채널명', '유형', '활성', '정렬순서', '업로드시작월', '원천업태명', '점포명접두어', '코드체계채널']],
   ['코드매핑', ['channel_id', '원본코드', 'sku_id', '재고구분', '원본상품명', '등록일', '등록자', '비고']],
   ['점포마스터', ['channel_id', '점포코드', '점포명', '지역', '최초등록일', '최근확인일']],
   ['판매원장', ['기간시작', '기간종료', '단위', 'channel_id', '점포코드', '원본코드', '수량', '설치완료수량', '출처', 'upload_id']],
@@ -69,11 +69,12 @@ function textColsFromFormats(sheet) {
     });
     const ch = dataRows(tab('채널마스터'));
     check('채널마스터 초기 데이터 7행', ch.length === 7, ch);
-    check('  ↳ 하이마트·전자랜드·이마트만 활성', ch.filter(r => r[3] === 'Y').map(r => r[0]).join(',') === 'himart,etland,emart', ch.map(r => r[0] + r[3]));
-    check('  ↳ 값이 명세 그대로(업로드시작월: 하이마트·전자랜드·이마트 2026-09, 나머지 빈칸)', JSON.stringify(ch.map(r => r.slice(0, 4).concat([r[5]]))) === JSON.stringify([
-      ['himart', '하이마트', '전문점', 'Y', '2026-09'], ['etland', '전자랜드', '전문점', 'Y', '2026-09'], ['emart', '이마트', '할인점', 'Y', '2026-09'],
-      ['traders', '트레이더스', '창고형', 'N', ''], ['shinsegae', '신세계', '백화점', 'N', ''], ['theablen', '디에이블앤', '폐쇄몰', 'N', ''],
-      ['special', '기타 특판', '특판', 'N', '']]), ch);
+    check('  ↳ 하이마트·전자랜드·이마트·트레이더스 활성', ch.filter(r => r[3] === 'Y').map(r => r[0]).join(',') === 'himart,etland,emart,traders', ch.map(r => r[0] + r[3]));
+    check('  ↳ 값이 명세 그대로(업로드시작월 2026-09 = 업로드 채널, 원천업태명·점포명접두어·코드체계채널)', JSON.stringify(ch.map(r => r.slice(0, 4).concat(r.slice(5, 9)))) === JSON.stringify([
+      ['himart', '하이마트', '전문점', 'Y', '2026-09', '', '', 'himart'], ['etland', '전자랜드', '전문점', 'Y', '2026-09', '', '', 'etland'],
+      ['emart', '이마트', '할인점', 'Y', '2026-09', '이마트', 'EM', 'emart'], ['traders', '트레이더스', '창고형', 'Y', '2026-09', '트레이더스', 'TR', 'emart'],
+      ['shinsegae', '신세계', '백화점', 'N', '', '', '', 'shinsegae'], ['theablen', '디에이블앤', '폐쇄몰', 'N', '', '', '', 'theablen'],
+      ['special', '기타 특판', '특판', 'N', '', '', '', 'special']]), ch);
     const readme = dataRows(tab('README'));
     check('README에 "직접 수정 금지" 안내', readme.some(r => /직접 수정 금지/.test(r[0]) && /대시보드/.test(r[1])), readme[0]);
     check('README가 원장 탭을 전부 설명', EXPECT.slice(1).every(([n]) => readme.some(r => r[0] === n)));
@@ -163,11 +164,11 @@ function textColsFromFormats(sheet) {
     ['목표실적_월', '단가마스터', '이관로그'].forEach(n => { delete off._sheets[n]; off._order.splice(off._order.indexOf(n), 1); });
     tab('README')._grid.length = 12;
     const rep = ctx.offline_setupSheets();
-    check('채널마스터 확장 보고(업로드시작월 추가)', rep.extended.length === 1 && JSON.stringify(rep.extended[0].added) === '["업로드시작월"]', rep.extended);
+    check('채널마스터 확장 보고(업로드시작월 + 트레이더스 분리 3열)', rep.extended.length === 1 && JSON.stringify(rep.extended[0].added) === '["업로드시작월","원천업태명","점포명접두어","코드체계채널"]', rep.extended);
     check('2-A 탭 3개 생성', JSON.stringify(rep.created) === JSON.stringify(['목표실적_월', '단가마스터', '이관로그']), rep.created);
     check('헤더가 다른 탭 없음', rep.mismatched.length === 0, rep.mismatched);
     const rows = dataRows(ch);
-    check('업로드시작월 초기값: himart·etland·emart = 2026-09, 나머지 빈칸', rows.map(r => r[0] + '=' + r[5]).join() === 'himart=2026-09,etland=2026-09,emart=2026-09,traders=,shinsegae=,theablen=,special=', rows.map(r => r[5]));
+    check('업로드시작월 초기값: himart·etland·emart·traders = 2026-09, 나머지 빈칸', rows.map(r => r[0] + '=' + r[5]).join() === 'himart=2026-09,etland=2026-09,emart=2026-09,traders=2026-09,shinsegae=,theablen=,special=', rows.map(r => r[5]));
     check('기존 값(사람이 바꾼 활성)은 그대로', rows[3][3] === 'Y' && rows[3][0] === 'traders');
     check('새 열은 텍스트 서식', ch._formats.some(f => f.r === 1 && f.c === 6 && f.f === '@'));
     check('README에 새 탭 설명이 추가됨', ['목표실적_월', '단가마스터', '이관로그'].every(n => dataRows(tab('README')).some(r => r[0] === n)));
@@ -214,6 +215,30 @@ function textColsFromFormats(sheet) {
     delete off._sheets['설정'];
     check('  ↳ 탭이 없어도(setup 재실행 전) 기본값으로 동작', ctx._offReadSettings(off)['재고경보_과다일수'] === 90);
     check('README에 설정 설명', dataRows(tab('README')).some(r => r[0] === '설정'));
+  }
+
+  console.log('\n[12] 트레이더스 분리 — 2-B 채널마스터(6열)에 원천업태명·점포명접두어·코드체계채널을 덧붙이고, 이번 한 번만 트레이더스를 켠다');
+  {
+    const { ctx, tab } = loadOfflineGas({ setup: true });
+    const J = JSON.stringify;
+    const ch = tab('채널마스터');
+    ch._grid.forEach(row => { row.length = 6; });           // 2-B 모양(업로드시작월까지)
+    ch._grid[4][3] = 'N'; ch._grid[4][5] = '';               // 2-B 시점의 트레이더스(비활성, 업로드 없음)
+    ch._grid[3][5] = '2026-08';                              // 사람이 이마트 업로드시작월을 바꿔 둠
+    ch._grid[1][5] = '';                                     // 사람이 하이마트 업로드시작월을 비워 둠
+    const rep = ctx.offline_setupSheets();
+    check('채널마스터 확장 보고(3열)', rep.extended.length === 1 && J(rep.extended[0].added) === J(['원천업태명', '점포명접두어', '코드체계채널']), rep.extended);
+    const rows = dataRows(ch), by = id => rows.find(r => r[0] === id);
+    check('이마트 = 이마트 / EM / emart, 트레이더스 = 트레이더스 / TR / emart, 나머지 코드체계 = 자기 자신',
+      J(by('emart').slice(6)) === J(['이마트', 'EM', 'emart']) && J(by('traders').slice(6)) === J(['트레이더스', 'TR', 'emart']) &&
+      by('himart')[8] === 'himart' && by('special')[8] === 'special' && by('himart')[6] === '', rows.map(r => r.slice(6)));
+    check('트레이더스 활성 Y + 업로드시작월 2026-09', by('traders')[3] === 'Y' && by('traders')[5] === '2026-09', by('traders'));
+    check('사람이 고친 업로드시작월(이마트 2026-08·하이마트 빈칸)은 그대로', by('emart')[5] === '2026-08' && by('himart')[5] === '', [by('emart')[5], by('himart')[5]]);
+    check('새 열은 텍스트 서식', [7, 8, 9].every(c => ch._formats.some(f => f.r === 1 && f.c === c && f.f === '@')));
+    ch._grid[4][3] = 'N';                                    // 사람이 트레이더스를 다시 끔
+    const rep2 = ctx.offline_setupSheets();
+    check('다시 실행하면 확장 없이 확인만 — 트레이더스를 다시 켜지 않음', rep2.extended.length === 0 && dataRows(ch).find(r => r[0] === 'traders')[3] === 'N', rep2);
+    check('README 채널마스터 설명에 새 열', dataRows(tab('README')).some(r => r[0] === '채널마스터' && /원천업태명/.test(r[1]) && /코드체계채널/.test(r[1])));
   }
 
   console.log('\n[8] 날짜 산술 — 타임존 영향 없음');
