@@ -35,7 +35,8 @@ var OFF_STOCK_TYPES = ['정상', '전시', '리퍼'];
 var OFF_FILE_TYPES = {
   EMART_STOCK:        { channelId: 'emart',  kind: 'snapshot' },
   EMART_DAILY_SALES_STORE: { channelId: 'emart', kind: 'period', split: 'biz' },
-  EMART_DAILY_SALES:  { channelId: 'emart',  kind: 'period' },
+  // 트레이더스가 합쳐진 SKU별 합계 파일 — 반영 거절(판별은 브라우저가 해서 안내한다). 점포별 일별 매출을 쓴다
+  EMART_DAILY_SALES:  { channelId: 'emart',  kind: 'period', blocked: "트레이더스가 합쳐진 합계 파일이라 반영할 수 없습니다. '기간별매출(상품별)_일별상세' 파일을 사용하세요" },
   ETLAND_SALES:       { channelId: 'etland', kind: 'period' },
   ETLAND_STOCK:       { channelId: 'etland', kind: 'snapshot' },
   HIMART_SALES_STOCK: { channelId: 'himart', kind: 'himart' }
@@ -409,6 +410,7 @@ function _offUpload(data, auth) {
   var meta = data.meta || {}, rec = data.records || {};
   var ft = OFF_FILE_TYPES[meta.fileType];
   if (!ft) throw new Error('알 수 없는 파일 유형입니다: ' + meta.fileType);
+  if (ft.blocked) throw new Error(ft.blocked);
   if (meta.channelId !== ft.channelId) throw new Error(meta.fileType + ' 파일의 채널은 ' + ft.channelId + ' 여야 합니다 (받은 값: ' + meta.channelId + ')');
   if (ft.kind === 'period') {
     if (!_offIsDate(meta.replaceStart) || !_offIsDate(meta.replaceEnd) || meta.replaceStart > meta.replaceEnd) {

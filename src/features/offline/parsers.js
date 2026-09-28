@@ -50,8 +50,10 @@
       sig: ['업태명', '점포코드', '상품코드', '상품명'], needDateCols: true,
       cols: { biz: '업태명', store: '점포코드', storeName: '점포명', code: '상품코드', name: '상품명' }
     },
+    // 트레이더스가 합쳐진 SKU별 합계 파일 — 판별은 하되 반영하지 않는다(blocked). 점포별 일별 매출을 쓴다
     EMART_DAILY_SALES: {
-      label: '이마트 일별 매출', channelId: 'emart', kind: 'period',
+      label: '이마트 일별 매출(합계)', channelId: 'emart', kind: 'period',
+      blocked: "트레이더스가 합쳐진 합계 파일이라 반영할 수 없습니다. '기간별매출(상품별)_일별상세' 파일을 사용하세요",
       sig: ['상품코드', '상품명'], needDateCols: true,
       cols: { code: '상품코드', name: '상품명' }
     }
@@ -168,7 +170,7 @@
     const data = rows.slice(found.headerIndex + 1).filter(r => !isBlankRow(r));
     const fileDate = dateFromFileName(opts.fileName);
     const res = {
-      ok: true, type: found.type, typeLabel: t.label, channelId: t.channelId, kind: t.kind, split: t.split || '',
+      ok: true, type: found.type, typeLabel: t.label, channelId: t.channelId, kind: t.kind, split: t.split || '', blocked: t.blocked || '',
       headerRow: found.headerIndex + 1, rawRowCount: data.length, fileDate,
       baseDate: '', needsDate: false, period: null, year: null,
       records: { sales: [], storeStock: [], channelStock: [], himart: [], stores: [], names: {} },

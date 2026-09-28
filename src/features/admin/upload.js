@@ -80,6 +80,7 @@ function _upTogglePanel(id){const f=_upFile(id);f.panelOpen=!f.panelOpen;_upRend
 function _upPlan(f){
   const p=f.parse;
   if(!p||!p.ok)return{error:f.error||'파일을 해석하지 못했습니다.'};
+  if(p.blocked)return{error:p.blocked,blocked:true}; // 반영하지 않는 양식(트레이더스가 합쳐진 이마트 합계 파일)
   if(p.kind==='period'){
     const s=f.edits.replaceStart||(p.period&&p.period.start)||'',e=f.edits.replaceEnd||(p.period&&p.period.end)||'';
     if(!s||!e)return{error:'교체 기간을 정하세요.'};
@@ -200,7 +201,7 @@ function _upCardHtml(f){
   const chip=`<span class="up-chip ${f.status}">${_UP_STATUS_LABEL[f.status]}</span>`;
   const busy=f.status==='applying'||_UP.busyAll;
   const acts=`<div class="up-acts">
-    ${p&&p.ok?`<button type="button" class="btn-primary up-btn" ${busy?'disabled':''} onclick="_upApply(${f.id})">${f.status==='done'?'다시 반영':'반영'}</button>`:''}
+    ${p&&p.ok?`<button type="button" class="btn-primary up-btn" ${busy||p.blocked?'disabled':''} ${p.blocked?'title="반영할 수 없는 양식"':''} onclick="_upApply(${f.id})">${f.status==='done'?'다시 반영':'반영'}</button>`:''}
     <button type="button" class="btn-cancel up-btn" ${busy?'disabled':''} onclick="_upRemove(${f.id})">제거</button></div>`;
   const typeSel=`<span class="f-lbl">유형</span><select class="f-sel" ${busy?'disabled':''} onchange="_upSetType(${f.id},this.value)">
     ${p&&p.ok?'':'<option value="">— 유형 선택 —</option>'}
@@ -239,7 +240,7 @@ function _upCardHtml(f){
     ${_upSplitHtml(p)}
     <div class="up-row">${umHtml}</div>
     ${p.warnings.length?`<ul class="up-warn">${p.warnings.map(w=>'<li>'+_escHtml(w)+'</li>').join('')}</ul>`:''}
-    ${f.error?`<div class="up-err">${_escHtml(f.error)}</div>`:(plan.error&&p.kind==='period'?`<div class="up-err">${_escHtml(plan.error)}</div>`:'')}
+    ${f.error?`<div class="up-err">${_escHtml(f.error)}</div>`:(plan.error&&(p.kind==='period'||plan.blocked)?`<div class="up-err">${plan.blocked?'⛔ ':''}${_escHtml(plan.error)}</div>`:'')}
     ${f.result?_upResultHtml(f.result):''}
     ${f.panelOpen?`<div class="up-panel" id="upMap-${f.id}"></div>`:''}
   </div>`;

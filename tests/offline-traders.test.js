@@ -136,10 +136,35 @@ function env() {
     check('전체 반영 순서: 점포별 매출 → 재고', ctx._upApplyOrder().map(f => f.parse.type).join() === 'EMART_DAILY_SALES_STORE,EMART_STOCK', ctx._upApplyOrder().map(f => f.parse.type));
   }
 
+  console.log('\n[5] 기존 EMART_DAILY_SALES(합계) 양식 차단 — 판별은 유지, 반영 버튼 비활성·안내');
+  {
+    const { ctx } = loadFrontend(PROJ, 'get UP(){return _UP;}');
+    const box = {};
+    ctx.document.getElementById = id => (box[id] = box[id] || { innerHTML: '', style: {}, classList: { add() {}, remove() {}, toggle() {}, contains: () => false } });
+    vmSet(ctx, { skus: [], mappings: [], stores: [], channels: [{ channelId: 'emart', name: '이마트', bizNames: '이마트', codeSystem: 'emart' }] });
+    const calls = [];
+    ctx._offlineCall = async (a, d) => { calls.push(a); return { success: true, applied: {}, replaceRange: {}, unmatched: [], warnings: [] }; };
+    const old = [['상품 코드', '상품명', '9월 1일', '합계', '평균'], [MAX, '가상', 2, 2, 0]];
+    const pr = P.parseRows(old, { fileName: '기간별매출(상품별)_일별요약_20260925104853.xlsx', today: TODAY });
+    ctx.__X__.UP.files.push({ id: 9, name: '기간별매출(상품별)_일별요약_20260925104853.xlsx', status: 'ready', parse: pr, edits: {}, rows: old });
+    const html = ctx._upCardHtml(ctx.__X__.UP.files[0]);
+    check('판별은 합계 양식으로', pr.type === 'EMART_DAILY_SALES' && pr.ok);
+    check('카드: 반영 버튼 disabled + "트레이더스가 합쳐진 합계 파일이라 반영할 수 없습니다" 안내', /<button[^>]*disabled[^>]*onclick="_upApply\(9\)"/.test(html) &&
+      /⛔ 트레이더스가 합쳐진 합계 파일이라 반영할 수 없습니다\. '기간별매출\(상품별\)_일별상세' 파일을 사용하세요/.test(html), html.slice(0, 1500));
+    check('전체 반영 목록에서 빠짐', ctx._upApplyOrder().length === 0);
+    (async () => {
+      const ok = await ctx._upApply(9);
+      check('직접 불러도 서버에 보내지 않음', ok === false && calls.indexOf('offline_upload') < 0, calls);
+      finish();
+    })();
+  }
+})();
+
+function finish() {
   console.log('\n' + '─'.repeat(50));
   console.log('통과 ' + pass + ' / 실패 ' + fail);
   process.exit(fail ? 1 : 0);
-})();
+}
 
 // 이마트 점포별 일별 매출 합성 파일 — lines: [업태명, 점포코드, 점포명, 상품코드, 날짜별 수량...]
 function storeSales(dates, lines) {

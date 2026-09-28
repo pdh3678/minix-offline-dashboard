@@ -41,6 +41,7 @@ const TABS = ['판매원장', '재고_채널일별', '재고_점포최신', '하
 const counts = () => TABS.map(t => dataRows(gas.tab(t)).length).join('/');
 const sim = [];
 for (const { f, r } of parsed) {
+  if (r.blocked) { sim.push({ 파일: f, 반영: '차단 — ' + r.blocked }); continue; } // 반영하지 않는 양식(트레이더스가 합쳐진 이마트 합계)
   const res1 = gas.ctx._offUpload(P.toUploadPayload(r, { fileName: f }), { email: 'local@athomecorp.com' });
   const c1 = counts();
   gas.ctx._offUpload(P.toUploadPayload(r, { fileName: f }), { email: 'local@athomecorp.com' });

@@ -82,15 +82,16 @@ const himartLedger = t => ledger(t).filter(r => r[3] === 'himart');
     check('다른 채널(하이마트) 행은 그대로', ledger(tab).some(x => x[3] === 'himart' && x[6] === 5));
   }
 
-  console.log('\n[A3] 이마트 일별 매출 — 점포 없는 day 레코드');
+  console.log('\n[A3] 이마트 일별 매출(합계 양식) — 트레이더스가 합쳐진 파일이라 반영 거절(2026-09-28)');
   {
     const { ctx, tab } = loadOfflineGas({ setup: true, today: TODAY });
-    const r = upload(ctx, emartDaily(['9월 1일', '9월 2일'], [['8800000000011', 2, 0], ['2790000000022', 0, -1]]), '기간별매출(상품별)_일별요약_20260925104853.xlsx');
-    const e = ledger(tab);
-    check('0 제외 2행, 점포코드 빈칸, 바코드 문자열', e.length === 2 && e.every(x => x[4] === '' && x[3] === 'emart') && e[0][5] === '8800000000011', e);
-    check('교체 범위 9/1~9/2', r.replaceRange.start === '2026-09-01' && r.replaceRange.end === '2026-09-02');
-    upload(ctx, emartDaily(['9월 1일', '9월 2일'], [['8800000000011', 2, 0], ['2790000000022', 0, -1]]), 'x_20260925.xlsx');
-    check('재업로드 후 동일', ledger(tab).length === 2);
+    const f = emartDaily(['9월 1일', '9월 2일'], [['8800000000011', 2, 0], ['2790000000022', 0, -1]]);
+    const pr = P.parseRows(f, { fileName: '기간별매출(상품별)_일별요약_20260925104853.xlsx', today: TODAY });
+    check('판별은 그대로(EMART_DAILY_SALES) + blocked 안내', pr.ok && pr.type === 'EMART_DAILY_SALES' && /트레이더스가 합쳐진 합계 파일/.test(pr.blocked), pr.blocked);
+    let err = null;
+    try { upload(ctx, f, '기간별매출(상품별)_일별요약_20260925104853.xlsx'); } catch (e) { err = e; }
+    check('서버도 반영 거절 — "일별상세 파일을 사용하세요"', err && /일별상세/.test(err.message), err && err.message);
+    check('  ↳ 원장·업로드로그에 아무것도 남지 않음', ledger(tab).length === 0 && dataRows(tab('업로드로그')).length === 0);
   }
 
   console.log('\n[B] 스냅샷형 — 채널일별 이력 누적, 점포최신은 더 최신일 때만');
