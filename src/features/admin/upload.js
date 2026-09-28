@@ -114,11 +114,29 @@ async function _upApply(id,quiet){
   return f.status==='done';
 }
 /* 전체 반영 — 준비된 파일을 하나씩. 하이마트는 누적 차이 계산이라 기준일 오름차순으로 맨 뒤에 모아 보낸다
-   (순서를 뒤섞어도 서버 결과는 같지만, 오름차순이면 매번 "다음 스냅샷 재계산"이 생기지 않아 가장 빠르다). */
+   (순서를 뒤섞어도 서버 결과는 같지만, 오름차순이면 매번 "다음 스냅샷 재계산"이 생기지 않아 가장 빠르다).
+   이마트 점포별 일별 매출은 이마트 재고보다 먼저 — 매출 파일의 업태명으로 점포 → 채널(이마트·트레이더스)을 먼저 익혀야
+   재고 파일(업태명 없음)의 점포를 점포마스터로 가를 수 있다. */
 function _upApplyOrder(){
   const ready=_UP.files.filter(f=>f.status==='ready'&&!_upPlan(f).error);
   const hm=ready.filter(f=>f.parse.channelId==='himart').sort((a,b)=>_upPlan(a).baseDate.localeCompare(_upPlan(b).baseDate));
-  return ready.filter(f=>f.parse.channelId!=='himart').concat(hm);
+  const rank=f=>f.parse.split==='biz'?0:1;
+  return ready.filter(f=>f.parse.channelId!=='himart').sort((a,b)=>rank(a)-rank(b)).concat(hm);
+}
+// 업태명 → 채널(채널마스터 원천업태명, 쉼표로 여러 개) — 미리보기용. 반영 때는 서버가 같은 규칙으로 정한다
+function _upBizChannel(biz){
+  const b=String(biz||'').trim();
+  return ((OFFLINE_MASTERS&&OFFLINE_MASTERS.channels)||[]).find(c=>String(c.bizNames||'').split(',').map(x=>x.trim()).indexOf(b)>=0)||null;
+}
+// 한 파일에 여러 채널이 섞인 파일(split) — 채널별 레코드·점포·판매 합계
+function _upSplitHtml(p){
+  if(p.split!=='biz'||!p.summary.byBiz)return '';
+  const parts=p.summary.byBiz.map(b=>{
+    const c=_upBizChannel(b.biz);
+    return c?`<span class="up-chip ready">${_escHtml(c.name)}</span> 업태명 "${_escHtml(b.biz)}" · 레코드 <b>${b.rows}</b> · 점포 <b>${b.stores}</b> · 판매 <b>${b.qty}</b>`
+      :`<span class="up-chip error">채널 없음</span> 업태명 "${_escHtml(b.biz)}" · 레코드 <b>${b.rows}</b> · 판매 <b>${b.qty}</b> — 채널마스터 원천업태명에 없어 반영을 보류합니다`;
+  });
+  return `<div class="up-stats">${parts.join('<br>')}</div>`;
 }
 async function _upApplyAll(){
   if(_UP.busyAll)return;
@@ -218,6 +236,7 @@ function _upCardHtml(f){
     <div class="up-card-hd"><span class="up-fname">${_escHtml(f.name)}</span>${chip}<span class="off-muted">${_escHtml(_offlineChannelName(p.channelId))}</span>${acts}</div>
     <div class="up-row">${typeSel}${dateCtl}</div>
     <div class="up-stats">헤더 <b>${p.headerRow}</b>행 · 원본 <b>${p.rawRowCount}</b>행 · 반영 예정 ${planned} · 점포 <b>${p.summary.storeCount}</b> · 원본코드 <b>${p.summary.codeCount}</b>종${gubun}</div>
+    ${_upSplitHtml(p)}
     <div class="up-row">${umHtml}</div>
     ${p.warnings.length?`<ul class="up-warn">${p.warnings.map(w=>'<li>'+_escHtml(w)+'</li>').join('')}</ul>`:''}
     ${f.error?`<div class="up-err">${_escHtml(f.error)}</div>`:(plan.error&&p.kind==='period'?`<div class="up-err">${_escHtml(plan.error)}</div>`:'')}
@@ -233,6 +252,9 @@ function _upResultHtml(r){
   if(a.stockStore!=null)parts.push('점포 재고 '+a.stockStore);
   if(a.himartSnap!=null)parts.push('누적스냅샷 '+a.himartSnap);
   if(a.storesAdded)parts.push('새 점포 '+a.storesAdded);
+  if(a.storesMoved)parts.push('채널 옮긴 점포 '+a.storesMoved);
+  // 채널별(한 파일에 여러 채널 — 이마트·트레이더스)
+  if(a.byChannel)parts.push(Object.keys(a.byChannel).map(c=>_offlineChannelName(c)+' '+a.byChannel[c].rows+'행·판매 '+a.byChannel[c].qty).join(' / '));
   let range=rr.start?rr.start+' ~ '+rr.end:(rr.baseDate||'');
   if(rr.himart)range+=' · 판매 재계산: '+rr.himart.recomputed.map(x=>x.date+'('+(x.unit==='day'?'day':x.start+'~ period')+')').join(', ');
   return `<div class="up-result">✓ 반영 완료 — ${_escHtml(parts.join(' · '))}<br>교체 범위: ${_escHtml(range)} · 미매칭 ${r.unmatched?r.unmatched.length:0}개</div>`+

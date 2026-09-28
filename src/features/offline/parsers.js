@@ -43,13 +43,21 @@
       cols: { ym: '조회일자', storeName: '점포명', store: '점포코드', name: '상품명', stock: '현재수량',
         monthIn: '매입량', code: '상품코드', monthSale: '매출량' }
     },
+    /* 이마트 포털 '기간별매출(상품별)_일별상세' — 업태명(이마트·트레이더스) × 점포 × 상품 × 날짜 열.
+       split: 'biz' — 한 파일에 여러 채널이 섞여 있어 레코드마다 업태명을 싣고, GAS가 채널마스터 원천업태명으로 채널을 정한다 */
+    EMART_DAILY_SALES_STORE: {
+      label: '이마트 점포별 일별 매출', channelId: 'emart', kind: 'period', split: 'biz',
+      sig: ['업태명', '점포코드', '상품코드', '상품명'], needDateCols: true,
+      cols: { biz: '업태명', store: '점포코드', storeName: '점포명', code: '상품코드', name: '상품명' }
+    },
     EMART_DAILY_SALES: {
       label: '이마트 일별 매출', channelId: 'emart', kind: 'period',
       sig: ['상품코드', '상품명'], needDateCols: true,
       cols: { code: '상품코드', name: '상품명' }
     }
   };
-  const TYPE_ORDER = ['HIMART_SALES_STOCK', 'ETLAND_SALES', 'ETLAND_STOCK', 'EMART_STOCK', 'EMART_DAILY_SALES'];
+  // 점포별 일별 매출(업태명·점포코드 포함)도 일별 매출(합계)의 시그니처를 만족하므로 반드시 그보다 앞에 둔다
+  const TYPE_ORDER = ['HIMART_SALES_STOCK', 'ETLAND_SALES', 'ETLAND_STOCK', 'EMART_STOCK', 'EMART_DAILY_SALES_STORE', 'EMART_DAILY_SALES'];
   const OPTIONAL_COLS = { gubun: true, ym: true, region: true, branch: true, reserved: true, week: true };
 
   // ── 값 정규화 ──
@@ -160,7 +168,7 @@
     const data = rows.slice(found.headerIndex + 1).filter(r => !isBlankRow(r));
     const fileDate = dateFromFileName(opts.fileName);
     const res = {
-      ok: true, type: found.type, typeLabel: t.label, channelId: t.channelId, kind: t.kind,
+      ok: true, type: found.type, typeLabel: t.label, channelId: t.channelId, kind: t.kind, split: t.split || '',
       headerRow: found.headerIndex + 1, rawRowCount: data.length, fileDate,
       baseDate: '', needsDate: false, period: null, year: null,
       records: { sales: [], storeStock: [], channelStock: [], himart: [], stores: [], names: {} },
@@ -176,7 +184,8 @@
       if (res.needsDate) res.warnings.push('파일명에서 기준일을 찾지 못했습니다 — 기준일을 선택해야 반영할 수 있습니다.');
     }
 
-    if (found.type === 'EMART_DAILY_SALES') parseEmartDaily(res, hdr, data, col, opts, num, bad);
+    if (found.type === 'EMART_DAILY_SALES_STORE') parseEmartDailyStore(res, hdr, data, col, opts, num, bad);
+    else if (found.type === 'EMART_DAILY_SALES') parseEmartDaily(res, hdr, data, col, opts, num, bad);
     else if (found.type === 'ETLAND_SALES') parseEtlandSales(res, data, cell, num, bad);
     else parseSnapshot(res, found.type, data, cell, num, bad);
 
@@ -195,8 +204,9 @@
     res.records.stores.push({ code, name: String(name || '').trim(), region: String(region || '').trim() });
   }
 
-  // 날짜 열을 세로로 풀어 day 레코드(점포 없음). 합계·평균 열은 날짜 헤더가 아니라서 자연히 빠진다.
-  function parseEmartDaily(res, hdr, data, col, opts, num, bad) {
+  /* 이마트 일별 매출 두 양식이 같이 쓰는 날짜 열('9월 1일' · '09월01일') → [{ i, date }]. res.year·res.period도 채운다.
+     합계·평균 열은 날짜 헤더가 아니라서 자연히 빠진다. */
+  function emartDateCols(res, hdr, opts) {
     const today = opts.today || new Date().toISOString().slice(0, 10);
     const ty = +today.slice(0, 4), tm = +today.slice(5, 7);
     const dateCols = [];
@@ -211,6 +221,12 @@
     res.year = opts.year ? +opts.year : (dateCols.length ? +dateCols[dateCols.length - 1].date.slice(0, 4) : ty);
     const dates = dateCols.map(c => c.date).sort();
     res.period = dates.length ? { start: dates[0], end: dates[dates.length - 1] } : null;
+    return dateCols;
+  }
+
+  // 날짜 열을 세로로 풀어 day 레코드(점포 없음)
+  function parseEmartDaily(res, hdr, data, col, opts, num, bad) {
+    const dateCols = emartDateCols(res, hdr, opts);
     data.forEach(r => {
       const code = toCode(r[col.code]);
       if (!code) { bad.skipped++; return; }
@@ -220,6 +236,40 @@
         if (qty) res.records.sales.push({ s: c.date, e: c.date, store: '', code, qty, inst: '' });
       });
     });
+  }
+
+  /* 점포별 일별 매출 — 날짜 열을 세로로 풀어 점포 단위 day 레코드. 레코드·점포마다 업태명(biz)을 싣는다(채널은 GAS가 정함).
+     같은 날·점포·상품·업태가 여러 줄이면 합산, 0은 저장하지 않고 음수(반품)는 그대로.
+     summary.byBiz = 업태명별 [{ biz, rows(레코드), stores, qty }] — 미리보기에서 채널별로 나눠 보여 준다 */
+  function parseEmartDailyStore(res, hdr, data, col, opts, num, bad) {
+    const dateCols = emartDateCols(res, hdr, opts);
+    const agg = {}, order = [], seenStore = {}, byBiz = {}, bizOrder = [];
+    data.forEach(r => {
+      const code = toCode(r[col.code]), store = toCode(r[col.store]);
+      const biz = String(r[col.biz] == null ? '' : r[col.biz]).trim();
+      if (!code || !store) { bad.skipped++; return; }
+      addName(res, code, r[col.name]);
+      if (!seenStore[store]) {
+        seenStore[store] = true;
+        res.records.stores.push({ code: store, name: String(r[col.storeName] == null ? '' : r[col.storeName]).trim(), region: '', biz });
+      }
+      if (!byBiz[biz]) { byBiz[biz] = { biz, rows: 0, stores: {}, qty: 0 }; bizOrder.push(biz); }
+      byBiz[biz].stores[store] = true;
+      dateCols.forEach(c => {
+        const qty = num(r[c.i]);
+        if (!qty) return;
+        const k = [c.date, store, code, biz].join('|');
+        if (!(k in agg)) { agg[k] = 0; order.push(k); }
+        agg[k] += qty;
+      });
+    });
+    order.forEach(k => {
+      if (!agg[k]) return;
+      const p = k.split('|');
+      res.records.sales.push({ s: p[0], e: p[0], store: p[1], code: p[2], qty: agg[k], inst: '', biz: p[3] });
+      byBiz[p[3]].rows++; byBiz[p[3]].qty += agg[k];
+    });
+    res.summary.byBiz = bizOrder.map(b => ({ biz: b || '(빈칸)', rows: byBiz[b].rows, stores: Object.keys(byBiz[b].stores).length, qty: byBiz[b].qty }));
   }
 
   // 판매일자 × 지점 × 모델명으로 합산해 day 레코드 — 같은 날 같은 모델이 여러 줄(반품 포함)일 수 있다

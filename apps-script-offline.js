@@ -30,8 +30,11 @@ var OFFLINE_PRODUCT_LINES = ['더플렌더', '더시프트', '더슬림', '더�
 var OFF_STOCK_TYPES = ['정상', '전시', '리퍼'];
 
 // 파일 유형 → 채널과 반영 방식. period = 기간 교체형, snapshot = 스냅샷형, himart = 스냅샷형 + 누적 차이 계산
+// split = 한 파일에 같은 코드체계의 여러 채널이 섞인 파일(이마트 포털: 이마트·트레이더스). channelId는 그 코드체계 채널이고,
+//         레코드마다 채널을 따로 정한다 — 'biz' = 레코드의 업태명 → 채널마스터 원천업태명
 var OFF_FILE_TYPES = {
   EMART_STOCK:        { channelId: 'emart',  kind: 'snapshot' },
+  EMART_DAILY_SALES_STORE: { channelId: 'emart', kind: 'period', split: 'biz' },
   EMART_DAILY_SALES:  { channelId: 'emart',  kind: 'period' },
   ETLAND_SALES:       { channelId: 'etland', kind: 'period' },
   ETLAND_STOCK:       { channelId: 'etland', kind: 'snapshot' },
@@ -373,6 +376,18 @@ function _offCodeSystem(channelRows) {
   return function (ch) { return m[ch] || ch; };
 }
 function _offCodeSystemOf(ss) { return _offCodeSystem(_offReadRows(_offSheet(ss, 'channel'), OFF_TABS.channel)); }
+function _offSplitList(v) { return String(v == null ? '' : v).split(',').map(function (x) { return x.trim(); }).filter(function (x) { return x; }); }
+/* split 파일 반영용 채널마스터 요약 — codeSys(코드체계채널), byBiz{원천업태명: 채널}, prefixes[{channelId, prefix}](긴 접두어 먼저) */
+function _offChannelMeta(ss) {
+  var rows = _offReadRows(_offSheet(ss, 'channel'), OFF_TABS.channel).filter(function (r) { return r[0]; });
+  var byBiz = {}, prefixes = [];
+  rows.forEach(function (r) {
+    _offSplitList(r[6]).forEach(function (b) { byBiz[b] = r[0]; });
+    _offSplitList(r[7]).forEach(function (x) { prefixes.push({ channelId: r[0], prefix: x }); });
+  });
+  prefixes.sort(function (a, b) { return b.prefix.length - a.prefix.length; });
+  return { rows: rows, codeSys: _offCodeSystem(rows), byBiz: byBiz, prefixes: prefixes };
+}
 
 // 활성 매핑(sku_id가 있는 행)의 (코드체계채널, 원본코드) 집합
 function _offMappedKeys(mappingRows, codeSys) {
@@ -407,20 +422,24 @@ function _offUpload(data, auth) {
   return _offWithLock(function () {
     var ctx = {
       ss: _offSS(), today: _offToday(), warnings: [], applied: {},
-      uploadId: 'U' + Utilities.formatDate(new Date(), 'Asia/Seoul', 'yyyyMMdd-HHmmss') + '-' + Utilities.getUuid().slice(0, 4)
+      uploadId: 'U' + Utilities.formatDate(new Date(), 'Asia/Seoul', 'yyyyMMdd-HHmmss') + '-' + Utilities.getUuid().slice(0, 4),
+      // split 파일 — 반영한 채널 목록(업로드로그 channel_id = 'emart,traders')과 점포코드 → 채널(점포마스터 기록용)
+      channels: null, storeChannel: null
     };
+    ctx.chMeta = _offChannelMeta(ctx.ss);
     try {
       var range = {};
-      if (ft.kind === 'period') range = _offApplyPeriodSales(ctx, meta, rec);
+      if (ft.kind === 'period') range = _offApplyPeriodSales(ctx, meta, rec, ft);
       else {
-        range = _offApplyStock(ctx, meta, rec);
+        range = _offApplyStock(ctx, meta, rec, ft);
         if (ft.kind === 'himart') range.himart = _offApplyHimart(ctx, meta, rec);
       }
       _offUpsertStores(ctx, meta.channelId, rec.stores || []);
       var unmatched = _offUpdateUnmatched(ctx, meta.channelId, _offCodesOf(rec));
       _offAppendLog(ctx, meta, auth, '성공', unmatched.length);
       _offInvalidateCache();
-      return { success: true, uploadId: ctx.uploadId, applied: ctx.applied, replaceRange: range, unmatched: unmatched, warnings: ctx.warnings };
+      return { success: true, uploadId: ctx.uploadId, applied: ctx.applied, replaceRange: range, unmatched: unmatched, warnings: ctx.warnings,
+        channels: ctx.channels || [meta.channelId] };
     } catch (e) {
       // 실패도 로그에 남긴다(다음 업로드가 같은 범위를 교체하므로 재시도하면 복구된다)
       try { _offAppendLog(ctx, meta, auth, '실패: ' + String((e && e.message) || e).slice(0, 300), 0); } catch (e2) {}
@@ -453,24 +472,48 @@ function _offValidateRecords(rec) {
   });
 }
 
-// A. 기간 교체형 — 이 채널의 판매원장 중 교체 기간 안의 행을 지우고 새 행을 넣는다
-function _offApplyPeriodSales(ctx, meta, rec) {
+/* A. 기간 교체형 — 이 채널의 판매원장 중 교체 기간 안의 행을 지우고 새 행을 넣는다.
+   split 'biz'(이마트 점포별 일별 매출) — 레코드의 업태명 → 채널마스터 원천업태명으로 채널(이마트·트레이더스)을 정하고,
+   파일에 들어 있는 채널마다 교체 기간의 행을 점포 유무와 관계없이 전부 지운 뒤 넣는다(예전 점포 빈칸 합계 행도 이때 정리).
+   채널마스터에 없는 업태명(또는 다른 코드체계 채널)의 행은 반영하지 않고 경고로 남긴다. */
+function _offApplyPeriodSales(ctx, meta, rec, ft) {
   var ch = meta.channelId, s = meta.replaceStart, e = meta.replaceEnd;
-  var rows = [], outside = 0;
+  var split = ft && ft.split === 'biz', cm = ctx.chMeta;
+  var rows = [], outside = 0, unknown = {}, byCh = {};
+  var chOfBiz = function (biz) { var c = cm.byBiz[String(biz == null ? '' : biz).trim()]; return c && cm.codeSys(c) === cm.codeSys(ch) ? c : ''; };
   (rec.sales || []).forEach(function (r) {
     if (r.s < s || r.e > e) { outside++; return; } // 교체 범위 밖을 넣으면 재업로드 때 중복된다
+    var rc = ch;
+    if (split) {
+      rc = chOfBiz(r.biz);
+      if (!rc) { var b = String(r.biz == null ? '' : r.biz).trim() || '(빈칸)'; unknown[b] = (unknown[b] || 0) + 1; return; }
+    }
     var qty = Number(r.qty) || 0;
     var inst = (r.inst === '' || r.inst == null) ? '' : (Number(r.inst) || 0);
     if (!qty && !inst) return;
-    rows.push([r.s, r.e, r.s === r.e ? 'day' : 'period', ch, r.store || '', r.code, qty, inst, 'upload', ctx.uploadId]);
+    var o = byCh[rc] || (byCh[rc] = { rows: 0, qty: 0 });
+    o.rows++; o.qty += qty;
+    rows.push([r.s, r.e, r.s === r.e ? 'day' : 'period', rc, r.store || '', r.code, qty, inst, 'upload', ctx.uploadId]);
   });
   if (outside) ctx.warnings.push('교체 기간(' + s + '~' + e + ') 밖의 레코드 ' + outside + '건은 반영하지 않았습니다');
+  var unk = Object.keys(unknown);
+  if (unk.length) ctx.warnings.push('채널마스터 원천업태명에 없는 업태명 ' + unk.map(function (b) { return '"' + b + '" ' + unknown[b] + '건'; }).join(', ') + '은 반영을 보류했습니다 — 채널마스터 원천업태명을 확인하세요');
+  var replace = {};
+  if (split) Object.keys(byCh).forEach(function (c) { replace[c] = true; });
+  else replace[ch] = true;
   var def = OFF_TABS.sales, sheet = _offSheet(ctx.ss, 'sales');
   var res = _offReplaceRows(sheet, def, _offReadRows(sheet, def), function (r) {
-    return !(r[3] === ch && r[0] >= s && r[1] <= e);
+    return !(replace[r[3]] && r[0] >= s && r[1] <= e);
   }, rows);
   ctx.applied.sales = rows.length;
   ctx.applied.salesRemoved = res.removed;
+  if (split) {
+    ctx.channels = Object.keys(replace);
+    ctx.applied.byChannel = byCh;
+    // 점포 → 채널(점포마스터 기록) — 판매가 0이어서 레코드가 없는 점포도 업태명으로 정한다
+    ctx.storeChannel = {};
+    (rec.stores || []).forEach(function (st) { var c = chOfBiz(st.biz); if (st.code && c) ctx.storeChannel[String(st.code).trim()] = c; });
+  }
   return { start: s, end: e };
 }
 
@@ -589,30 +632,37 @@ function _offHimartSalesFor(D, byDate, dates, uploadId) {
   return { rows: rows, unit: unit, start: start, mismatch: mismatch, samples: samples };
 }
 
-// 점포마스터 upsert — 새 점포는 추가, 있던 점포는 이름·지역(값이 있을 때만)과 최근확인일 갱신
+/* 점포마스터 upsert — 새 점포는 추가, 있던 점포는 이름·지역(값이 있을 때만)과 최근확인일 갱신.
+   점포코드는 코드체계(이마트·트레이더스 = emart) 안에서 한 채널에만 속한다 — split 파일이 점포의 채널을 정하면
+   (ctx.storeChannel) 같은 코드체계의 다른 채널로 있던 행을 그 채널로 옮긴다(최초등록일 유지). 채널을 못 정한 점포는 건드리지 않는다. */
 function _offUpsertStores(ctx, ch, stores) {
   if (!stores.length) return;
+  var cs = (ctx.chMeta && ctx.chMeta.codeSys) || function (c) { return c; };
   var def = OFF_TABS.store, sheet = _offSheet(ctx.ss, 'store');
   var rows = _offReadRows(sheet, def);
   var prev = rows.length;
   var idx = {};
-  rows.forEach(function (r) { idx[r[0] + OFF_KEY_SEP + r[1]] = r; });
-  var added = 0;
+  rows.forEach(function (r) { idx[cs(r[0]) + OFF_KEY_SEP + r[1]] = r; });
+  var added = 0, moved = 0;
   stores.forEach(function (s) {
     var code = String(s.code || '').trim();
     if (!code) return;
-    var row = idx[ch + OFF_KEY_SEP + code];
+    var target = ctx.storeChannel ? ctx.storeChannel[code] : ch;
+    if (!target) return;
+    var k = cs(target) + OFF_KEY_SEP + code, row = idx[k];
     if (!row) {
-      row = [ch, code, s.name || '', s.region || '', ctx.today, ctx.today];
-      rows.push(row); idx[ch + OFF_KEY_SEP + code] = row; added++;
+      row = [target, code, s.name || '', s.region || '', ctx.today, ctx.today];
+      rows.push(row); idx[k] = row; added++;
       return;
     }
+    if (row[0] !== target) { row[0] = target; moved++; }
     if (s.name) row[2] = s.name;
     if (s.region) row[3] = s.region;
     if (ctx.today > row[5]) row[5] = ctx.today;
   });
   _offWriteAll(sheet, def, rows, prev);
   ctx.applied.storesAdded = added;
+  if (moved) ctx.applied.storesMoved = moved;
 }
 
 // 레코드에 나온 원본코드 → 상품명
@@ -664,7 +714,7 @@ function _offAppendLog(ctx, meta, auth, status, unmatchedCount) {
   var def = OFF_TABS.uploadLog, sheet = _offSheet(ctx.ss, 'uploadLog');
   _offWriteBlock(sheet, def, sheet.getLastRow() + 1, [[
     ctx.uploadId, Utilities.formatDate(new Date(), 'Asia/Seoul', 'yyyy-MM-dd HH:mm:ss'), (auth && auth.email) || '',
-    String(meta.fileName || '').slice(0, 200), meta.fileType, meta.channelId, range,
+    String(meta.fileName || '').slice(0, 200), meta.fileType, (ctx.channels && ctx.channels.length ? ctx.channels.join(',') : meta.channelId), range,
     Number(meta.rawRowCount) || 0, appliedRows, unmatchedCount, ctx.warnings.join(' / ').slice(0, 2000), status
   ]]);
 }
@@ -798,21 +848,25 @@ function _offGetStatus() {
 
 /* 업로드로그(성공 행) → byCh[채널]의 salesLast(판매 업로드가 덮은 마지막 날)·stockLast(재고 마지막 기준일)·covered{날짜}.
    byCh에 없는 채널은 건너뛴다. 데이터 현황(_offGetStatus)과 재고 지표(판매 최신 기준일)가 같이 쓴다. */
+// channel_id가 'emart,traders'(한 파일에 여러 채널 — split 파일)면 각 채널에 같은 범위를 준다
 function _offLogCoverage(logRows, byCh) {
   logRows.forEach(function (r) {
     var ft = OFF_FILE_TYPES[r[4]];
-    var st = byCh[r[5]];
-    if (!ft || !st || r[11] !== '성공') return;
+    if (!ft || r[11] !== '성공') return;
     var parts = String(r[6] || '').split('~');
     var a = parts[0], b = parts[1] || parts[0];
     if (!_offIsDate(a) || !_offIsDate(b)) return;
-    if (ft.kind === 'period' || ft.kind === 'himart') {
-      if (b > st.salesLast) st.salesLast = b;
-      if (st.covered) for (var d = a; d <= b; d = _offAddDays(d, 1)) st.covered[d] = true;
-    }
-    if (ft.kind === 'snapshot' || ft.kind === 'himart') {
-      if (a > st.stockLast) st.stockLast = a;
-    }
+    _offSplitList(r[5]).forEach(function (ch) {
+      var st = byCh[ch];
+      if (!st) return;
+      if (ft.kind === 'period' || ft.kind === 'himart') {
+        if (b > st.salesLast) st.salesLast = b;
+        if (st.covered) for (var d = a; d <= b; d = _offAddDays(d, 1)) st.covered[d] = true;
+      }
+      if (ft.kind === 'snapshot' || ft.kind === 'himart') {
+        if (a > st.stockLast) st.stockLast = a;
+      }
+    });
   });
   return byCh;
 }
