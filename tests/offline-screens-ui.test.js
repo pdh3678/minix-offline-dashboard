@@ -152,11 +152,12 @@ function setup() {
     check('CSV — BOM, 헤더, 6행(미매칭 포함), 결품 Y', csv[0] === '﻿' && lines[0].indexOf('점포코드,점포명,지역,sku_id') > 0 && lines.length === 7 && lines.some(l => /,S2,S2점,강남,SKU-0001,.*,Y$/.test(l)), lines);
     // 이마트 안내 · 전자랜드 원장 안내 · 업로드 없는 채널
     X.OCD.ch = 'emart';
-    check('이마트: 당월 누적 기준 안내', /이마트는 점포별 일별 판매가 없어 당월판매는 재고 파일의 당월 누적/.test(ctx._ocdStoreHtml({ monthSaleSource: 'stock', monthSaleMonth: '2026-09', storeTotal: 3 })));
+    const emartNote = ctx._ocdStoreHtml({ monthSaleSource: 'ledger', monthSaleMonth: '2026-09', storeTotal: 3 });
+    check('이마트: "당월 누적 기준" 안내 없이 점포별 일별 판매 합(트레이더스 분리 후)', !/당월 누적/.test(emartNote) && /판매원장의 2026-09 점포별 일별 판매 합/.test(emartNote), emartNote.slice(0, 400));
     X.OCD.ch = 'himart';
     ctx._ofGo('offline-channel', 'etland');
     await settle();
-    check('전자랜드: 당월판매 = 판매원장 9월 점포 판매 안내', /당월판매 = 판매원장의 2026-09 점포 판매 합/.test(text(page('offline-channel'))), text(page('offline-channel')).slice(-600));
+    check('전자랜드: 당월판매 = 판매원장 9월 점포 판매 안내', /당월판매 = 판매원장의 2026-09 점포별 일별 판매 합/.test(text(page('offline-channel'))), text(page('offline-channel')).slice(-600));
     ctx._ofGo('offline-channel', 'traders');
     await settle();
     const tt = text(page('offline-channel'));

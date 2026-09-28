@@ -8,6 +8,7 @@
      [5] 기존 합계 양식: 판별은 유지, 반영 버튼 비활성 + 안내, 전체 반영에서 제외, 서버도 거절
      [6] 이마트 재고: 점포마스터 → 점포명접두어 → 기본 이마트(경고)로 채널, 채널일별·점포최신 채널별 교체, 이마트 + 트레이더스 = 파일 합계,
          재업로드 불변, 과거 파일은 점포최신을 건드리지 않음, 미리보기도 같은 규칙
+     [7] 화면: 트레이더스가 재고 지표·채널 현황 카드·데이터 기준일에 이마트와 같은 방식으로, 이마트·트레이더스 당월판매는 판매원장(점포별 일별)
 
    실행: node tests/offline-traders.test.js  (또는 node tests/run-all.js) */
 const path = require('path');
@@ -194,6 +195,41 @@ function env() {
     check('채널별 줄 + 못 정한 점포 안내', /이마트<\/span> 점포 <b>2<\/b> · 재고 <b>3<\/b>/.test(h) && /트레이더스<\/span> 점포 <b>2<\/b> · 재고 <b>8<\/b>/.test(h) && /못 정해 이마트로 1곳/.test(h), h);
   }
 
+  console.log('\n[7] 화면 — 두 파일을 올리면 트레이더스가 이마트와 같은 방식으로, 당월판매는 점포별 일별 판매');
+  (async () => {
+    const g = env();
+    const sales = P.parseRows(storeSales(['09월01일', '09월27일'], [['이마트', '1003', 'EM분당점', MAX, 2, 1], ['트레이더스', '2001', 'TR구성점', MAX, 3, 0]]),
+      { fileName: '기간별매출(상품별)_일별상세_20260928101437.xlsx', today: TODAY });
+    g.ctx._offUpload(P.toUploadPayload(sales, { fileName: 'a_20260928101437.xlsx' }), AUTH);
+    const stock = P.parseRows(stockFile([['EM분당점', '1003', MAX, 0, 9], ['TR구성점', '2001', MAX, 4, 9]]), { fileName: '재고현황_상세_20260928101559.xlsx', today: TODAY });
+    g.ctx._offUpload(P.toUploadPayload(stock, { fileName: '재고현황_상세_20260928101559.xlsx' }), AUTH);
+    const call = (a, d) => JSON.parse(g.ctx._offlineHandle(a, d || {}, AUTH));
+    const inv = call('offline_getInventory', { channelId: 'emart' });
+    const ch = id => inv.channels.find(c => c.channelId === id);
+    check('재고 지표: 트레이더스도 판매·재고 기준일 · 점포 수(이마트와 같은 방식)', ch('traders').hasStock && ch('traders').hasSales && ch('traders').salesDate === '2026-09-27' && ch('traders').storeTotal === 1, ch('traders'));
+    check('당월판매 원천: 이마트·트레이더스 = 판매원장(점포별 일별), 재고 파일 매출량(9) 대신 원장 3·3', ch('emart').monthSaleSource === 'ledger' && ch('traders').monthSaleSource === 'ledger' &&
+      inv.stores.find(s => s.store === '1003').monthSale === 3, [ch('emart'), inv.stores]);
+    check('  ↳ 이마트 1003: 재고 0 · 당월판매 3 → 점포 결품', inv.stores.find(s => s.store === '1003').out === true);
+    // 프론트 — 채널 현황 카드·데이터 기준일에 트레이더스
+    const { ctx: F, X } = loadFrontend(PROJ, 'get OF(){return OFFLINE_FILTER;}');
+    const box = {};
+    F.document.getElementById = id => (box[id] = box[id] || { id, innerHTML: '', value: '', textContent: '', dataset: {}, style: {}, getContext: () => ({}),
+      classList: { add() {}, remove() {}, toggle() {}, contains: () => false } });
+    F.Chart = function () { return { destroy() {} }; };
+    F._getToken = () => 'T';
+    F._gasFetch = async (url, opts) => { const b = JSON.parse(opts.body); return call(b.action, b.data); };
+    X.OF.ym = '2026-09';
+    F.navPage('offline-channels', null);
+    for (let i = 0; i < 12; i++) await new Promise(r => setTimeout(r, 0));
+    const h = box['page-offline-channels'].innerHTML;
+    const names = [...h.matchAll(/<span class="of-card-name">([^<]+)</g)].map(m => m[1]);
+    check('채널 현황 카드에 트레이더스(활성)', names.indexOf('트레이더스') >= 0 && names.indexOf('이마트') >= 0, names);
+    const i = h.indexOf("_ofGo('offline-channel','traders')"), card = h.slice(i, h.indexOf('<div class="of-card"', i + 10) < 0 ? h.length : h.indexOf('<div class="of-card"', i + 10)).replace(/<[^>]+>/g, ' ');
+    check('  ↳ 트레이더스 카드: 업로드 데이터 있음(정상재고 4)', !/업로드 데이터 없음/.test(card) && /정상재고\s+4/.test(card), card.replace(/\s+/g, ' ').slice(0, 300));
+    check('데이터 기준일에 트레이더스', /<span class="of-fresh-ch">트레이더스<\/span>/.test(h));
+    finish7();
+  })();
+  function finish7() {
   console.log('\n[5] 기존 EMART_DAILY_SALES(합계) 양식 차단 — 판별은 유지, 반영 버튼 비활성·안내');
   {
     const { ctx } = loadFrontend(PROJ, 'get UP(){return _UP;}');
@@ -216,6 +252,7 @@ function env() {
       finish();
     })();
   }
+  } // finish7 — [7]이 비동기라 [5]를 그 뒤에 이어서 돌린다
 })();
 
 function finish() {

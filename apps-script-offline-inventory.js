@@ -16,8 +16,8 @@
  *   진열 점포 수 재고_점포최신에서 '전시' 재고 > 0 인 점포 수
  *   취급 점포 수 재고구분 무관 재고 > 0 인 점포 수. 커버리지 = 취급 ÷ 점포마스터의 그 채널 점포 수
  *   점포 결품    당월판매 > 0 인데 현재 재고(재고구분 합) 0 인 점포 × SKU
- *                당월판매 = 재고_점포최신의 당월판매(이마트·하이마트 파일에 있음, 당월 누적), 그 열이 비어 있는 채널(전자랜드)은
- *                판매원장에서 재고 기준일이 속한 달의 점포 판매 합
+ *                당월판매 = 판매원장에서 재고 기준일이 속한 달의 점포 판매 합 — 업태명으로 점포별 일별 판매를 받는 채널(원천업태명이
+ *                있는 이마트·트레이더스)과 재고 파일에 당월판매 열이 없는 채널(전자랜드). 그 외(하이마트)는 재고_점포최신의 당월판매(당월 누적)
  *   경보         재고일수 > 과다일수 → over(과다) / 재고일수 < 결품위험일수 → risk(결품 위험) / 점포 결품
  *   미매칭       매핑 없는 코드의 재고·판매는 합계에서 빼지 않고 unmatched 로 따로 준다(채널 전체 = SKU 합 + 미매칭).
  *                점포 수·점포 결품은 SKU로 해석된 코드만 센다(다른 브랜드 상품이 섞여 있어서)
@@ -71,7 +71,7 @@ function _offDaysBetween(a, b) { // b − a (일), 'YYYY-MM-DD'
 }
 function _offChannelInfo(channelRows) {
   return channelRows.filter(function (r) { return r[0]; }).map(function (r) {
-    return { channelId: r[0], name: r[1], type: r[2], active: r[3], order: r[4], uploadStartMonth: _offIsYm(r[5]) ? r[5] : '' };
+    return { channelId: r[0], name: r[1], type: r[2], active: r[3], order: r[4], uploadStartMonth: _offIsYm(r[5]) ? r[5] : '', bizNames: r[6] || '' };
   }).sort(function (a, b) { return (Number(a.order) || 99) - (Number(b.order) || 99); });
 }
 
@@ -180,6 +180,7 @@ function _offInventoryCompute(input) {
   });
   chans.forEach(function (c) {
     var d = storeDate[c.channelId] || stockDate[c.channelId] || '';
+    if (d && c.bizNames) monthSrc[c.channelId] = 'ledger'; // 점포별 일별 판매를 받는 채널(이마트·트레이더스)은 원장이 정확하다
     if (d && !monthSrc[c.channelId]) monthSrc[c.channelId] = 'ledger';
     month[c.channelId] = d.slice(0, 7);
   });

@@ -279,8 +279,7 @@ function _ocdStoreHtml(ci){
   const skus=[...new Set(all.map(r=>r.skuId).filter(Boolean))];
   const rows=_ocdStoreRows(),shown=rows.slice(0,s.limit);
   const nOut=all.filter(r=>r.out).length;
-  const src=ci.monthSaleSource==='ledger'?`당월판매 = 판매원장의 ${_escHtml(ci.monthSaleMonth)} 점포 판매 합(재고 파일에 당월판매 열이 없음)`
-    :_OCD.ch==='emart'?`이마트는 점포별 일별 판매가 없어 당월판매는 재고 파일의 당월 누적(매출량) 기준입니다(${_escHtml(ci.monthSaleMonth)}).`
+  const src=ci.monthSaleSource==='ledger'?`당월판매 = 판매원장의 ${_escHtml(ci.monthSaleMonth)} 점포별 일별 판매 합`
     :`당월판매 = 재고 파일의 당월 누적 판매(${_escHtml(ci.monthSaleMonth)})`;
   return `<div class="card-hd"><span>점포 <span class="of-sub">재고 기준일 ${_escHtml(ci.storeDate||ci.stockDate||'')} · 점포마스터 ${_ofNum(ci.storeTotal)}곳</span></span>
       <span class="card-hd-r">${nOut?`<span class="of-badge of-b-out">점포 결품 ${nOut}</span> `:''}결품 = 당월판매 > 0 인데 재고 0</span></div>
