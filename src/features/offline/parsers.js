@@ -37,8 +37,9 @@
       cols: { region: '지부', store: '입고지점코드', storeName: '입고지점', code: '모델명', name: '설명',
         stock: '재고수량', transit: '타지점입고예정수량', reserved: '판매예약수량' }
     },
+    // 이마트·트레이더스 점포가 한 파일 — split 'store': GAS가 점포(점포마스터 → 점포명접두어)로 채널을 나눈다
     EMART_STOCK: {
-      label: '이마트 점포 재고', channelId: 'emart', kind: 'snapshot',
+      label: '이마트 점포 재고', channelId: 'emart', kind: 'snapshot', split: 'store',
       sig: ['조회일자', '점포코드', '상품코드', '현재수량'],
       cols: { ym: '조회일자', storeName: '점포명', store: '점포코드', name: '상품명', stock: '현재수량',
         monthIn: '매입량', code: '상품코드', monthSale: '매출량' }

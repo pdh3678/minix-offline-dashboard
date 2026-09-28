@@ -3,6 +3,11 @@
    지키려는 성질:
      [2] 코드 매핑 공유 — 트레이더스는 코드체계채널(emart) 매핑으로 해석한다(월별 해석·재고 지표·프론트 해석기),
          미매칭코드·매핑 저장은 emart 한 벌(같은 코드가 두 번 뜨지 않음), 코드 매핑 화면에는 트레이더스가 따로 없고 안내가 뜬다
+     [4] 점포별 일별 매출: 업태명 → 원천업태명으로 채널, 파일 속 채널마다 교체 기간 교체(점포 빈칸 합계 행 정리), 모르는 업태명 보류,
+         점포마스터에 점포 채널 기록(코드체계 안에서 이동), 로그 channel_id 'emart,traders', 재업로드 불변, 미리보기 채널별
+     [5] 기존 합계 양식: 판별은 유지, 반영 버튼 비활성 + 안내, 전체 반영에서 제외, 서버도 거절
+     [6] 이마트 재고: 점포마스터 → 점포명접두어 → 기본 이마트(경고)로 채널, 채널일별·점포최신 채널별 교체, 이마트 + 트레이더스 = 파일 합계,
+         재업로드 불변, 과거 파일은 점포최신을 건드리지 않음, 미리보기도 같은 규칙
 
    실행: node tests/offline-traders.test.js  (또는 node tests/run-all.js) */
 const path = require('path');
@@ -136,6 +141,59 @@ function env() {
     check('전체 반영 순서: 점포별 매출 → 재고', ctx._upApplyOrder().map(f => f.parse.type).join() === 'EMART_DAILY_SALES_STORE,EMART_STOCK', ctx._upApplyOrder().map(f => f.parse.type));
   }
 
+  console.log('\n[6] 이마트 재고(EMART_STOCK) — 점포마스터 → 점포명접두어 → 기본 이마트로 채널을 나눈다');
+  {
+    const g = env(), T = g.ctx.OFF_TABS;
+    const D = '2026-09-28';
+    // 점포마스터: 1003 이마트, 2001 트레이더스(점포별 매출 파일에서 익힌 상태) / 분리 전 이마트 합계 재고
+    g.ctx._offWriteBlock(g.tab('점포마스터'), T.store, 2, [['emart', '1003', 'EM분당점', '', '2026-09-25', '2026-09-28'], ['traders', '2001', 'TR구성점', '', '2026-09-25', '2026-09-28']]);
+    g.ctx._offWriteBlock(g.tab('재고_채널일별'), T.stockDaily, 2, [[D, 'emart', MAX, 99, '', '', 'OLD'], ['2026-09-25', 'emart', MAX, 50, '', '', 'OLD']]);
+    g.ctx._offWriteBlock(g.tab('재고_점포최신'), T.stockStore, 2, [['2026-09-25', 'emart', '2001', MAX, 9, '', '', 0, 0, 'OLD'], ['2026-09-25', 'emart', '1003', MAX, 9, '', '', 0, 0, 'OLD']]);
+    const file = stockFile([['EM분당점', '1003', MAX, 2, 1], ['TR구성점', '2001', MAX, 5, 0], ['TR송림점', '2002', MAX, 3, 1], ['SFM군산점', '1025', MAX, 1, 0], ['EM창동점', '1001', MAX_DISPLAY, 4, 0]]);
+    const pr = P.parseRows(file, { fileName: '재고현황_상세_20260928101559.xlsx', today: TODAY });
+    check('판별: 이마트 재고, split store, 기준일(14자리 파일명) 2026-09-28', pr.ok && pr.type === 'EMART_STOCK' && pr.split === 'store' && pr.baseDate === D, pr);
+    const up = name => g.ctx._offUpload(P.toUploadPayload(pr, { fileName: name || '재고현황_상세_20260928101559.xlsx' }), AUTH);
+    const r1 = up();
+    const daily = () => g.rows('재고_채널일별').map(r => [r[0], r[1], r[2], r[3]].join('|')).sort();
+    check('재고_채널일별: 9/28은 이마트(1003 2 + 1025 1 = MAX 3, 전시 4)·트레이더스(5 + 3 = MAX 8)로 교체, 9/25 이마트 합계는 그대로', J(daily()) === J([
+      '2026-09-25|emart|' + MAX + '|50', D + '|emart|' + MAX_DISPLAY + '|4', D + '|emart|' + MAX + '|3', D + '|traders|' + MAX + '|8']), daily());
+    const store = () => g.rows('재고_점포최신').map(r => [r[0], r[1], r[2], r[4]].join('|')).sort();
+    check('재고_점포최신: 이마트 3점포 · 트레이더스 2점포(분리 전 이마트 행은 교체)', J(store()) === J([D + '|emart|1001|4', D + '|emart|1003|2', D + '|emart|1025|1', D + '|traders|2001|5', D + '|traders|2002|3']), store());
+    const total = pr.records.storeStock.reduce((s, x) => s + x.stock, 0);
+    check('이마트 7 + 트레이더스 8 = 파일 재고 합계 15', J(r1.applied.byChannel) === J({ emart: { stores: 3, stock: 7 }, traders: { stores: 2, stock: 8 } }) && total === 15, r1.applied.byChannel);
+    check('판별 경로: 점포마스터 2 · 접두어 2(TR송림·EM창동) · 기본 1(SFM군산) + 경고', J(r1.applied.channelVia) === J({ master: 2, prefix: 2, fallback: 1 }) &&
+      r1.warnings.some(w => /1곳은 이마트로/.test(w) && /1025 SFM군산점/.test(w)), [r1.applied.channelVia, r1.warnings]);
+    const sm = g.rows('점포마스터').map(r => r[0] + ':' + r[1]).sort();
+    check('점포마스터: 2002 트레이더스(접두어), 1025·1001 이마트', J(sm) === J(['emart:1001', 'emart:1003', 'emart:1025', 'traders:2001', 'traders:2002']), sm);
+    check('업로드로그 channel_id = emart,traders · 응답 채널', g.rows('업로드로그').pop()[5] === 'emart,traders' && J(r1.channels) === J(['emart', 'traders']));
+    const snap = { d: daily(), s: store(), m: g.rows('점포마스터').length };
+    up();
+    check('같은 파일 재반영 → 재고 두 탭·점포마스터 불변', J(daily()) === J(snap.d) && J(store()) === J(snap.s) && g.rows('점포마스터').length === snap.m);
+    const older = P.parseRows(stockFile([['TR구성점', '2001', MAX, 1, 0], ['EM분당점', '1003', MAX, 1, 0]]), { fileName: '재고현황_상세_20260920101559.xlsx', today: TODAY });
+    const r3 = g.ctx._offUpload(P.toUploadPayload(older, { fileName: '재고현황_상세_20260920101559.xlsx' }), AUTH);
+    check('더 과거 파일 → 채널일별에 9/20 채널별 추가, 점포최신은 두 채널 모두 그대로 + 경고', daily().some(x => x === '2026-09-20|traders|' + MAX + '|1') && daily().some(x => x === '2026-09-20|emart|' + MAX + '|1') &&
+      J(store()) === J(snap.s) && r3.warnings.filter(w => /더 최신 기준일/.test(w)).length === 2, r3.warnings);
+    // 재고 지표 — 트레이더스 재고가 이마트 매핑으로 SKU에
+    const inv = JSON.parse(g.ctx._offlineHandle('offline_getInventory', { channelId: 'traders' }, AUTH));
+    const tg = inv.groups.find(x => x.channelId === 'traders' && x.level === 'sku' && x.key === 'SKU-0001');
+    check('재고 지표: 트레이더스 SKU-0001 정상 8(이마트 매핑), 기준일 9/28, 점포 표 2점포', tg && tg.stock['정상'] === 8 && inv.channels.find(c => c.channelId === 'traders').stockDate === D && inv.stores.length === 2, tg);
+  }
+
+  console.log('\n[6-화면] 재고 파일 미리보기 — 채널별 점포 수·재고 합계, 판별 경로');
+  {
+    const { ctx } = loadFrontend(PROJ, '');
+    vmSet(ctx, { skus: [], mappings: [], stores: [{ channelId: 'emart', code: '1003' }, { channelId: 'traders', code: '2001' }, { channelId: 'himart', code: '2002' }],
+      channels: [{ channelId: 'emart', name: '이마트', storePrefix: 'EM', codeSystem: 'emart' }, { channelId: 'traders', name: '트레이더스', storePrefix: 'TR', codeSystem: 'emart' },
+        { channelId: 'himart', name: '하이마트', codeSystem: 'himart' }] });
+    const pr = P.parseRows(stockFile([['EM분당점', '1003', MAX, 2, 1], ['TR구성점', '2001', MAX, 5, 0], ['TR송림점', '2002', MAX, 3, 1], ['SFM군산점', '1025', MAX, 1, 0]]),
+      { fileName: '재고현황_상세_20260928101559.xlsx', today: TODAY });
+    const sp = ctx._upStoreSplit(pr);
+    check('미리보기 = 서버와 같은 규칙(다른 코드체계 점포마스터 무시 → 2002는 접두어로 트레이더스)', J(sp.byCh) === J({ emart: { stores: 2, stock: 3 }, traders: { stores: 2, stock: 8 } }) &&
+      J(sp.via) === J({ master: 2, prefix: 1, fallback: 1 }), sp);
+    const h = ctx._upSplitHtml(pr);
+    check('채널별 줄 + 못 정한 점포 안내', /이마트<\/span> 점포 <b>2<\/b> · 재고 <b>3<\/b>/.test(h) && /트레이더스<\/span> 점포 <b>2<\/b> · 재고 <b>8<\/b>/.test(h) && /못 정해 이마트로 1곳/.test(h), h);
+  }
+
   console.log('\n[5] 기존 EMART_DAILY_SALES(합계) 양식 차단 — 판별은 유지, 반영 버튼 비활성·안내');
   {
     const { ctx } = loadFrontend(PROJ, 'get UP(){return _UP;}');
@@ -174,3 +232,10 @@ function storeSales(dates, lines) {
 
 // OFFLINE_MASTERS는 let 선언이라 vm 컨텍스트 프로퍼티가 아니다 — 스크립트로 넣는다
 function vmSet(ctx, masters) { require('vm').runInContext('OFFLINE_MASTERS = ' + J(masters) + ';', ctx); }
+
+// 이마트 재고 합성 파일('재고현황_상세' — 상단 요약 뒤 헤더) — lines: [점포명, 점포코드, 상품코드, 현재수량, 매출량]
+function stockFile(lines) {
+  return [['구분', '전월재고', '매입', '매출', '이관', '현재고'], ['수량', 0, 0, 0, 0, lines.reduce((s, l) => s + l[3], 0)], [], [],
+    ['조회일자', '점포명', '점포코드', '상품명', '전월수량', '전월금액', '현재수량', '현재금액', '이관량', '이관액', '매입량', '매입액', '상품코드', '매출량']]
+    .concat(lines.map(l => ['202609', l[0], l[1], '가상 ' + l[2], 0, 0, l[3], 0, 0, 0, 0, 0, l[2], l[4]]));
+}

@@ -129,8 +129,36 @@ function _upBizChannel(biz){
   const b=String(biz||'').trim();
   return ((OFFLINE_MASTERS&&OFFLINE_MASTERS.channels)||[]).find(c=>String(c.bizNames||'').split(',').map(x=>x.trim()).indexOf(b)>=0)||null;
 }
-// 한 파일에 여러 채널이 섞인 파일(split) — 채널별 레코드·점포·판매 합계
+/* 재고 파일(split 'store') — 점포마다 채널: 점포마스터(같은 코드체계) → 점포명접두어 → 코드체계 채널(이마트).
+   미리보기용이고 반영 때는 서버(_offApplyStockSplit)가 같은 순서로 다시 정한다 → { byCh{채널: {stores, stock}}, via{master, prefix, fallback} } */
+function _upStoreSplit(p){
+  const m=OFFLINE_MASTERS||{},cs=OfflineResolver.codeSystemOf(m),root=p.channelId;
+  const master={};(m.stores||[]).forEach(x=>{if(cs(x.channelId)===cs(root))master[x.code]=x.channelId;});
+  const prefixes=[];(m.channels||[]).forEach(c=>{if(cs(c.channelId)===cs(root))String(c.storePrefix||'').split(',').map(x=>x.trim()).filter(Boolean).forEach(px=>prefixes.push({ch:c.channelId,px}));});
+  prefixes.sort((a,b)=>b.px.length-a.px.length);
+  const names={};(p.records.stores||[]).forEach(x=>{names[x.code]=x.name||'';});
+  const chOf={},via={master:0,prefix:0,fallback:0},byCh={};
+  const storeCh=code=>{
+    if(chOf[code])return chOf[code];
+    let c=master[code];
+    if(c)via.master++;
+    else{const hit=prefixes.find(x=>(names[code]||'').indexOf(x.px)===0);if(hit){c=hit.ch;via.prefix++;}else{c=root;via.fallback++;}}
+    return chOf[code]=c;
+  };
+  (p.records.storeStock||[]).forEach(r=>{
+    const c=r.store?storeCh(r.store):root,o=byCh[c]||(byCh[c]={stores:{},stock:0});
+    if(r.store)o.stores[r.store]=true;o.stock+=Number(r.stock)||0;
+  });
+  Object.keys(byCh).forEach(c=>{byCh[c]={stores:Object.keys(byCh[c].stores).length,stock:byCh[c].stock};});
+  return {byCh,via};
+}
+// 한 파일에 여러 채널이 섞인 파일(split) — 채널별 레코드·점포·판매 합계 / 재고는 채널별 점포 수·재고 합계
 function _upSplitHtml(p){
+  if(p.split==='store'){
+    const {byCh,via}=_upStoreSplit(p);
+    const rows=Object.keys(byCh).map(c=>`<span class="up-chip ready">${_escHtml(_offlineChannelName(c))}</span> 점포 <b>${byCh[c].stores}</b> · 재고 <b>${byCh[c].stock}</b>`);
+    return `<div class="up-stats">${rows.join('<br>')}<br><span class="off-muted">점포 채널 판별: 점포마스터 ${via.master}곳 · 점포명접두어 ${via.prefix}곳${via.fallback?` · <b class="off-miss">못 정해 ${_escHtml(_offlineChannelName(p.channelId))}로 ${via.fallback}곳</b> — 점포별 일별 매출 파일을 먼저 올리면 점포마스터로 정해집니다`:''}</span></div>`;
+  }
   if(p.split!=='biz'||!p.summary.byBiz)return '';
   const parts=p.summary.byBiz.map(b=>{
     const c=_upBizChannel(b.biz);
@@ -255,7 +283,7 @@ function _upResultHtml(r){
   if(a.storesAdded)parts.push('새 점포 '+a.storesAdded);
   if(a.storesMoved)parts.push('채널 옮긴 점포 '+a.storesMoved);
   // 채널별(한 파일에 여러 채널 — 이마트·트레이더스)
-  if(a.byChannel)parts.push(Object.keys(a.byChannel).map(c=>_offlineChannelName(c)+' '+a.byChannel[c].rows+'행·판매 '+a.byChannel[c].qty).join(' / '));
+  if(a.byChannel)parts.push(Object.keys(a.byChannel).map(c=>{const b=a.byChannel[c];return _offlineChannelName(c)+(b.rows!=null?' '+b.rows+'행·판매 '+b.qty:' 점포 '+b.stores+'·재고 '+b.stock);}).join(' / '));
   let range=rr.start?rr.start+' ~ '+rr.end:(rr.baseDate||'');
   if(rr.himart)range+=' · 판매 재계산: '+rr.himart.recomputed.map(x=>x.date+'('+(x.unit==='day'?'day':x.start+'~ period')+')').join(', ');
   return `<div class="up-result">✓ 반영 완료 — ${_escHtml(parts.join(' · '))}<br>교체 범위: ${_escHtml(range)} · 미매칭 ${r.unmatched?r.unmatched.length:0}개</div>`+

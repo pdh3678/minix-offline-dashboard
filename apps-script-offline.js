@@ -33,7 +33,8 @@ var OFF_STOCK_TYPES = ['정상', '전시', '리퍼'];
 // split = 한 파일에 같은 코드체계의 여러 채널이 섞인 파일(이마트 포털: 이마트·트레이더스). channelId는 그 코드체계 채널이고,
 //         레코드마다 채널을 따로 정한다 — 'biz' = 레코드의 업태명 → 채널마스터 원천업태명
 var OFF_FILE_TYPES = {
-  EMART_STOCK:        { channelId: 'emart',  kind: 'snapshot' },
+  // 'store' = 업태명이 없어 점포로 채널을 정한다(점포마스터 → 점포명접두어 → 코드체계 채널)
+  EMART_STOCK:        { channelId: 'emart',  kind: 'snapshot', split: 'store' },
   EMART_DAILY_SALES_STORE: { channelId: 'emart', kind: 'period', split: 'biz' },
   // 트레이더스가 합쳐진 SKU별 합계 파일 — 반영 거절(판별은 브라우저가 해서 안내한다). 점포별 일별 매출을 쓴다
   EMART_DAILY_SALES:  { channelId: 'emart',  kind: 'period', blocked: "트레이더스가 합쳐진 합계 파일이라 반영할 수 없습니다. '기간별매출(상품별)_일별상세' 파일을 사용하세요" },
@@ -520,7 +521,8 @@ function _offApplyPeriodSales(ctx, meta, rec, ft) {
 }
 
 // B. 스냅샷형 — 재고_채널일별은 (기준일, 채널) 교체, 재고_점포최신은 더 최신일 때만 채널 통째 교체
-function _offApplyStock(ctx, meta, rec) {
+function _offApplyStock(ctx, meta, rec, ft) {
+  if (ft && ft.split === 'store') return _offApplyStockSplit(ctx, meta, rec);
   var ch = meta.channelId, D = meta.baseDate;
   var dDef = OFF_TABS.stockDaily, dSheet = _offSheet(ctx.ss, 'stockDaily');
   var dRows = (rec.channelStock || []).map(function (r) {
@@ -548,6 +550,87 @@ function _offApplyStock(ctx, meta, rec) {
 
 // 파일에 없는 값은 빈칸('없음')으로 — 0(있는데 0개)과 구분한다
 function _offOpt(v) { return (v === '' || v == null) ? '' : (Number(v) || 0); }
+
+/* B-2. 스냅샷형 + 채널 분리(이마트 재고 '재고현황_상세' — 이마트·트레이더스 점포가 한 파일).
+   점포마다 채널: ① 점포마스터에 그 점포코드가 있는 채널(같은 코드체계 안에서) ② 점포명이 채널마스터 점포명접두어로 시작하는 채널
+   ③ 둘 다 없으면 코드체계 채널(이마트)로 두고 경고. 그 뒤 채널마다 기존 규칙 그대로 —
+   재고_채널일별은 (기준일, 채널) 교체(채널 합계는 점포 재고를 채널별로 다시 더한 값), 재고_점포최신은 그 채널의 최신 기준일보다
+   과거가 아닐 때만 채널 통째 교체. 파일 속 채널 합계(channelStock)는 채널이 섞여 있어 쓰지 않는다. */
+function _offApplyStockSplit(ctx, meta, rec) {
+  var root = meta.channelId, D = meta.baseDate, cm = ctx.chMeta, cs = cm.codeSys;
+  var master = {};
+  _offReadRows(_offSheet(ctx.ss, 'store'), OFF_TABS.store).forEach(function (r) { if (r[0] && r[1] && cs(r[0]) === cs(root)) master[r[1]] = r[0]; });
+  var names = {};
+  (rec.stores || []).forEach(function (s) { if (s.code) names[String(s.code).trim()] = String(s.name || ''); });
+  var prefixes = cm.prefixes.filter(function (p) { return cs(p.channelId) === cs(root); });
+  var chOf = {}, via = { master: 0, prefix: 0, fallback: 0 }, fallback = [];
+  function storeCh(code) {
+    if (chOf[code]) return chOf[code];
+    var c = master[code];
+    if (c) via.master++;
+    else {
+      var nm = names[code] || '', hit = null;
+      for (var i = 0; i < prefixes.length && !hit; i++) if (nm.indexOf(prefixes[i].prefix) === 0) hit = prefixes[i];
+      if (hit) { c = hit.channelId; via.prefix++; }
+      else { c = root; via.fallback++; if (fallback.length < 5) fallback.push(code + (nm ? ' ' + nm : '')); }
+    }
+    return (chOf[code] = c);
+  }
+  var sRowsByCh = {}, agg = {}, order = [], sum = {};
+  function add(c, r) {
+    var k = c + OFF_KEY_SEP + r.code;
+    var o = agg[k];
+    if (!o) { o = agg[k] = { ch: c, code: r.code, stock: 0, transit: r.transit === '' || r.transit == null ? '' : 0, reserved: r.reserved === '' || r.reserved == null ? '' : 0 }; order.push(k); }
+    o.stock += Number(r.stock) || 0;
+    if (o.transit !== '') o.transit += Number(r.transit) || 0;
+    if (o.reserved !== '') o.reserved += Number(r.reserved) || 0;
+  }
+  (rec.storeStock || []).forEach(function (r) {
+    var code = String(r.store || '').trim(), c = code ? storeCh(code) : root;
+    (sRowsByCh[c] = sRowsByCh[c] || []).push([D, c, r.store || '', r.code, Number(r.stock) || 0, _offOpt(r.transit), _offOpt(r.reserved), _offOpt(r.monthIn), _offOpt(r.monthSale), ctx.uploadId]);
+    add(c, r);
+    var s = sum[c] || (sum[c] = { stores: {}, stock: 0 });
+    if (code) s.stores[code] = true;
+    s.stock += Number(r.stock) || 0;
+  });
+  (rec.stores || []).forEach(function (s) { var code = String(s.code || '').trim(); if (code) storeCh(code); });
+  // 채널 순서 = 채널마스터 정렬순서
+  var rank = {};
+  cm.rows.forEach(function (r, i) { rank[r[0]] = Number(r[4]) || 99 + i; });
+  var chans = Object.keys(sRowsByCh).sort(function (a, b) { return (rank[a] || 99) - (rank[b] || 99); });
+  if (!chans.length) chans = [root];
+  var inFile = {};
+  chans.forEach(function (c) { inFile[c] = true; });
+
+  var dDef = OFF_TABS.stockDaily, dSheet = _offSheet(ctx.ss, 'stockDaily');
+  var dRows = [];
+  chans.forEach(function (c) { order.forEach(function (k) { var o = agg[k]; if (o.ch === c) dRows.push([D, c, o.code, o.stock, o.transit, o.reserved, ctx.uploadId]); }); });
+  _offReplaceRows(dSheet, dDef, _offReadRows(dSheet, dDef), function (r) { return !(r[0] === D && inFile[r[1]]); }, dRows);
+  ctx.applied.stockDaily = dRows.length;
+
+  var sDef = OFF_TABS.stockStore, sSheet = _offSheet(ctx.ss, 'stockStore');
+  var sOld = _offReadRows(sSheet, sDef);
+  var current = {};
+  sOld.forEach(function (r) { if (inFile[r[1]] && r[0] > (current[r[1]] || '')) current[r[1]] = r[0]; });
+  var replace = {}, sRows = [];
+  chans.forEach(function (c) {
+    if (current[c] && D < current[c]) { ctx.warnings.push(_offChName(cm, c) + ' 재고_점포최신은 더 최신 기준일(' + current[c] + ') 데이터가 있어 갱신하지 않았습니다'); return; }
+    replace[c] = true;
+    sRows = sRows.concat(sRowsByCh[c] || []);
+  });
+  _offReplaceRows(sSheet, sDef, sOld, function (r) { return !replace[r[1]]; }, sRows);
+  ctx.applied.stockStore = sRows.length;
+
+  var byCh = {};
+  chans.forEach(function (c) { var s = sum[c] || { stores: {}, stock: 0 }; byCh[c] = { stores: Object.keys(s.stores).length, stock: s.stock }; });
+  ctx.applied.byChannel = byCh;
+  ctx.applied.channelVia = via;
+  if (via.fallback) ctx.warnings.push('점포마스터·점포명접두어로 채널을 정하지 못한 점포 ' + via.fallback + '곳은 ' + _offChName(cm, root) + '로 반영했습니다(예: ' + fallback.join(', ') + ') — 점포별 일별 매출 파일을 먼저 올리면 점포마스터로 정해집니다');
+  ctx.channels = chans;
+  ctx.storeChannel = chOf;
+  return { baseDate: D };
+}
+function _offChName(cm, id) { for (var i = 0; i < cm.rows.length; i++) if (cm.rows[i][0] === id) return cm.rows[i][1] || id; return id; }
 
 /* C. 하이마트 판매 계산 — 당월 누적(당월판매·당월실판매) 스냅샷의 차이로 판매를 만든다.
    1) 누적스냅샷에 기준일 D0 교체 저장
