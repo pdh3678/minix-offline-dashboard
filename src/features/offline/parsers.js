@@ -87,8 +87,13 @@
     const y = +m[1], mo = +m[2], d = +m[3];
     return validYmd(y, mo, d) ? ymd(y, mo, d) : null;
   }
-  // 파일명의 기준일 — YYYYMMDD / YYYY-MM-DD / YYYY_MM_DD (구분자는 한 가지로 일관돼야 함)
+  /* 파일명의 기준일
+     · 날짜+시각 14자리(YYYYMMDDhhmmss — 이마트 '재고현황_상세_20260928101559')는 앞 8자리
+     · 그 외 YYYYMMDD / YYYY-MM-DD / YYYY_MM_DD (구분자는 한 가지로 일관돼야 함, 전자랜드 'YYYY-MM-DD_hhmmss' 포함) */
   function dateFromFileName(name) {
+    const s = String(name || '');
+    const dt = /(?:^|\D)(20\d{2})(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])([01]\d|2[0-3])([0-5]\d)([0-5]\d)(?!\d)/.exec(s);
+    if (dt && validYmd(+dt[1], +dt[2], +dt[3])) return ymd(+dt[1], +dt[2], +dt[3]);
     const re = /(?:^|\D)(20\d{2})([-_.]?)(0[1-9]|1[0-2])\2(0[1-9]|[12]\d|3[01])/g;
     let m;
     while ((m = re.exec(String(name || ''))) !== null) {
