@@ -134,3 +134,28 @@
   .of-cards{grid-template-columns:minmax(0,1fr)}
   .of-kv{grid-template-columns:repeat(2,minmax(0,1fr))}
 }
+
+/* 채널 상세 — (e) 판매 분석(channel-sales.js) */
+.osa-ctl{margin-bottom:12px}
+.osa-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.3fr);gap:18px;align-items:start}
+@media(max-width:1100px){.osa-grid{grid-template-columns:minmax(0,1fr)}}
+.osa-sec{margin-top:18px}
+.osa-rank,.osa-stores{display:flex;flex-direction:column;gap:4px;margin-top:6px}
+.osa-row{display:grid;grid-template-columns:minmax(90px,34%) minmax(0,1fr) 64px;align-items:center;gap:8px;font-size:12px;min-height:22px}
+.osa-lb{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text)}
+.osa-track{height:12px;display:block}
+.osa-bar,.osa-stack{display:flex;height:12px;border-radius:0 4px 4px 0;min-width:2px;overflow:hidden}
+.osa-seg{height:100%;border-right:2px solid var(--surface);box-sizing:border-box}
+.osa-seg:last-child{border-right:none}
+.osa-v{text-align:right;font-variant-numeric:tabular-nums;font-weight:700;color:var(--text)}
+.osa-store{border-radius:6px;padding:2px 4px;cursor:pointer}
+.osa-store:hover,.osa-store.pin{background:var(--surface-2)}
+.osa-detail{display:none;font-size:11px;color:var(--text-2);padding:2px 0 6px calc(34% + 8px);line-height:1.6}
+.osa-store:hover .osa-detail,.osa-store.pin .osa-detail{display:block}
+@media(max-width:640px){.osa-row{grid-template-columns:minmax(80px,40%) minmax(0,1fr) 52px}.osa-detail{padding-left:4px}}
+.osa-legend{display:flex;flex-wrap:wrap;gap:4px 12px;font-size:11px;color:var(--text-2);margin:4px 0 6px}
+.osa-leg{display:inline-flex;align-items:center}
+.osa-mtbl td,.osa-mtbl th{white-space:nowrap}
+.osa-heat{color:var(--text)}
+.osa-trophy{margin-right:3px;font-size:11px}
+.osa-note{margin-top:6px}
