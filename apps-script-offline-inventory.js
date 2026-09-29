@@ -383,6 +383,110 @@ function _offGetDailySales(data) {
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// ── 판매 분석 (채널 상세 — 모델별·지점별) ──
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+var OFF_BREAKDOWN_MAX_MONTHS = 24;
+/* 대분류 선택 — '' = 본품 + 필터(기본, 기타 제외), '*' = 전체(기타 포함), 그 외 = 그 대분류만.
+   매핑 안 된 코드는 대분류를 모르므로 '' · '*'에서만 "미매칭(원본코드)" 항목으로 들어간다(합계에서 빠지지 않게). */
+function _offBreakdownCatOk(sel, cat) {
+  if (sel === '*') return true;
+  if (!sel) return _offCatMain(cat) || cat === '필터';
+  return cat === sel;
+}
+
+/* input: { channelId, from, to('YYYY-MM'), unit('model'|'sku'), category, measure('sale'|'inst'), channels, skus, mappings, sales, stores, unmatchedTab }
+   판매원장의 판매 등록 수량(하이마트 measure 'inst'면 설치완료수량). 연월은 기간종료일의 달 — day는 그 날, period는 기간종료일(월별 해석과 같은 규칙).
+   코드 해석은 재고 지표·월별 해석과 같은 _offCodeResolver(코드체계채널 포함).
+   반환 { months, keys[{key, label, category, line, model, skuId, unmatched, code, total, byMonth{ym}}](많이 팔린 순),
+          stores[{store, storeName, region, storeType, total, byKey{key}}](합계 많은 순), regions[], online{online, offline, stores[]}|null,
+          totals{qty, unmatchedQty, byCategory{}}, hasInst } — 모델별 합계 = 지점별 합계 = totals.qty */
+function _offSalesBreakdownCompute(input) {
+  var ch = input.channelId, unit = input.unit === 'sku' ? 'sku' : 'model', sel = input.category || '';
+  var inst = input.measure === 'inst';
+  var months = _offYmList(input.from, input.to), inRange = {};
+  months.forEach(function (m) { inRange[m] = true; });
+  var R = _offCodeResolver(input.skus, input.mappings, input.channels);
+  var csN = _offCodeSystem(input.channels), names = {};
+  (input.unmatchedTab || []).forEach(function (r) { if (r[0] && r[1] && r[2]) names[csN(r[0]) + OFF_KEY_SEP + r[1]] = r[2]; });
+  (input.mappings || []).forEach(function (m) { var k = csN(m[0]) + OFF_KEY_SEP + m[1]; if (m[4] && !names[k]) names[k] = m[4]; });
+  var storeInfo = {}, anyOnline = false, onlineStores = [];
+  (input.stores || []).forEach(function (r) {
+    if (r[0] !== ch || !r[1]) return;
+    var type = r[6] === '온라인' || r[6] === '오프라인' ? r[6] : _offStoreTypeOf(r[2], r[3]);
+    storeInfo[r[1]] = { name: r[2], region: r[3], type: type };
+    if (type === '온라인') { anyOnline = true; onlineStores.push(r[2] || r[1]); }
+  });
+  var K = {}, S = {}, tot = { qty: 0, unmatchedQty: 0, byCategory: {} }, on = { online: 0, offline: 0 }, hasInst = false;
+  (input.sales || []).forEach(function (s) {
+    if (s[3] !== ch) return;
+    var ym = String(s[1] || '').slice(0, 7);
+    if (!inRange[ym]) return;
+    if (s[7] !== '' && s[7] != null) hasInst = true; // 설치완료수량이 있는 채널(하이마트) — 화면이 [판매등록 / 설치완료]를 보여 준다
+    var qty = inst ? (s[7] === '' || s[7] == null ? 0 : Number(s[7]) || 0) : (Number(s[6]) || 0);
+    if (!qty) return;
+    var res = R.resolve(ch, s[5]), key, meta;
+    if (res) {
+      var sku = res.sku;
+      if (!_offBreakdownCatOk(sel, sku.category)) return;
+      key = unit === 'sku' ? sku.skuId : sku.line + '|' + sku.model;
+      meta = { label: unit === 'sku' ? (sku.name || sku.skuId) : sku.model, category: sku.category, line: sku.line, model: sku.model, skuId: unit === 'sku' ? sku.skuId : '',
+        unmatched: false, code: '', rank: _offCatalogRank(sku) };
+      tot.byCategory[sku.category] = (tot.byCategory[sku.category] || 0) + qty;
+    } else {
+      if (sel && sel !== '*') return;
+      key = 'um:' + s[5];
+      meta = { label: '미매칭(원본코드) ' + s[5], category: '', line: '', model: '', skuId: '', unmatched: true, code: s[5], name: names[csN(ch) + OFF_KEY_SEP + s[5]] || '', rank: [99, 99, 99, 9999] };
+      tot.unmatchedQty += qty;
+    }
+    var k = K[key] || (K[key] = Object.assign({ key: key, total: 0, byMonth: {} }, meta));
+    k.total += qty; k.byMonth[ym] = (k.byMonth[ym] || 0) + qty;
+    var sc = String(s[4] || '').trim(), info = storeInfo[sc] || { name: '', region: '', type: '오프라인' }; // 점포마스터에 없는 점포·점포 없는 행은 오프라인
+    var st = S[sc] || (S[sc] = { store: sc, storeName: sc ? info.name : '(점포 없음)', region: info.region || '', storeType: info.type, total: 0, byKey: {} });
+    st.total += qty; st.byKey[key] = (st.byKey[key] || 0) + qty;
+    if (st.storeType === '온라인') on.online += qty; else on.offline += qty;
+    tot.qty += qty;
+  });
+  var keys = Object.keys(K).map(function (k) { return K[k]; }).sort(function (a, b) {
+    if (b.total !== a.total) return b.total - a.total;
+    for (var i = 0; i < 4; i++) if (a.rank[i] !== b.rank[i]) return a.rank[i] - b.rank[i];
+    return a.key < b.key ? -1 : 1;
+  });
+  keys.forEach(function (k) { delete k.rank; });
+  var stores = Object.keys(S).map(function (k) { return S[k]; }).sort(function (a, b) { return (b.total - a.total) || String(a.storeName).localeCompare(String(b.storeName)); });
+  var regions = [];
+  stores.forEach(function (s) { if (s.region && regions.indexOf(s.region) < 0) regions.push(s.region); });
+  regions.sort();
+  return { channelId: ch, from: input.from, to: input.to, months: months, unit: unit, category: sel, measure: inst ? 'inst' : 'sale',
+    keys: keys, stores: stores, regions: regions, totals: tot, hasInst: hasInst,
+    online: anyOnline ? { online: on.online, offline: on.offline, stores: onlineStores } : null };
+}
+
+/* offline_getSalesBreakdown — data = { channelId, from, to, unit, category, measure }. 캐시 5분(오프라인 캐시 세대 — 업로드·매핑 변경 시 무효) */
+function _offGetSalesBreakdown(data) {
+  var ch = String(data.channelId || ''), from = String(data.from || ''), to = String(data.to || from);
+  if (!ch) throw new Error('채널을 지정하세요.');
+  if (!_offIsYm(from) || !_offIsYm(to) || from > to) throw new Error('연월 범위가 올바르지 않습니다: ' + from + ' ~ ' + to);
+  if (_offYmList(from, to).length > OFF_BREAKDOWN_MAX_MONTHS) throw new Error('한 번에 ' + OFF_BREAKDOWN_MAX_MONTHS + '개월까지만 볼 수 있습니다.');
+  var cat = String(data.category || '');
+  if (cat && cat !== '*' && OFFLINE_CATEGORIES.indexOf(cat) < 0) throw new Error('대분류가 올바르지 않습니다: ' + cat);
+  var args = { channelId: ch, from: from, to: to, unit: data.unit === 'sku' ? 'sku' : 'model', category: cat, measure: data.measure === 'inst' ? 'inst' : 'sale' };
+  var cache = CacheService.getScriptCache();
+  var key = 'offline:breakdown:' + _offCacheGen() + ':' + [args.channelId, args.from, args.to, args.unit, args.category, args.measure].join(':');
+  var hit = _cacheGetJSON(cache, key);
+  if (hit) { hit.cached = true; return hit; }
+  var ss = _offSS();
+  var read = function (k) { return _offReadRows(_offSheet(ss, k), OFF_TABS[k]); };
+  args.channels = read('channel'); args.skus = read('sku'); args.mappings = read('mapping'); args.sales = read('sales');
+  args.stores = read('store'); args.unmatchedTab = read('unmatched');
+  if (!args.channels.some(function (r) { return r[0] === ch; })) throw new Error('채널마스터에 없는 channel_id 입니다: ' + ch);
+  var out = _offSalesBreakdownCompute(args);
+  out.success = true;
+  _cachePutJSON(cache, key, out, OFF_CACHE_TTL_SEC);
+  return out;
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // ── 재고 추이 (재고_채널일별) ──
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 

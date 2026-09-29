@@ -53,7 +53,8 @@ var OFF_TABS = {
   // 재고기준일오프셋(9, 숫자)은 재고 기준일 보정(2026-09-29)에서 덧붙인 열 — OFF_STOCK_OFFSET_SEED 주석
   channel:    { name: '채널마스터', headers: ['channel_id', '채널명', '유형', '활성', '정렬순서', '업로드시작월', '원천업태명', '점포명접두어', '코드체계채널', '재고기준일오프셋'], text: [0, 1, 2, 3, 5, 6, 7, 8] },
   mapping:    { name: '코드매핑', headers: ['channel_id', '원본코드', 'sku_id', '재고구분', '원본상품명', '등록일', '등록자', '비고'], text: [0, 1, 2, 3, 4, 5, 6, 7] },
-  store:      { name: '점포마스터', headers: ['channel_id', '점포코드', '점포명', '지역', '최초등록일', '최근확인일'], text: [0, 1, 2, 3, 4, 5] },
+  // 점포유형(6)은 판매 분석(2026-09-29)에서 덧붙인 열 — 온라인/오프라인. OFF_ONLINE_STORE_RE 주석
+  store:      { name: '점포마스터', headers: ['channel_id', '점포코드', '점포명', '지역', '최초등록일', '최근확인일', '점포유형'], text: [0, 1, 2, 3, 4, 5, 6] },
   sales:      { name: '판매원장', headers: ['기간시작', '기간종료', '단위', 'channel_id', '점포코드', '원본코드', '수량', '설치완료수량', '출처', 'upload_id'], text: [0, 1, 2, 3, 4, 5, 8, 9] },
   stockDaily: { name: '재고_채널일별', headers: ['기준일', 'channel_id', '원본코드', '재고수량', '이동중수량', '예약수량', 'upload_id'], text: [0, 1, 2, 6] },
   stockStore: { name: '재고_점포최신', headers: ['기준일', 'channel_id', '점포코드', '원본코드', '재고수량', '이동중수량', '예약수량', '당월입고', '당월판매', 'upload_id'], text: [0, 1, 2, 3, 9] },
@@ -105,6 +106,12 @@ var OFF_STOCK_OFFSET_SEED = { himart: 0, etland: -1, emart: -1, traders: -1 };
 // 업로드로그 경고 열에 남기는 재고 기준일 표시 — offline_fixStockDates는 이 표시가 있는 업로드(이미 새 기준)를 옮기지 않는다
 var OFF_STOCK_BASIS_NOTE = '재고 기준일 ';
 var OFF_STOCK_FIX_KEY = '재고기준일보정_완료';
+/* 점포유형 — 점포마스터 행마다 '온라인' / '오프라인'. 채널 상세 판매 분석의 온라인/오프라인 판매량이 이 값을 쓴다(사람이 시트에서 고칠 수 있다).
+   열을 덧붙일 때와 업로드로 새 점포가 생길 때만 이 규칙(점포명·지역에 온라인·인터넷·e몰·이몰·쇼핑몰·(ON))으로 채운다 — 있는 값은 덮어쓰지 않는다.
+   2026-09-29 점포마스터: 전자랜드 '온라인쇼핑몰'(지역 온라인), 하이마트 '○○(ON)HM' 77곳(점포코드 끝 O — 같은 매장의 일반 점포는 끝 E).
+   '롯데몰'처럼 몰 안의 실매장은 걸리지 않게 '몰' 한 글자는 규칙에 넣지 않는다. */
+var OFF_ONLINE_STORE_RE = /온라인|인터넷|e\s*몰|이몰|쇼핑몰|\(ON\)/i;
+function _offStoreTypeOf(name, region) { return OFF_ONLINE_STORE_RE.test(String(name || '')) || OFF_ONLINE_STORE_RE.test(String(region || '')) ? '온라인' : '오프라인'; }
 
 // 하이마트 누적 스냅샷 보관 기간 — 차이 계산에는 "바로 이전 스냅샷"만 필요하다
 var OFF_SNAPSHOT_KEEP_DAYS = 45;
@@ -281,6 +288,12 @@ function _offExtendTab(sheet, def, from) {
     _offWriteAll(sheet, def, rows, rows.length);
   }
   // 목표실적_월 대분류 — 기존(모델 단위) 행은 품목군에서 채운다(OFFLINE_LINE_CATEGORY: apps-script-offline-targets.js)
+  // 점포유형 — 기존 점포는 이름·지역 규칙으로 채운다
+  if (def === OFF_TABS.store) {
+    var srows = _offReadRows(sheet, def);
+    srows.forEach(function (r) { if (r[0] && !r[6]) r[6] = _offStoreTypeOf(r[2], r[3]); });
+    _offWriteAll(sheet, def, srows, srows.length);
+  }
   if (def === OFF_TABS.targets) {
     var trows = _offReadRows(sheet, def);
     trows.forEach(function (r) { if (!r[11] && r[2]) r[11] = OFFLINE_LINE_CATEGORY[r[2]] || ''; });
@@ -303,7 +316,7 @@ function _offReadmeRows() {
     ['제품마스터', '표준 SKU. sku_id(SKU-0001)는 자동 부여. 품목군은 대시보드 품목 분류 상수의 값만 허용. 대시보드 코드 매핑 화면에서 만든다.'],
     ['채널마스터', '채널 목록. 업로드시작월(YYYY-MM) = 포털 업로드로 판매(OUT)를 집계하기 시작한 달 — 비어 있으면 업로드 없는 채널이라 OUT 실적은 목표 관리에서 입력·이관한 값을 쓴다. 활성=N 채널은 목표 관리 화면에 데이터가 있을 때만 보인다. 원천업태명 = 한 파일에 여러 채널이 섞인 포털 파일(이마트 점포별 일별 매출)의 업태명 값(쉼표로 여러 개). 점포명접두어 = 업태명이 없는 파일(이마트 재고)에서 점포마스터에 없는 점포를 가를 점포명 앞부분(쉼표로 여러 개). 코드체계채널 = 코드매핑을 빌려 쓸 채널(트레이더스 = emart, 빈칸 = 자기 자신). 재고기준일오프셋(일) = 재고 파일의 기준일 = 파일명 날짜 + 이 값(전자랜드·이마트·트레이더스 −1 = 받은 날의 전일 마감 재고, 하이마트 0). 스냅샷형 재고 파일에만 쓰인다.'],
     ['코드매핑', '(channel_id, 원본코드) → sku_id·재고구분(정상/전시/리퍼). 한 SKU에 여러 코드 가능. sku_id가 빈 행은 비활성화된 매핑.'],
-    ['점포마스터', '업로드 때 자동 추가·갱신. 지역 = 지부·지사.'],
+    ['점포마스터', '업로드 때 자동 추가·갱신. 지역 = 지부·지사. 점포유형 = 온라인/오프라인 — 새 점포는 점포명·지역 규칙(온라인·인터넷·e몰·쇼핑몰·(ON))으로 채우고, 사람이 고친 값은 그대로 둔다. 채널 상세 판매 분석의 온라인/오프라인 판매량이 이 값을 쓴다.'],
     ['판매원장', '판매 수량. 단위 day = 하루치(기간시작=기간종료), period = 여러 날 합. 원본코드만 저장하고 SKU는 읽을 때 코드매핑으로 해석. 설치완료수량은 하이마트만.'],
     ['재고_채널일별', '채널 전체 합계 재고, 기준일마다 누적(이력).'],
     ['재고_점포최신', '채널별 최신 기준일 1벌만 유지(0 재고 포함). 당월입고·당월판매는 파일에 있을 때만.'],
@@ -870,7 +883,7 @@ function _offUpsertStores(ctx, ch, stores) {
     if (!target) return;
     var k = cs(target) + OFF_KEY_SEP + code, row = idx[k];
     if (!row) {
-      row = [target, code, s.name || '', s.region || '', ctx.today, ctx.today];
+      row = [target, code, s.name || '', s.region || '', ctx.today, ctx.today, _offStoreTypeOf(s.name, s.region)];
       rows.push(row); idx[k] = row; added++;
       return;
     }
@@ -878,6 +891,7 @@ function _offUpsertStores(ctx, ch, stores) {
     if (s.name) row[2] = s.name;
     if (s.region) row[3] = s.region;
     if (ctx.today > row[5]) row[5] = ctx.today;
+    if (!row[6]) row[6] = _offStoreTypeOf(row[2], row[3]); // 점포유형은 비어 있을 때만 — 사람이 고친 값은 그대로
   });
   _offWriteAll(sheet, def, rows, prev);
   ctx.applied.storesAdded = added;
@@ -963,6 +977,7 @@ function _offlineHandle(action, data, auth) {
     else if (action === 'offline_getInventory') out = _offGetInventory(data || {});
     else if (action === 'offline_getDailySales') out = _offGetDailySales(data || {});
     else if (action === 'offline_getInventoryTrend') out = _offGetInventoryTrend(data || {});
+    else if (action === 'offline_getSalesBreakdown') out = _offGetSalesBreakdown(data || {});
     else if (action === 'offline_saveSettings') out = _offSaveSettings(data || {}, auth);
     // 파트 홈 (apps-script-home.js)
     else if (action === 'offline_getGonguTargets') out = _gtGet(data || {});
@@ -998,7 +1013,7 @@ function _offGetMasters() {
     }),
     mappings: _offReadRows(_offSheet(ss, 'mapping'), OFF_TABS.mapping).filter(function (r) { return r[0] && r[1]; }).map(_offMappingObj),
     stores: _offReadRows(_offSheet(ss, 'store'), OFF_TABS.store).filter(function (r) { return r[0] && r[1]; }).map(function (r) {
-      return { channelId: r[0], code: r[1], name: r[2], region: r[3], firstSeen: r[4], lastSeen: r[5] };
+      return { channelId: r[0], code: r[1], name: r[2], region: r[3], firstSeen: r[4], lastSeen: r[5], storeType: r[6] || _offStoreTypeOf(r[2], r[3]) };
     }),
     productLines: OFFLINE_PRODUCT_LINES,
     stockTypes: OFF_STOCK_TYPES,
