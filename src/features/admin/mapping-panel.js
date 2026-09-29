@@ -120,9 +120,12 @@ function _mpOpenNewSku(hostId,i){
   st.ns.name=_mpAutoName(st.ns.line,'','');
   _mpRerender(hostId);
 }
+// 옵션 필수 품목군(기타 — 품명을 옵션에 적는다): 카탈로그의 skuOptionHint가 곧 안내 문구
+function _mpNsOptionHint(lineKey){const l=PRODUCT_CATALOG.find(x=>x.key===lineKey);return (l&&l.skuOptionHint)||'';}
 function _mpNewSkuHtml(hostId,st){
   const ns=st.ns;
   const line=PRODUCT_CATALOG.find(l=>l.key===ns.line)||PRODUCT_CATALOG[0];
+  const hint=_mpNsOptionHint(line.key);
   return `<div class="mp-newsku">
     <div class="f-lbl">새 SKU${ns.forCode?' — '+_escHtml(ns.forCode)+'에 연결':''}</div>
     <div class="up-row">
@@ -130,8 +133,9 @@ function _mpNewSkuHtml(hostId,st){
         `<option value="${_escAttr(l.key)}"${l.key===ns.line?' selected':''}>${_escHtml(l.label)}</option>`).join('')}</select>
       <span class="f-lbl">모델</span><input class="f-inp" id="mpNsModel-${hostId}" list="mpNsModels-${hostId}" value="${_escAttr(ns.model)}" placeholder="예: ${_escAttr((line.models[0]||{}).label||'')}" oninput="_mpNsInput('${hostId}')">
       <datalist id="mpNsModels-${hostId}">${line.models.map(m=>`<option value="${_escAttr(m.label)}"></option>`).join('')}</datalist>
-      <span class="f-lbl">옵션</span><input class="f-inp" id="mpNsOption-${hostId}" value="${_escAttr(ns.option)}" placeholder="예: 그레이지" oninput="_mpNsInput('${hostId}')">
+      <span class="f-lbl">옵션${hint?' <span class="off-miss">(필수)</span>':''}</span><input class="f-inp${hint?' mp-ns-name':''}" id="mpNsOption-${hostId}" value="${_escAttr(ns.option)}" placeholder="${_escAttr(hint||'예: 그레이지')}" oninput="_mpNsInput('${hostId}')">
     </div>
+    ${hint?`<div class="mp-sugg">${_escHtml(hint)} — 표준명은 "${_escHtml(line.label)} {옵션}"으로 만들어집니다.</div>`:''}
     <div class="up-row">
       <span class="f-lbl">표준명</span><input class="f-inp mp-ns-name" id="mpNsName-${hostId}" value="${_escAttr(ns.name)}" oninput="_mpNsNameEdited('${hostId}',this.value)">
       <button type="button" class="btn-primary up-btn" ${st.busy?'disabled':''} onclick="_mpCreateSku('${hostId}')">만들기</button>
@@ -143,7 +147,14 @@ function _mpNewSkuHtml(hostId,st){
 function _mpNsInput(hostId,lineChanged){
   const ns=_MP[hostId].ns;
   const v=id=>{const el=document.getElementById(id+'-'+hostId);return el?el.value:'';};
+  const prevLine=ns.line;
   ns.line=v('mpNsLine')||ns.line;ns.model=v('mpNsModel');ns.option=v('mpNsOption');
+  // 옵션 필수 품목군(기타)은 모델이 하나뿐이라 미리 채우고, 다른 품목군으로 옮기면 그 모델을 비운다
+  if(lineChanged&&ns.line!==prevLine){
+    const cur=PRODUCT_CATALOG.find(l=>l.key===ns.line),prev=PRODUCT_CATALOG.find(l=>l.key===prevLine);
+    if(cur&&cur.skuOptionHint)ns.model=cur.models[0].label;
+    else if(prev&&prev.skuOptionHint&&ns.model===prev.models[0].label)ns.model='';
+  }
   if(!ns.nameEdited){
     ns.name=_mpAutoName(ns.line,ns.model,ns.option);
     const el=document.getElementById('mpNsName-'+hostId);
@@ -157,6 +168,7 @@ async function _mpCreateSku(hostId){
   const st=_MP[hostId],ns=st.ns;
   if(!ns||st.busy)return;
   if(!String(ns.name||'').trim()){showToast('표준명을 입력하세요.',{type:'error'});return;}
+  if(_mpNsOptionHint(ns.line)&&!String(ns.option||'').trim()){showToast('옵션에 품명을 입력하세요 — '+_mpNsOptionHint(ns.line),{type:'error'});return;}
   st.busy=true;_mpRerender(hostId);
   try{
     const j=await _offlineCall('offline_saveSku',{sku:{name:ns.name.trim(),line:ns.line,model:ns.model.trim(),option:ns.option.trim(),active:'Y'}});

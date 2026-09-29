@@ -1008,6 +1008,8 @@ function _offSaveSku(data, auth) {
     if (!keep(s.active)) row[5] = s.active === 'N' ? 'N' : 'Y';
     if (!keep(s.order)) row[6] = order;
     if (!keep(s.note)) row[7] = String(s.note || '').trim();
+    // 기타 품목군은 모델이 '기타' 하나뿐이라 옵션이 곧 품명이다(예: 3kg 건조기 전시대) — 비면 무엇인지 알 수 없다
+    if (line === '기타' && !row[4]) throw new Error('기타 품목군은 옵션에 품명을 입력해야 합니다 (예: 3kg 건조기 전시대).');
     _offWriteAll(sheet, def, rows, prev);
     var mappedCodes = _offReadRows(_offSheet(ss, 'mapping'), OFF_TABS.mapping).filter(function (m) { return m[0] && m[1] && m[2] === id; }).length;
     _offInvalidateCache();
