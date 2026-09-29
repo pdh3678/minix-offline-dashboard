@@ -1,8 +1,8 @@
 'use strict';
 /* 목표 관리(#admin/targets) — 오프라인 채널 월별 목표(Sell-in IN·Sell-out OUT)와 실적 입력, 단가, 과거 실적 이관.
-   탭 4개: [월별 입력] offline_getMonthly + offline_saveTargets / [연간 보기] targets-annual.js /
+   탭 5개: [월별 입력] offline_getMonthly + offline_saveTargets / [연간 보기] targets-annual.js / [공구 목표] targets-gongu.js /
           [단가] offline_getPrices·savePrices·deletePrice /
-          [이관] offline_migrateProgress·migratePrices(미리보기 → 매핑 확인 → 반영)
+          [이관] offline_migrateProgress·migratePrices·migrateGonguTargets(미리보기 → 매핑 확인 → 반영)
 
    본품 외 대분류(필터·기타) 행은 기본으로 숨기고 "비본품 표시"(월별 입력·연간 보기 공유)로 채널 합계 아래에 보인다.
    채널·전체 합계는 켜도 본품 합계다.
@@ -14,7 +14,8 @@ const _TG_FIELDS=['inT','inA','outT','outA'];
 const _TG={tab:'monthly',ym:'',ch:'',data:null,err:'',loading:false,edits:{},collapsed:{},saving:false,view:[],nonMain:false,
   prices:null,priceErr:'',priceCh:'',priceEditKey:null,priceEdit:null,priceForm:null,priceBusy:false,
   mig:{prog:null,progErr:'',progBusy:false,progMap:null,progResult:null,progConfirm:false,
-    price:null,priceErr:'',priceBusy:false,priceRows:{},priceStart:'',priceResult:null,priceConfirm:false,log:null}};
+    price:null,priceErr:'',priceBusy:false,priceRows:{},priceStart:'',priceResult:null,priceConfirm:false,log:null,
+    gg:null,ggErr:'',ggBusy:false,ggMap:null,ggResult:null,ggConfirm:false}};
 
 function _tgThisYm(){const d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0');}
 function _tgPrevYm(ym){let y=+ym.slice(0,4),m=+ym.slice(5,7)-1;if(m<1){m=12;y--;}return y+'-'+String(m).padStart(2,'0');}
@@ -44,6 +45,7 @@ function _tgSetTab(t){
   if(t==='monthly'&&!_TG.data&&!_TG.loading)_tgLoad();
   if(t==='prices'&&!_TG.prices)_tgLoadPrices();
   if(t==='annual'&&!_TGA.data)_tgaLoad();
+  if(t==='gongu'&&!_TGG.data)_tggLoad();
 }
 function _tgSetYm(v){
   if(!/^\d{4}-\d{2}$/.test(v))return;
@@ -153,11 +155,12 @@ function _tgDupEdits(){
 function _tgRender(){
   const host=document.getElementById('page-admin-targets');
   if(!host)return;
-  const tabs=[['monthly','월별 입력'],['annual','연간 보기'],['prices','단가'],['migrate','이관']];
+  const tabs=[['monthly','월별 입력'],['annual','연간 보기'],['gongu','공구 목표'],['prices','단가'],['migrate','이관']];
   host.innerHTML=`<div class="subtabs open">${tabs.map(([k,l])=>`<button type="button" class="stab${_TG.tab===k?' sam':''}" onclick="_tgSetTab('${k}')">${l}</button>`).join('')}</div>`+
-    (_TG.tab==='monthly'?_tgMonthlyHtml():_TG.tab==='annual'?_tgaHtml():_TG.tab==='prices'?_tgPricesHtml():_tgMigrateHtml());
+    (_TG.tab==='monthly'?_tgMonthlyHtml():_TG.tab==='annual'?_tgaHtml():_TG.tab==='gongu'?_tggHtml():_TG.tab==='prices'?_tgPricesHtml():_tgMigrateHtml());
   if(_TG.tab==='monthly'&&_TG.data&&!_TG.err)_tgRefreshNumbers();
   if(_TG.tab==='annual')_tgaRefresh(); // 연간 보기(targets-annual.js)
+  if(_TG.tab==='gongu')_tggRefresh(); // 공구 목표(targets-gongu.js)
 }
 
 function _tgMonthlyHtml(){
@@ -463,6 +466,7 @@ function _tgMigrateHtml(){
     ${g.priceErr?`<div class="up-err">${_escHtml(g.priceErr)}</div>`:''}
     ${g.priceResult?`<div class="up-result">✓ 반영 완료 — ${g.priceResult.written}건${g.priceResult.unmapped&&g.priceResult.unmapped.length?` · 미매핑 ${g.priceResult.unmapped.length}건: ${_escHtml(g.priceResult.unmapped.join(', '))}`:''}</div>`:''}
     ${g.price?_tgPricePreviewHtml(g.price):''}</div>
+  ${_tgGongMigrateHtml()}
   ${g.log?`<div class="card"><div class="card-hd">이관로그<span class="card-hd-r">최근 20건</span></div>${_tgLogHtml(g.log)}</div>`:''}`;
 }
 function _tgLogHtml(log){

@@ -108,6 +108,7 @@
 .tg-cat td{font-weight:800;background:var(--surface-2)}
 .tg-catrow td{color:var(--text-2)}
 .tg-sep td{border-top:2px dashed var(--border-s);padding-top:10px;font-size:11px;font-weight:700;color:var(--text-3)}
+.tga-gongu-sep td{border-top:2px solid var(--border-s);padding-top:10px;font-size:11px;font-weight:700;color:var(--text-3)} /* 연간 보기 — 채널 합계 아래 공동구매(읽기 전용) 구역 */
 .tg-catrow .tg-model{font-style:italic}
 .tg-line td:first-child{padding-left:20px!important}
 
