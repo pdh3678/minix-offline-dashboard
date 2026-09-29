@@ -50,7 +50,8 @@ var OFF_TABS = {
   readme:     { name: 'README', headers: ['탭', '설명'], text: [0, 1] },
   sku:        { name: '제품마스터', headers: ['sku_id', '표준명', '품목군', '모델', '옵션', '활성', '정렬순서', '비고'], text: [0, 1, 2, 3, 4, 5, 7] },
   // 원천업태명·점포명접두어·코드체계채널(6~8)은 트레이더스 분리(2026-09-28)에서 덧붙인 열 — 설명은 README·OFF_CHANNEL_SEED 주석
-  channel:    { name: '채널마스터', headers: ['channel_id', '채널명', '유형', '활성', '정렬순서', '업로드시작월', '원천업태명', '점포명접두어', '코드체계채널'], text: [0, 1, 2, 3, 5, 6, 7, 8] },
+  // 재고기준일오프셋(9, 숫자)은 재고 기준일 보정(2026-09-29)에서 덧붙인 열 — OFF_STOCK_OFFSET_SEED 주석
+  channel:    { name: '채널마스터', headers: ['channel_id', '채널명', '유형', '활성', '정렬순서', '업로드시작월', '원천업태명', '점포명접두어', '코드체계채널', '재고기준일오프셋'], text: [0, 1, 2, 3, 5, 6, 7, 8] },
   mapping:    { name: '코드매핑', headers: ['channel_id', '원본코드', 'sku_id', '재고구분', '원본상품명', '등록일', '등록자', '비고'], text: [0, 1, 2, 3, 4, 5, 6, 7] },
   store:      { name: '점포마스터', headers: ['channel_id', '점포코드', '점포명', '지역', '최초등록일', '최근확인일'], text: [0, 1, 2, 3, 4, 5] },
   sales:      { name: '판매원장', headers: ['기간시작', '기간종료', '단위', 'channel_id', '점포코드', '원본코드', '수량', '설치완료수량', '출처', 'upload_id'], text: [0, 1, 2, 3, 4, 5, 8, 9] },
@@ -87,16 +88,23 @@ var OFF_UPLOAD_START_SEED = { himart: '2026-09', etland: '2026-09', emart: '2026
    점포명접두어 업태명이 없는 파일(이마트 재고)에서 점포마스터에도 없는 점포를 점포명 앞부분으로 가를 때. 쉼표로 여러 개
    코드체계채널 코드매핑을 빌려 쓸 채널 — 트레이더스는 이마트와 같은 상품코드라 이마트 매핑을 그대로 쓴다(빈칸 = 자기 자신) */
 var OFF_CHANNEL_SEED = [
-  ['himart', '하이마트', '전문점', 'Y', 1, '2026-09', '', '', 'himart'],
-  ['etland', '전자랜드', '전문점', 'Y', 2, '2026-09', '', '', 'etland'],
-  ['emart', '이마트', '할인점', 'Y', 3, '2026-09', '이마트', 'EM', 'emart'],
-  ['traders', '트레이더스', '창고형', 'Y', 4, '2026-09', '트레이더스', 'TR', 'emart'],
-  ['shinsegae', '신세계', '백화점', 'N', 5, '', '', '', 'shinsegae'],
-  ['theablen', '디에이블앤', '폐쇄몰', 'N', 6, '', '', '', 'theablen'],
-  ['special', '기타 특판', '특판', 'N', 7, '', '', '', 'special']
+  ['himart', '하이마트', '전문점', 'Y', 1, '2026-09', '', '', 'himart', 0],
+  ['etland', '전자랜드', '전문점', 'Y', 2, '2026-09', '', '', 'etland', -1],
+  ['emart', '이마트', '할인점', 'Y', 3, '2026-09', '이마트', 'EM', 'emart', -1],
+  ['traders', '트레이더스', '창고형', 'Y', 4, '2026-09', '트레이더스', 'TR', 'emart', -1],
+  ['shinsegae', '신세계', '백화점', 'N', 5, '', '', '', 'shinsegae', 0],
+  ['theablen', '디에이블앤', '폐쇄몰', 'N', 6, '', '', '', 'theablen', 0],
+  ['special', '기타 특판', '특판', 'N', 7, '', '', '', 'special', 0]
 ];
 // 원천업태명·점포명접두어·코드체계채널 초기값(열을 덧붙일 때만 — 이미 있는 값은 덮어쓰지 않음)
 var OFF_CHANNEL_SPLIT_SEED = { emart: ['이마트', 'EM', 'emart'], traders: ['트레이더스', 'TR', 'emart'] };
+/* 재고기준일오프셋(일) — 재고 기준일 = 파일명 날짜 + 이 값. 전자랜드 현재고·이마트 재고현황_상세(트레이더스 포함)는
+   받은 날의 전일 마감 재고라 −1, 하이마트 판매재고현황은 파일명 날짜가 곧 기준일(0). 열을 덧붙일 때만 채운다(없는 채널은 0).
+   스냅샷형 파일에만 쓴다 — 하이마트(himart 유형)는 같은 기준일로 누적 판매 차이도 계산하므로 이 값과 무관하게 파일명 날짜 그대로. */
+var OFF_STOCK_OFFSET_SEED = { himart: 0, etland: -1, emart: -1, traders: -1 };
+// 업로드로그 경고 열에 남기는 재고 기준일 표시 — offline_fixStockDates는 이 표시가 있는 업로드(이미 새 기준)를 옮기지 않는다
+var OFF_STOCK_BASIS_NOTE = '재고 기준일 ';
+var OFF_STOCK_FIX_KEY = '재고기준일보정_완료';
 
 // 하이마트 누적 스냅샷 보관 기간 — 차이 계산에는 "바로 이전 스냅샷"만 필요하다
 var OFF_SNAPSHOT_KEEP_DAYS = 45;
@@ -158,6 +166,100 @@ function offline_setupSheets() {
   return report;
 }
 
+/* 재고 기준일 1회 보정 — 편집기에서 직접 1회 실행(offline_setupSheets로 채널마스터에 재고기준일오프셋 열을 붙인 뒤).
+   이 보정 전에 올린 스냅샷형 재고는 파일명 날짜 그대로 저장돼 있다 → 채널 오프셋만큼 옮긴다(전자랜드·이마트·트레이더스 −1일).
+     재고_채널일별·재고_점포최신  channel_id의 오프셋만큼 기준일을 옮긴다
+     업로드로그                  스냅샷형 파일(전자랜드 현재고·이마트 재고현황_상세)의 기준일을 그 파일 채널(ft.channelId)의 오프셋만큼
+   건드리지 않는 것: 판매원장, 하이마트(오프셋 0 · himart 유형), 이미 새 기준으로 올라온 업로드(업로드로그 경고에 "재고 기준일" 표시).
+   옮긴 뒤 같은 (기준일, 채널)에 업로드가 둘 이상이면(옛 업로드를 옮긴 날짜에 새 업로드가 이미 있을 때) 업로드 시각이 늦은 업로드의 행만
+   남긴다 — 스냅샷은 업로드 한 번이 그 날 그 채널의 재고 전체라, 코드별로 섞지 않고 업로드 단위로 고른다. 재고_점포최신은 채널마다
+   가장 최근 기준일 한 벌만 남긴다(원래 규칙). 끝나면 설정 탭에 재고기준일보정_완료 = 1(설명에 시각·건수)을 적고, 이미 있으면 아무것도 하지 않는다. */
+function offline_fixStockDates() {
+  return _offWithLock(function () {
+    var ss = _offSS();
+    var sDef = OFF_TABS.settings, sSheet = _offSheet(ss, 'settings'), sRows = _offReadRows(sSheet, sDef), sPrev = sRows.length;
+    for (var i = 0; i < sRows.length; i++) {
+      if (sRows[i][0] === OFF_STOCK_FIX_KEY && Number(sRows[i][1])) {
+        var done = { skipped: true, reason: '이미 보정했습니다 — ' + sRows[i][2] };
+        Logger.log('[offline_fixStockDates] ' + JSON.stringify(done));
+        return done;
+      }
+    }
+    var chSheet = _offSheet(ss, 'channel');
+    if (String(chSheet.getRange(1, 10).getValues()[0][0] || '').trim() !== '재고기준일오프셋') {
+      throw new Error('채널마스터에 재고기준일오프셋 열이 없습니다 — 편집기에서 offline_setupSheets를 먼저 실행하세요.');
+    }
+    var off = {};
+    _offReadRows(chSheet, OFF_TABS.channel).forEach(function (r) { var o = _offStockOffsetOf(r); if (r[0] && o) off[r[0]] = o; });
+    if (!Object.keys(off).length) {
+      var none = { skipped: true, reason: '재고기준일오프셋이 0이 아닌 채널이 없어 옮길 것이 없습니다(완료 표시도 남기지 않음).' };
+      Logger.log('[offline_fixStockDates] ' + JSON.stringify(none));
+      return none;
+    }
+    var lDef = OFF_TABS.uploadLog, lSheet = _offSheet(ss, 'uploadLog'), logs = _offReadRows(lSheet, lDef);
+    var newBasis = {}, logAt = {};
+    // 업로드 시각이 같으면 로그의 뒤쪽 행(나중에 쓴 것)이 늦은 업로드
+    logs.forEach(function (r, i) {
+      if (!r[0]) return;
+      logAt[r[0]] = String(r[1] || '') + '#' + ('000000' + i).slice(-6);
+      if (String(r[10] || '').indexOf(OFF_STOCK_BASIS_NOTE) >= 0) newBasis[r[0]] = true;
+    });
+    var report = { channels: off, stockDaily: 0, stockStore: 0, uploadLog: 0, duplicates: [], storeDropped: 0 };
+    // 1) 재고_채널일별 — 옮기고, 같은 (기준일, 채널)에 업로드가 둘 이상이면 늦은 업로드만
+    var dDef = OFF_TABS.stockDaily, dSheet = _offSheet(ss, 'stockDaily'), dRows = _offReadRows(dSheet, dDef), dPrev = dRows.length;
+    dRows.forEach(function (r) {
+      var o = off[r[1]];
+      if (!o || newBasis[r[6]] || !_offIsDate(r[0])) return;
+      r[0] = _offAddDays(r[0], o); report.stockDaily++;
+    });
+    var ups = {};
+    dRows.forEach(function (r) { var k = r[0] + OFF_KEY_SEP + r[1]; (ups[k] = ups[k] || {})[r[6]] = true; });
+    var keepUp = {};
+    Object.keys(ups).forEach(function (k) {
+      var list = Object.keys(ups[k]);
+      if (list.length < 2) return;
+      list.sort(function (a, b) { var x = logAt[a] || '', y = logAt[b] || ''; return x < y ? -1 : x > y ? 1 : 0; });
+      keepUp[k] = list[list.length - 1];
+      var p = k.split(OFF_KEY_SEP);
+      report.duplicates.push({ date: p[0], channelId: p[1], kept: keepUp[k], dropped: list.slice(0, -1) });
+    });
+    var dKept = dRows.filter(function (r) { var k = r[0] + OFF_KEY_SEP + r[1]; return !keepUp[k] || r[6] === keepUp[k]; });
+    report.duplicateRows = dRows.length - dKept.length;
+    // 2) 재고_점포최신 — 옮기고, 채널마다 가장 최근 기준일 한 벌만
+    var tDef = OFF_TABS.stockStore, tSheet = _offSheet(ss, 'stockStore'), tRows = _offReadRows(tSheet, tDef), tPrev = tRows.length;
+    tRows.forEach(function (r) {
+      var o = off[r[1]];
+      if (!o || newBasis[r[9]] || !_offIsDate(r[0])) return;
+      r[0] = _offAddDays(r[0], o); report.stockStore++;
+    });
+    var latest = {};
+    tRows.forEach(function (r) { if (_offIsDate(r[0]) && r[0] > (latest[r[1]] || '')) latest[r[1]] = r[0]; });
+    var tKept = tRows.filter(function (r) { return !_offIsDate(r[0]) || r[0] === latest[r[1]]; });
+    report.storeDropped = tRows.length - tKept.length;
+    // 3) 업로드로그 — 스냅샷형 파일의 기준일
+    logs.forEach(function (r) {
+      var ft = OFF_FILE_TYPES[r[4]], o = ft && ft.kind === 'snapshot' ? off[ft.channelId] : 0;
+      if (!o || newBasis[r[0]] || !_offIsDate(r[6])) return;
+      r[6] = _offAddDays(r[6], o); report.uploadLog++;
+    });
+    _offWriteAll(dSheet, dDef, dKept, dPrev);
+    _offWriteAll(tSheet, tDef, tKept, tPrev);
+    _offWriteAll(lSheet, lDef, logs, logs.length);
+    var at = Utilities.formatDate(new Date(), 'Asia/Seoul', 'yyyy-MM-dd HH:mm:ss');
+    var desc = at + ' 보정 — 재고_채널일별 ' + report.stockDaily + '행 · 재고_점포최신 ' + report.stockStore + '행 · 업로드로그 ' + report.uploadLog + '행' +
+      (report.duplicateRows ? ' · 중복 정리 ' + report.duplicateRows + '행' : '') + (report.storeDropped ? ' · 점포최신 옛 기준일 ' + report.storeDropped + '행' : '') + ' (' + Object.keys(off).join('·') + ')';
+    var hit = null;
+    sRows.forEach(function (r) { if (r[0] === OFF_STOCK_FIX_KEY) hit = r; });
+    if (!hit) { hit = [OFF_STOCK_FIX_KEY, '', '']; sRows.push(hit); }
+    hit[1] = 1; hit[2] = desc;
+    _offWriteAll(sSheet, sDef, sRows, sPrev);
+    _offInvalidateCache();
+    report.done = true; report.note = desc;
+    Logger.log('[offline_fixStockDates] ' + JSON.stringify(report));
+    return report;
+  });
+}
+
 // 기존 탭 뒤에 새 열(from부터)을 붙인다 — 헤더·텍스트 서식, 채널마스터면 새 열의 초기값
 function _offExtendTab(sheet, def, from) {
   var W = def.headers.length;
@@ -174,6 +276,8 @@ function _offExtendTab(sheet, def, from) {
       if (!r[8]) r[8] = r[0];
       if (r[0] === 'traders') { r[3] = 'Y'; if (!r[5]) r[5] = OFF_UPLOAD_START_SEED.traders; }
     });
+    // 재고기준일오프셋 — 그 열을 이번에 붙일 때만(사람이 고친 값은 덮어쓰지 않음)
+    if (from <= 9) rows.forEach(function (r) { if (r[9] === '' || r[9] == null) r[9] = OFF_STOCK_OFFSET_SEED[r[0]] || 0; });
     _offWriteAll(sheet, def, rows, rows.length);
   }
   // 목표실적_월 대분류 — 기존(모델 단위) 행은 품목군에서 채운다(OFFLINE_LINE_CATEGORY: apps-script-offline-targets.js)
@@ -197,7 +301,7 @@ function _offReadmeRows() {
   return [
     ['⚠ 원장 탭은 직접 수정 금지', '판매원장·재고_채널일별·재고_점포최신·하이마트_누적스냅샷·업로드로그는 대시보드(데이터 업로드)에서만 반영한다. 손으로 고치면 다음 업로드가 그 범위를 다시 덮어쓴다.'],
     ['제품마스터', '표준 SKU. sku_id(SKU-0001)는 자동 부여. 품목군은 대시보드 품목 분류 상수의 값만 허용. 대시보드 코드 매핑 화면에서 만든다.'],
-    ['채널마스터', '채널 목록. 업로드시작월(YYYY-MM) = 포털 업로드로 판매(OUT)를 집계하기 시작한 달 — 비어 있으면 업로드 없는 채널이라 OUT 실적은 목표 관리에서 입력·이관한 값을 쓴다. 활성=N 채널은 목표 관리 화면에 데이터가 있을 때만 보인다. 원천업태명 = 한 파일에 여러 채널이 섞인 포털 파일(이마트 점포별 일별 매출)의 업태명 값(쉼표로 여러 개). 점포명접두어 = 업태명이 없는 파일(이마트 재고)에서 점포마스터에 없는 점포를 가를 점포명 앞부분(쉼표로 여러 개). 코드체계채널 = 코드매핑을 빌려 쓸 채널(트레이더스 = emart, 빈칸 = 자기 자신).'],
+    ['채널마스터', '채널 목록. 업로드시작월(YYYY-MM) = 포털 업로드로 판매(OUT)를 집계하기 시작한 달 — 비어 있으면 업로드 없는 채널이라 OUT 실적은 목표 관리에서 입력·이관한 값을 쓴다. 활성=N 채널은 목표 관리 화면에 데이터가 있을 때만 보인다. 원천업태명 = 한 파일에 여러 채널이 섞인 포털 파일(이마트 점포별 일별 매출)의 업태명 값(쉼표로 여러 개). 점포명접두어 = 업태명이 없는 파일(이마트 재고)에서 점포마스터에 없는 점포를 가를 점포명 앞부분(쉼표로 여러 개). 코드체계채널 = 코드매핑을 빌려 쓸 채널(트레이더스 = emart, 빈칸 = 자기 자신). 재고기준일오프셋(일) = 재고 파일의 기준일 = 파일명 날짜 + 이 값(전자랜드·이마트·트레이더스 −1 = 받은 날의 전일 마감 재고, 하이마트 0). 스냅샷형 재고 파일에만 쓰인다.'],
     ['코드매핑', '(channel_id, 원본코드) → sku_id·재고구분(정상/전시/리퍼). 한 SKU에 여러 코드 가능. sku_id가 빈 행은 비활성화된 매핑.'],
     ['점포마스터', '업로드 때 자동 추가·갱신. 지역 = 지부·지사.'],
     ['판매원장', '판매 수량. 단위 day = 하루치(기간시작=기간종료), period = 여러 날 합. 원본코드만 저장하고 SKU는 읽을 때 코드매핑으로 해석. 설치완료수량은 하이마트만.'],
@@ -381,6 +485,13 @@ function _offCodeSystem(channelRows) {
   return function (ch) { return m[ch] || ch; };
 }
 function _offCodeSystemOf(ss) { return _offCodeSystem(_offReadRows(_offSheet(ss, 'channel'), OFF_TABS.channel)); }
+/* 채널마스터 행의 재고기준일오프셋(일) — 열이 없거나(setup 전) 빈칸·정수가 아니면 0. ±7일까지만 받는다(잘못 적은 큰 값이 기준일을 멀리 보내지 않게) */
+function _offStockOffsetOf(r) {
+  var v = r ? r[9] : '';
+  if (v === '' || v == null) return 0;
+  var n = Number(v);
+  return isFinite(n) && n === Math.round(n) && Math.abs(n) <= 7 ? n : 0;
+}
 function _offSplitList(v) { return String(v == null ? '' : v).split(',').map(function (x) { return x.trim(); }).filter(function (x) { return x; }); }
 /* split 파일 반영용 채널마스터 요약 — codeSys(코드체계채널), byBiz{원천업태명: 채널}, prefixes[{channelId, prefix}](긴 접두어 먼저) */
 function _offChannelMeta(ss) {
@@ -433,6 +544,7 @@ function _offUpload(data, auth) {
       channels: null, storeChannel: null
     };
     ctx.chMeta = _offChannelMeta(ctx.ss);
+    if (ft.kind === 'snapshot') _offStockBasis(ctx, meta, ft);
     try {
       var range = {};
       if (ft.kind === 'period') range = _offApplyPeriodSales(ctx, meta, rec, ft);
@@ -549,6 +661,25 @@ function _offApplyStock(ctx, meta, rec, ft) {
     ctx.applied.stockStore = sRows.length;
   }
   return { baseDate: D };
+}
+
+/* 스냅샷형 재고 기준일. 새 화면은 파일명 날짜 + 채널 재고기준일오프셋을 미리보기에서 정해 meta.baseDate로, 파일명 날짜를 meta.fileDate로
+   보낸다 — 그대로 쓴다(사람이 고친 날짜일 수도 있다). meta.fileDate가 없으면 옛 화면(오프셋을 모름 — 새로고침 전 탭)이라
+   파일명 날짜로 온 기준일에 그 파일 채널(ft.channelId — 이마트 파일은 이마트·트레이더스가 섞여도 이마트 값)의 오프셋을 더한다.
+   어느 쪽이든 업로드로그 경고 열에 "재고 기준일 …" 표시를 남긴다 — offline_fixStockDates가 이미 새 기준인 업로드를 다시 옮기지 않게. */
+function _offStockBasis(ctx, meta, ft) {
+  var row = null;
+  ctx.chMeta.rows.forEach(function (r) { if (r[0] === ft.channelId) row = r; });
+  var off = _offStockOffsetOf(row);
+  if (meta.fileDate === undefined) {
+    if (!off) return;
+    var d0 = meta.baseDate;
+    meta.baseDate = _offAddDays(d0, off);
+    ctx.warnings.push(OFF_STOCK_BASIS_NOTE + meta.baseDate + ' (파일명 날짜 ' + d0 + ' ' + off + '일 — 채널마스터 재고기준일오프셋)');
+    return;
+  }
+  var f = _offIsDate(meta.fileDate) ? meta.fileDate : '';
+  ctx.warnings.push(OFF_STOCK_BASIS_NOTE + meta.baseDate + (f ? (f === meta.baseDate ? ' (파일명 날짜 그대로)' : ' (파일명 날짜 ' + f + ')') : ''));
 }
 
 // 파일에 없는 값은 빈칸('없음')으로 — 0(있는데 0개)과 구분한다
@@ -863,7 +994,7 @@ function _offGetMasters() {
     skus: _offReadRows(_offSheet(ss, 'sku'), OFF_TABS.sku).filter(function (r) { return r[0]; }).map(_offSkuObj),
     channels: _offReadRows(_offSheet(ss, 'channel'), OFF_TABS.channel).filter(function (r) { return r[0]; }).map(function (r) {
       return { channelId: r[0], name: r[1], type: r[2], active: r[3], order: r[4], uploadStartMonth: r[5] || '',
-        bizNames: r[6] || '', storePrefix: r[7] || '', codeSystem: r[8] || r[0] };
+        bizNames: r[6] || '', storePrefix: r[7] || '', codeSystem: r[8] || r[0], stockOffset: _offStockOffsetOf(r) };
     }),
     mappings: _offReadRows(_offSheet(ss, 'mapping'), OFF_TABS.mapping).filter(function (r) { return r[0] && r[1]; }).map(_offMappingObj),
     stores: _offReadRows(_offSheet(ss, 'store'), OFF_TABS.store).filter(function (r) { return r[0] && r[1]; }).map(function (r) {

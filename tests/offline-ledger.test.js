@@ -37,8 +37,9 @@ function himart(entries) {
   return [['지사명', '인도처코드', '인도처명', '상품코드', '상품명', '당월실판매', '당월판매', '금주판매', '당일판매', '잔여재고', '회전율']]
     .concat(Object.keys(entries).map(k => { const [s, c] = k.split('|'); const v = entries[k]; return ['가상지사', s, s + 'HM', c, '가상 ' + c].concat(v, [0]); }));
 }
+// 원장 반영 규칙만 본다 — 재고기준일오프셋 0 채널로 파싱(오프셋·옛 화면 호환은 tests/offline-stock-date.test.js)
 function upload(ctx, rows, fileName, edits) {
-  const r = P.parseRows(rows, { fileName, today: TODAY });
+  const r = P.parseRows(rows, { fileName, today: TODAY, stockOffsets: {} });
   if (!r.ok) throw new Error('픽스처 파싱 실패: ' + r.error);
   return ctx._offUpload(P.toUploadPayload(r, Object.assign({ fileName }, edits || {})), AUTH);
 }

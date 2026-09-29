@@ -21,7 +21,7 @@ function check(l, c, extra) {
 const EXPECT = [
   ['README', ['탭', '설명']],
   ['제품마스터', ['sku_id', '표준명', '품목군', '모델', '옵션', '활성', '정렬순서', '비고']],
-  ['채널마스터', ['channel_id', '채널명', '유형', '활성', '정렬순서', '업로드시작월', '원천업태명', '점포명접두어', '코드체계채널']],
+  ['채널마스터', ['channel_id', '채널명', '유형', '활성', '정렬순서', '업로드시작월', '원천업태명', '점포명접두어', '코드체계채널', '재고기준일오프셋']],
   ['코드매핑', ['channel_id', '원본코드', 'sku_id', '재고구분', '원본상품명', '등록일', '등록자', '비고']],
   ['점포마스터', ['channel_id', '점포코드', '점포명', '지역', '최초등록일', '최근확인일']],
   ['판매원장', ['기간시작', '기간종료', '단위', 'channel_id', '점포코드', '원본코드', '수량', '설치완료수량', '출처', 'upload_id']],
@@ -38,7 +38,7 @@ const EXPECT = [
 ];
 // 텍스트 서식이어야 하는 열(날짜·코드·id) — 숫자 열은 절대 텍스트가 되면 안 된다(합계가 깨짐)
 const NUMERIC = {
-  '제품마스터': ['정렬순서'], '채널마스터': ['정렬순서'], '판매원장': ['수량', '설치완료수량'],
+  '제품마스터': ['정렬순서'], '채널마스터': ['정렬순서', '재고기준일오프셋'], '판매원장': ['수량', '설치완료수량'],
   '재고_채널일별': ['재고수량', '이동중수량', '예약수량'],
   '재고_점포최신': ['재고수량', '이동중수량', '예약수량', '당월입고', '당월판매'],
   '하이마트_누적스냅샷': ['당월실판매', '당월판매', '금주판매', '당일판매', '잔여재고'],
@@ -165,7 +165,7 @@ function textColsFromFormats(sheet) {
     ['목표실적_월', '단가마스터', '이관로그'].forEach(n => { delete off._sheets[n]; off._order.splice(off._order.indexOf(n), 1); });
     tab('README')._grid.length = 12;
     const rep = ctx.offline_setupSheets();
-    check('채널마스터 확장 보고(업로드시작월 + 트레이더스 분리 3열)', rep.extended.length === 1 && JSON.stringify(rep.extended[0].added) === '["업로드시작월","원천업태명","점포명접두어","코드체계채널"]', rep.extended);
+    check('채널마스터 확장 보고(업로드시작월 + 트레이더스 분리 3열 + 재고기준일오프셋)', rep.extended.length === 1 && JSON.stringify(rep.extended[0].added) === '["업로드시작월","원천업태명","점포명접두어","코드체계채널","재고기준일오프셋"]', rep.extended);
     check('2-A 탭 3개 생성', JSON.stringify(rep.created) === JSON.stringify(['목표실적_월', '단가마스터', '이관로그']), rep.created);
     check('헤더가 다른 탭 없음', rep.mismatched.length === 0, rep.mismatched);
     const rows = dataRows(ch);
@@ -228,10 +228,10 @@ function textColsFromFormats(sheet) {
     ch._grid[3][5] = '2026-08';                              // 사람이 이마트 업로드시작월을 바꿔 둠
     ch._grid[1][5] = '';                                     // 사람이 하이마트 업로드시작월을 비워 둠
     const rep = ctx.offline_setupSheets();
-    check('채널마스터 확장 보고(3열)', rep.extended.length === 1 && J(rep.extended[0].added) === J(['원천업태명', '점포명접두어', '코드체계채널']), rep.extended);
+    check('채널마스터 확장 보고(3열 + 재고기준일오프셋)', rep.extended.length === 1 && J(rep.extended[0].added) === J(['원천업태명', '점포명접두어', '코드체계채널', '재고기준일오프셋']), rep.extended);
     const rows = dataRows(ch), by = id => rows.find(r => r[0] === id);
     check('이마트 = 이마트 / EM / emart, 트레이더스 = 트레이더스 / TR / emart, 나머지 코드체계 = 자기 자신',
-      J(by('emart').slice(6)) === J(['이마트', 'EM', 'emart']) && J(by('traders').slice(6)) === J(['트레이더스', 'TR', 'emart']) &&
+      J(by('emart').slice(6, 9)) === J(['이마트', 'EM', 'emart']) && J(by('traders').slice(6, 9)) === J(['트레이더스', 'TR', 'emart']) &&
       by('himart')[8] === 'himart' && by('special')[8] === 'special' && by('himart')[6] === '', rows.map(r => r.slice(6)));
     check('트레이더스 활성 Y + 업로드시작월 2026-09', by('traders')[3] === 'Y' && by('traders')[5] === '2026-09', by('traders'));
     check('사람이 고친 업로드시작월(이마트 2026-08·하이마트 빈칸)은 그대로', by('emart')[5] === '2026-08' && by('himart')[5] === '', [by('emart')[5], by('himart')[5]]);

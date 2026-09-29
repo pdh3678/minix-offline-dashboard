@@ -137,7 +137,7 @@ function env() {
     const X = ctx.__X__;
     const mk = (id, parse) => ({ id, status: 'ready', parse, edits: {}, name: 'f' + id });
     const stock = P.parseRows([['구분'], ['조회일자', '점포명', '점포코드', '상품명', '현재수량', '매입량', '상품코드', '매출량'], ['202609', 'EM분당점', '1003', '가상', 1, 0, MAX, 0]],
-      { fileName: '재고현황_상세_20260928101559.xlsx', today: TODAY });
+      { fileName: '재고현황_상세_20260928101559.xlsx', today: TODAY, stockOffsets: {} });
     X.UP.files.push(mk(1, stock), mk(2, pr));
     check('전체 반영 순서: 점포별 매출 → 재고', ctx._upApplyOrder().map(f => f.parse.type).join() === 'EMART_DAILY_SALES_STORE,EMART_STOCK', ctx._upApplyOrder().map(f => f.parse.type));
   }
@@ -151,7 +151,7 @@ function env() {
     g.ctx._offWriteBlock(g.tab('재고_채널일별'), T.stockDaily, 2, [[D, 'emart', MAX, 99, '', '', 'OLD'], ['2026-09-25', 'emart', MAX, 50, '', '', 'OLD']]);
     g.ctx._offWriteBlock(g.tab('재고_점포최신'), T.stockStore, 2, [['2026-09-25', 'emart', '2001', MAX, 9, '', '', 0, 0, 'OLD'], ['2026-09-25', 'emart', '1003', MAX, 9, '', '', 0, 0, 'OLD']]);
     const file = stockFile([['EM분당점', '1003', MAX, 2, 1], ['TR구성점', '2001', MAX, 5, 0], ['TR송림점', '2002', MAX, 3, 1], ['SFM군산점', '1025', MAX, 1, 0], ['EM창동점', '1001', MAX_DISPLAY, 4, 0]]);
-    const pr = P.parseRows(file, { fileName: '재고현황_상세_20260928101559.xlsx', today: TODAY });
+    const pr = P.parseRows(file, { fileName: '재고현황_상세_20260928101559.xlsx', today: TODAY, stockOffsets: {} });
     check('판별: 이마트 재고, split store, 기준일(14자리 파일명) 2026-09-28', pr.ok && pr.type === 'EMART_STOCK' && pr.split === 'store' && pr.baseDate === D, pr);
     const up = name => g.ctx._offUpload(P.toUploadPayload(pr, { fileName: name || '재고현황_상세_20260928101559.xlsx' }), AUTH);
     const r1 = up();
@@ -170,7 +170,7 @@ function env() {
     const snap = { d: daily(), s: store(), m: g.rows('점포마스터').length };
     up();
     check('같은 파일 재반영 → 재고 두 탭·점포마스터 불변', J(daily()) === J(snap.d) && J(store()) === J(snap.s) && g.rows('점포마스터').length === snap.m);
-    const older = P.parseRows(stockFile([['TR구성점', '2001', MAX, 1, 0], ['EM분당점', '1003', MAX, 1, 0]]), { fileName: '재고현황_상세_20260920101559.xlsx', today: TODAY });
+    const older = P.parseRows(stockFile([['TR구성점', '2001', MAX, 1, 0], ['EM분당점', '1003', MAX, 1, 0]]), { fileName: '재고현황_상세_20260920101559.xlsx', today: TODAY, stockOffsets: {} });
     const r3 = g.ctx._offUpload(P.toUploadPayload(older, { fileName: '재고현황_상세_20260920101559.xlsx' }), AUTH);
     check('더 과거 파일 → 채널일별에 9/20 채널별 추가, 점포최신은 두 채널 모두 그대로 + 경고', daily().some(x => x === '2026-09-20|traders|' + MAX + '|1') && daily().some(x => x === '2026-09-20|emart|' + MAX + '|1') &&
       J(store()) === J(snap.s) && r3.warnings.filter(w => /더 최신 기준일/.test(w)).length === 2, r3.warnings);
@@ -187,7 +187,7 @@ function env() {
       channels: [{ channelId: 'emart', name: '이마트', storePrefix: 'EM', codeSystem: 'emart' }, { channelId: 'traders', name: '트레이더스', storePrefix: 'TR', codeSystem: 'emart' },
         { channelId: 'himart', name: '하이마트', codeSystem: 'himart' }] });
     const pr = P.parseRows(stockFile([['EM분당점', '1003', MAX, 2, 1], ['TR구성점', '2001', MAX, 5, 0], ['TR송림점', '2002', MAX, 3, 1], ['SFM군산점', '1025', MAX, 1, 0]]),
-      { fileName: '재고현황_상세_20260928101559.xlsx', today: TODAY });
+      { fileName: '재고현황_상세_20260928101559.xlsx', today: TODAY, stockOffsets: {} });
     const sp = ctx._upStoreSplit(pr);
     check('미리보기 = 서버와 같은 규칙(다른 코드체계 점포마스터 무시 → 2002는 접두어로 트레이더스)', J(sp.byCh) === J({ emart: { stores: 2, stock: 3 }, traders: { stores: 2, stock: 8 } }) &&
       J(sp.via) === J({ master: 2, prefix: 1, fallback: 1 }), sp);
@@ -201,7 +201,7 @@ function env() {
     const sales = P.parseRows(storeSales(['09월01일', '09월27일'], [['이마트', '1003', 'EM분당점', MAX, 2, 1], ['트레이더스', '2001', 'TR구성점', MAX, 3, 0]]),
       { fileName: '기간별매출(상품별)_일별상세_20260928101437.xlsx', today: TODAY });
     g.ctx._offUpload(P.toUploadPayload(sales, { fileName: 'a_20260928101437.xlsx' }), AUTH);
-    const stock = P.parseRows(stockFile([['EM분당점', '1003', MAX, 0, 9], ['TR구성점', '2001', MAX, 4, 9]]), { fileName: '재고현황_상세_20260928101559.xlsx', today: TODAY });
+    const stock = P.parseRows(stockFile([['EM분당점', '1003', MAX, 0, 9], ['TR구성점', '2001', MAX, 4, 9]]), { fileName: '재고현황_상세_20260928101559.xlsx', today: TODAY, stockOffsets: {} });
     g.ctx._offUpload(P.toUploadPayload(stock, { fileName: '재고현황_상세_20260928101559.xlsx' }), AUTH);
     const call = (a, d) => JSON.parse(g.ctx._offlineHandle(a, d || {}, AUTH));
     const inv = call('offline_getInventory', { channelId: 'emart' });

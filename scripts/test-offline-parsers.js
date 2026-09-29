@@ -196,6 +196,38 @@ console.log('\n[8] 하이마트 판매재고현황');
   check('누적 스냅샷 반영 예정 = 판매 값 있는 행만(2)', r.plannedRows.himartSnap === 2 && r.plannedRows.stockStore === 4, r.plannedRows);
 }
 
+console.log('\n[8-1] 재고 기준일 = 파일명 날짜 + 채널 재고기준일오프셋(스냅샷형만)');
+{
+  const OFF = { himart: 0, etland: -1, emart: -1, traders: -1 };
+  const et = P.parseRows(ETLAND_STOCK, { fileName: '현재고_2026-09-25_124812.xls', today: TODAY, stockOffsets: OFF });
+  check('전자랜드 현재고 9/25 파일 → 재고 기준일 9/24(오프셋 −1)', et.fileDate === '2026-09-25' && et.baseDate === '2026-09-24' && et.stockOffset === -1, [et.fileDate, et.baseDate, et.stockOffset]);
+  const em = P.parseRows(EMART_STOCK, { fileName: '재고현황_상세_20260928101559.xlsx', today: TODAY, stockOffsets: OFF });
+  check('이마트 재고현황_상세 9/28 파일 → 9/27(파일 단위로 이마트 오프셋)', em.fileDate === '2026-09-28' && em.baseDate === '2026-09-27' && em.stockOffset === -1, [em.fileDate, em.baseDate]);
+  const hm = P.parseRows(HIMART(HIMART_ROWS), { fileName: '판매재고현황_20260924.xlsx', today: TODAY, stockOffsets: { himart: -1 } });
+  check('하이마트는 오프셋을 적용하지 않는다(누적 판매 차이도 같은 날짜) — 9/24 그대로', hm.baseDate === '2026-09-24' && hm.stockOffset === 0, [hm.baseDate, hm.stockOffset]);
+  const mb = P.parseRows(ETLAND_STOCK, { fileName: '현재고_2026-10-01_090000.xls', today: TODAY, stockOffsets: OFF });
+  check('월말 경계 — 10/1 파일 → 9/30', mb.baseDate === '2026-09-30', mb.baseDate);
+  const yb = P.parseRows(EMART_STOCK, { fileName: '재고현황_상세_20270101090000.xlsx', today: TODAY, stockOffsets: OFF });
+  check('연말 경계 — 2027-01-01 파일 → 2026-12-31', yb.baseDate === '2026-12-31', yb.baseDate);
+  check('10/1 이마트 파일(조회일자 202609 = 재고 기준일의 월) → 조회일자 경고 없음',
+    !P.parseRows(EMART_STOCK, { fileName: '재고현황_상세_20261001090000.xlsx', today: TODAY, stockOffsets: OFF }).warnings.some(w => /조회일자/.test(w)));
+  check('오프셋 0 채널(stockOffsets에 없음) → 파일명 날짜 그대로', P.parseRows(ETLAND_STOCK, { fileName: '현재고_2026-09-25_124812.xls', today: TODAY, stockOffsets: {} }).baseDate === '2026-09-25');
+  const none = P.parseRows(ETLAND_STOCK, { fileName: '현재고_2026-09-25_124812.xls', today: TODAY });
+  check('채널마스터를 아직 못 받음(stockOffsets 없음) → stockOffset null, 기준일 = 파일명 날짜', none.stockOffset === null && none.baseDate === '2026-09-25');
+  const chosen = P.parseRows(ETLAND_STOCK, { fileName: '현재고_2026-09-25_124812.xls', today: TODAY, stockOffsets: OFF, baseDate: '2026-09-25' });
+  check('직접 고른 기준일이 오프셋보다 우선', chosen.baseDate === '2026-09-25' && chosen.baseDateChosen === true);
+  check('판매(기간 교체형)에는 오프셋 없음', P.parseRows(ETLAND_SALES, { fileName: '판매내역_2026-09-25_124820.xls', today: TODAY, stockOffsets: OFF }).period.end === '2026-09-05');
+  // 업로드 입력 — 파일명 날짜(fileDate)는 "재고 기준일이 이미 정해졌다"는 표시. 모르면 보내지 않아 서버가 오프셋을 더한다
+  const pe = P.toUploadPayload(et, { fileName: 'f.xls', baseDate: et.baseDate });
+  check('오프셋 적용 → meta.baseDate 9/24 + fileDate 9/25', pe.meta.baseDate === '2026-09-24' && pe.meta.fileDate === '2026-09-25', pe.meta);
+  const pn = P.toUploadPayload(none, { fileName: 'f.xls', baseDate: none.baseDate });
+  check('오프셋을 모름 → fileDate 없음(서버가 채널 오프셋 적용)', pn.meta.baseDate === '2026-09-25' && !('fileDate' in pn.meta), pn.meta);
+  const pc = P.toUploadPayload(P.parseRows(ETLAND_STOCK, { fileName: '현재고_2026-09-25_124812.xls', today: TODAY, baseDate: '2026-09-23' }), { baseDate: '2026-09-23' });
+  check('오프셋을 몰라도 직접 고른 기준일이면 fileDate를 보낸다(서버가 다시 더하지 않게)', pc.meta.baseDate === '2026-09-23' && pc.meta.fileDate === '2026-09-25', pc.meta);
+  check('하이마트는 fileDate를 보내지 않는다(서버 처리 그대로)', !('fileDate' in P.toUploadPayload(hm, { baseDate: hm.baseDate }).meta));
+  check('addDays', P.addDays('2026-03-01', -1) === '2026-02-28' && P.addDays('2028-03-01', -1) === '2028-02-29' && P.addDays('2026-09-30', 1) === '2026-10-01');
+}
+
 console.log('\n[9] 업로드 입력 만들기 — 미리보기 수정값 반영');
 {
   const r = P.parseRows(ETLAND_SALES, { fileName: 'f.xls', today: TODAY });

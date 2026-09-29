@@ -59,8 +59,8 @@ function env(today) {
     const m1 = g.call('offline_getMasters');
     check('채널 7개·빈 제품/매핑/점포·품목군·재고구분', m1.channels.length === 7 && !m1.skus.length && !m1.mappings.length && !m1.stores.length &&
       m1.productLines.length === 8 && m1.stockTypes.join() === '정상,전시,리퍼', m1);
-    check('채널 객체 모양(업로드시작월·원천업태명·점포명접두어·코드체계채널)', JSON.stringify(m1.channels[0]) === JSON.stringify({ channelId: 'himart', name: '하이마트', type: '전문점', active: 'Y', order: 1, uploadStartMonth: '2026-09', bizNames: '', storePrefix: '', codeSystem: 'himart' }), m1.channels[0]);
-    check('트레이더스 = 이마트 코드체계, 업태명 트레이더스', JSON.stringify(m1.channels.find(c => c.channelId === 'traders')) === JSON.stringify({ channelId: 'traders', name: '트레이더스', type: '창고형', active: 'Y', order: 4, uploadStartMonth: '2026-09', bizNames: '트레이더스', storePrefix: 'TR', codeSystem: 'emart' }));
+    check('채널 객체 모양(업로드시작월·원천업태명·점포명접두어·코드체계채널·재고기준일오프셋)', JSON.stringify(m1.channels[0]) === JSON.stringify({ channelId: 'himart', name: '하이마트', type: '전문점', active: 'Y', order: 1, uploadStartMonth: '2026-09', bizNames: '', storePrefix: '', codeSystem: 'himart', stockOffset: 0 }), m1.channels[0]);
+    check('트레이더스 = 이마트 코드체계, 업태명 트레이더스', JSON.stringify(m1.channels.find(c => c.channelId === 'traders')) === JSON.stringify({ channelId: 'traders', name: '트레이더스', type: '창고형', active: 'Y', order: 4, uploadStartMonth: '2026-09', bizNames: '트레이더스', storePrefix: 'TR', codeSystem: 'emart', stockOffset: -1 }));
     check('업로드 없는 채널은 업로드시작월 빈칸', m1.channels.find(c => c.channelId === 'shinsegae').uploadStartMonth === '');
     check('두 번째는 캐시', g.call('offline_getMasters').cached === true);
     g.call('offline_saveSku', { sku: { name: '더 플렌더 MAX 그레이지', line: '더플렌더', model: '더 플렌더 MAX', option: '그레이지' } });

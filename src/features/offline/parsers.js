@@ -71,6 +71,11 @@
     return t.getUTCFullYear() === y && t.getUTCMonth() === m - 1 && t.getUTCDate() === d;
   }
   const ymd = (y, m, d) => y + '-' + pad2(m) + '-' + pad2(d);
+  // 'YYYY-MM-DD' + n일(음수 가능, 월말·연말 넘김 포함)
+  function addDays(s, n) {
+    const t = new Date(Date.UTC(+s.slice(0, 4), +s.slice(5, 7) - 1, +s.slice(8, 10) + n));
+    return ymd(t.getUTCFullYear(), t.getUTCMonth() + 1, t.getUTCDate());
+  }
 
   function toNum(v) {
     if (typeof v === 'number') return isFinite(v) ? v : 0;
@@ -147,9 +152,14 @@
 
   // ── 파싱 ──
   /* opts: { fileName, type(판별 무시하고 이 유형으로), baseDate(스냅샷형 기준일 직접 지정),
-             year(이마트 일별 매출 연도 직접 지정), today('YYYY-MM-DD', 연도 추정 기준) }
+             year(이마트 일별 매출 연도 직접 지정), today('YYYY-MM-DD', 연도 추정 기준),
+             stockOffsets({channel_id: 일} — 채널마스터 재고기준일오프셋) }
      반환: { ok, error?, type, typeLabel, channelId, kind, headerRow(1-based), rawRowCount, fileDate,
-             baseDate, needsDate, period{start,end}, year, records, summary, plannedRows, warnings } */
+             baseDate, baseDateChosen(직접 고른 기준일), needsDate, stockOffset, period{start,end}, year, records, summary, plannedRows, warnings }
+     재고 기준일 = 파일명 날짜 + 그 파일 채널의 재고기준일오프셋 — 스냅샷형(전자랜드 현재고·이마트 재고현황_상세)만.
+       전자랜드·이마트 재고 파일은 받은 날의 전일 마감 재고라 오프셋 −1(이마트 파일은 이마트·트레이더스가 섞여 있지만
+       두 채널 오프셋이 같아 파일 단위로 이마트 값을 쓴다). 하이마트(himart)는 같은 날짜로 누적 판매 차이도 계산하므로
+       오프셋을 적용하지 않는다. stockOffsets를 주지 않으면(채널마스터를 아직 못 받음) stockOffset = null, 기준일 = 파일명 날짜 */
   function parseRows(rows, opts) {
     opts = opts || {};
     const found = detect(rows, opts.type || null);
@@ -173,7 +183,7 @@
     const res = {
       ok: true, type: found.type, typeLabel: t.label, channelId: t.channelId, kind: t.kind, split: t.split || '', blocked: t.blocked || '',
       headerRow: found.headerIndex + 1, rawRowCount: data.length, fileDate,
-      baseDate: '', needsDate: false, period: null, year: null,
+      baseDate: '', baseDateChosen: !!opts.baseDate, needsDate: false, stockOffset: null, period: null, year: null,
       records: { sales: [], storeStock: [], channelStock: [], himart: [], stores: [], names: {} },
       summary: {}, warnings: []
     };
@@ -182,7 +192,9 @@
     const cell = (r, k) => (col[k] == null ? '' : r[col[k]]);
 
     if (t.kind !== 'period') {
-      res.baseDate = opts.baseDate || fileDate;
+      if (t.kind === 'snapshot') { if (opts.stockOffsets) res.stockOffset = Number(opts.stockOffsets[t.channelId]) || 0; }
+      else res.stockOffset = 0;
+      res.baseDate = opts.baseDate || (fileDate && res.stockOffset ? addDays(fileDate, res.stockOffset) : fileDate);
       res.needsDate = !res.baseDate;
       if (res.needsDate) res.warnings.push('파일명에서 기준일을 찾지 못했습니다 — 기준일을 선택해야 반영할 수 있습니다.');
     }
@@ -349,8 +361,9 @@
     });
     res.records.channelStock = chanOrder.map(c => chan[c]);
     if (type === 'EMART_STOCK' && res.baseDate) {
-      const want = res.baseDate.slice(0, 4) + res.baseDate.slice(5, 7);
-      const other = Object.keys(yms).filter(ym => ym !== want);
+      // 조회일자는 기준일의 월 또는 파일명 날짜의 월이면 된다(10/1에 받은 파일 = 9/30 재고 — 조회일자가 어느 쪽이어도 정상)
+      const want = [res.baseDate, res.fileDate].filter(Boolean).map(d => d.slice(0, 4) + d.slice(5, 7));
+      const other = Object.keys(yms).filter(ym => want.indexOf(ym) < 0);
       if (other.length) res.warnings.push('조회일자(' + other.join(', ') + ')가 기준일 ' + res.baseDate + '의 월과 다릅니다.');
     }
   }
@@ -367,7 +380,9 @@
       : { stockDaily: r.channelStock.length, stockStore: r.storeStock.length, himartSnap: r.himart.filter(h => h.real || h.sale || h.week || h.day).length };
   }
 
-  // 미리보기에서 고친 값(기준일·교체기간)을 얹어 offline_upload 입력으로 — { meta, records }
+  /* 미리보기에서 고친 값(기준일·교체기간)을 얹어 offline_upload 입력으로 — { meta, records }
+     스냅샷형은 파일명 날짜(meta.fileDate)도 보낸다 — 서버는 이걸 보고 "기준일이 이미 재고 기준일로 정해졌다"고 보고 그대로 쓴다.
+     채널 오프셋을 몰라 적용하지 못했고(stockOffset null) 기준일을 직접 고르지도 않았으면 보내지 않는다 → 서버가 채널 오프셋을 더한다 */
   function toUploadPayload(res, edits) {
     edits = edits || {};
     const meta = { fileName: edits.fileName || '', fileType: res.type, channelId: res.channelId, rawRowCount: res.rawRowCount };
@@ -376,6 +391,7 @@
       meta.replaceEnd = edits.replaceEnd || (res.period && res.period.end) || '';
     } else {
       meta.baseDate = edits.baseDate || res.baseDate || '';
+      if (res.kind === 'snapshot' && (res.stockOffset != null || res.baseDateChosen)) meta.fileDate = res.fileDate || '';
     }
     const r = res.records;
     return {
@@ -420,6 +436,6 @@
   return {
     TYPES, TYPE_ORDER, HEADER_SCAN_ROWS,
     detect, parseRows, toUploadPayload, readWorkbookRows,
-    dateFromFileName, toNum, toCode, toDate, normHeader
+    dateFromFileName, addDays, toNum, toCode, toDate, normHeader
   };
 });

@@ -20,6 +20,9 @@ async function _upRefreshSide(){
     _offlineCall('offline_getUploadLog').then(j=>{_UP.log=j.items;_UP.logErr='';}).catch(e=>{_UP.logErr=e.message;}),
     _offlineLoadMasters(true).then(()=>{_UP.mastersErr='';}).catch(e=>{_UP.mastersErr=e.message;})
   ]);
+  // 채널마스터(재고기준일오프셋)가 오기 전에 판별한 파일은 오프셋을 넣어 다시 판별한다(반영 중·반영한 파일은 그대로)
+  const key=JSON.stringify(_upStockOffsets());
+  _UP.files.forEach(f=>{if(f.rows&&f.status==='ready'&&f.offsetsKey!==key)_upParse(f);});
   _upRender();
 }
 
@@ -61,14 +64,31 @@ async function _upReadFile(f,file){
   }
   _upRender();
 }
+/* 채널마스터 재고기준일오프셋 {channel_id: 일} — 재고 기준일 = 파일명 날짜 + 오프셋(스냅샷형 재고 파일).
+   마스터를 아직 못 받았으면 null — 파서가 오프셋을 적용하지 않고, 반영 때 서버가 채널 오프셋을 더한다 */
+function _upStockOffsets(){
+  if(!OFFLINE_MASTERS||!OFFLINE_MASTERS.channels)return null;
+  const o={};OFFLINE_MASTERS.channels.forEach(c=>{if(c.stockOffset)o[c.channelId]=c.stockOffset;});
+  return o;
+}
 // 판별·파싱(유형·기준일·연도를 고칠 때마다 다시 돈다 — 원본 행은 f.rows에 남아 있다)
 function _upParse(f){
-  f.parse=OfflineParsers.parseRows(f.rows,{fileName:f.name,type:f.edits.type||null,baseDate:f.edits.baseDate||'',year:f.edits.year||null,today:_upTodayStr()});
+  const offsets=_upStockOffsets();
+  f.offsetsKey=JSON.stringify(offsets);
+  f.parse=OfflineParsers.parseRows(f.rows,{fileName:f.name,type:f.edits.type||null,baseDate:f.edits.baseDate||'',year:f.edits.year||null,today:_upTodayStr(),stockOffsets:offsets||undefined});
   f.status=f.parse.ok?'ready':'error';
   f.error=f.parse.ok?'':f.parse.error;
   f.result=null;
 }
 function _upFile(id){return _UP.files.find(x=>x.id===id);}
+// 기준일 옆 설명 — 스냅샷형 재고 파일은 "파일명 날짜 9/29 → 재고 기준일 9/28 (전일 기준)"
+function _upBaseNote(f,p,b){
+  if(f.edits.baseDate)return '직접 선택'+(p.fileDate&&p.fileDate!==b?` (파일명 날짜 ${_upMD(p.fileDate)})`:'');
+  if(!p.fileDate)return '파일명에 날짜 없음 — 선택 필요';
+  if(p.kind==='snapshot'&&p.stockOffset==null)return '파일명에서 읽음 — 채널 재고 기준일 설정을 불러오는 중(반영 때 서버가 적용)';
+  if(p.stockOffset)return `파일명 날짜 ${_upMD(p.fileDate)} → 재고 기준일 ${_upMD(b)} (${p.stockOffset===-1?'전일 기준':p.stockOffset+'일'})`;
+  return '파일명에서 읽음';
+}
 function _upRemove(id){_UP.files=_UP.files.filter(x=>x.id!==id);_upRender();}
 function _upSetType(id,v){const f=_upFile(id);f.edits={type:v,baseDate:f.edits.baseDate};_upParse(f);_upRender();}
 function _upSetBase(id,v){const f=_upFile(id);f.edits.baseDate=v;_upParse(f);_upRender();}
@@ -250,8 +270,8 @@ function _upCardHtml(f){
     if(p.type==='EMART_DAILY_SALES')dateCtl+=`<span class="f-lbl">연도</span><input type="number" class="f-inp up-year" value="${p.year}" ${busy?'disabled':''} onchange="_upSetYear(${f.id},this.value)">`;
   }else{
     const b=f.edits.baseDate||p.baseDate;
-    dateCtl=`<span class="f-lbl">기준일</span><input type="date" class="f-inp${b?'':' up-need'}" value="${b}" ${busy?'disabled':''} onchange="_upSetBase(${f.id},this.value)">
-      <span class="off-muted">${f.edits.baseDate?'직접 선택':(p.fileDate?'파일명에서 읽음':'파일명에 날짜 없음 — 선택 필요')}</span>`;
+    dateCtl=`<span class="f-lbl">${p.kind==='snapshot'?'재고 기준일':'기준일'}</span><input type="date" class="f-inp${b?'':' up-need'}" value="${b}" ${busy?'disabled':''} onchange="_upSetBase(${f.id},this.value)">
+      <span class="off-muted">${_upBaseNote(f,p,b)}</span>`;
   }
   const pr=p.plannedRows;
   const planned=p.kind==='period'?`판매 <b>${pr.sales}</b>행`
