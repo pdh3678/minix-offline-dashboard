@@ -5,8 +5,9 @@
                     하이마트는 [판매등록 / 설치완료]
    (c) 모델·SKU 표 대분류 → 품목군 → 모델 → SKU. 목표·실적은 월별 해석(모델 단위), SKU 행 OUT 실적은 판매원장 기준,
                     재고 열은 offline_getInventory 그룹 지표 그대로. 채널 합계 = 본품 합계, 본품 외(필터·기타)는 그 아래 구분선 뒤
-   (d) 점포 표     offline_getInventory(이 채널 점포 표) — 검색·정렬·지역·SKU 필터, 결품 강조, CSV 다운로드
-   (e) 판매 분석   channel-sales.js — 모델별·지점별 판매량(카드 자리만 여기서 만들고 그리기는 _osaRender) */
+   (d) 판매 분석   channel-sales.js — 모델별·지점별 판매량(카드 자리만 여기서 만들고 그리기는 _osaRender)
+   (e) 점포 표     offline_getInventory(이 채널 점포 표) — 검색·정렬·지역·SKU 필터, 결품 강조, CSV 다운로드
+   화면 순서 = 위 (a)~(e) 순서 */
 
 const _OCD={ch:'',mon:null,inv:null,skuOut:null,daily:null,err:'',dailyErr:'',dailyRange:null,dmode:'qty',open:{},skuOpen:{},
   store:{q:'',region:'',sku:'',outOnly:false,sort:'storeName',dir:1,limit:300},focusSku:''};
@@ -97,8 +98,8 @@ function _ocdRender(){
     </div>`+
     `<div class="card"><div class="card-hd"><span>모델·SKU <span class="of-sub">${_escHtml(_ofRangeLabel())}</span></span>
       <span class="card-hd-r">▸ 누르면 펼침 · 재고는 최신 기준일${ci.stockDate?' '+_escHtml(ci.stockDate):''} · SKU 행 OUT 실적은 판매원장 기준</span></div>${_ocdTableHtml(ci)}</div>`+
-    `<div class="card" id="ocdStoreCard">${up?_ocdStoreHtml(ci):'<div class="card-hd">점포</div><div class="of-chart-empty">업로드 데이터 없음</div>'}</div>`+
-    '<div class="card" id="ocdSalesCard"></div>';
+    '<div class="card" id="ocdSalesCard"></div>'+
+    `<div class="card" id="ocdStoreCard">${up?_ocdStoreHtml(ci):'<div class="card-hd">점포</div><div class="of-chart-empty">업로드 데이터 없음</div>'}</div>`;
   _ocdDrawMonthly();
   _osaRender();
   if(up){_ocdRenderDailyCtl();_ocdRenderDaily();}
@@ -262,7 +263,7 @@ function _ocdTableHtml(ci){
 function _ocdToggleCat(c){_OCD.open[c]=_OCD.open[c]===false;_ocdRender();}
 function _ocdToggleSku(k){_OCD.skuOpen[k]=!_OCD.skuOpen[k];_OCD.focusSku='';_ocdRender();}
 
-// (d) 점포 표
+// (e) 점포 표
 function _ocdStoreRows(){
   const s=_OCD.store,cat=OFFLINE_FILTER.category,q=String(s.q||'').trim().toLowerCase();
   const skuCat={};((_OCD.inv&&_OCD.inv.groups)||[]).forEach(g=>{if(g.level==='sku')skuCat[g.skuId]=g.category;});

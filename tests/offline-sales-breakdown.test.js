@@ -171,9 +171,13 @@ const B = (g, data) => g.call('offline_getSalesBreakdown', data);
     Object.assign(X.OSA, { preset: 'custom', from: '2026-10', to: '2026-10' }); ctx._osaLoad(); await settle();
     check('판매 없는 기간 → 안내', /이 기간에 판매 기록이 없습니다/.test(card()));
     check('판매 분석 그리기에 콘솔 에러 없음', errors.length === 0, errors);
-    // 기존 채널 상세 섹션은 그대로 — 모델·SKU 표·점포 표가 함께 있다
-    const page = el('page-offline-channel').innerHTML;
-    check('기존 섹션(월별 추이·일별·모델·SKU·점포) 그대로 + 판매 분석 카드가 맨 아래', /월별 추이[^]*일별 Sell-out[^]*모델·SKU[^]*id="ocdStoreCard"[^]*id="ocdSalesCard"/.test(page));
+    // 섹션 순서 — 채널마다 같다(기존 섹션은 그대로, 판매 분석은 모델·SKU 표와 점포 표 사이)
+    const ORDER = /월별 추이[^]*일별 Sell-out[^]*모델·SKU[^]*id="ocdSalesCard"[^]*id="ocdStoreCard"/;
+    for (const c of ['himart', 'etland', 'emart']) {
+      ctx.navPage('offline-channel', null, c); await settle();
+      check(c + ' 섹션 순서 = 월별 추이 → 일별 Sell-out → 모델·SKU → 판매 분석 → 점포', ORDER.test(el('page-offline-channel').innerHTML) && /판매 분석/.test(card()));
+    }
+    check('채널을 오가도 콘솔 에러 없음', errors.length === 0, errors);
   }
   {
     const g3 = env();
@@ -188,6 +192,7 @@ const B = (g, data) => g.call('offline_getSalesBreakdown', data);
     ctx.navPage('offline-channel', null, 'himart'); await settle();
     check('임베드(?embed=1) — 판매 분석 카드가 그려지고 주소에 embed 유지, 콘솔 에러 없음', X.IS_EMBED === true && /합계 <b>146대<\/b>/.test(box.ocdSalesCard.innerHTML) &&
       /\?embed=1#offline\/channel\/himart$/.test(ctx.history._urls[ctx.history._urls.length - 1]) && errors.length === 0, errors);
+    check('임베드 — 섹션 순서 같음(모델·SKU → 판매 분석 → 점포)', /모델·SKU[^]*id="ocdSalesCard"[^]*id="ocdStoreCard"/.test(box['page-offline-channel'].innerHTML));
   }
 
   console.log('\n' + '─'.repeat(50));
