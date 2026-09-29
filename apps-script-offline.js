@@ -65,10 +65,12 @@ var OFF_TABS = {
   prices:     { name: '단가마스터', headers: ['channel_id', '품목군', '모델', '공급가', '적용시작일', '비고', '수정일', '수정자'], text: [0, 1, 2, 4, 5, 6, 7] },
   migrationLog: { name: '이관로그', headers: ['실행시각', '실행자', '대상', '월 범위', '반영 행수', '미매핑 항목', '상태'], text: [0, 1, 2, 3, 5, 6] },
   // 2-B단계(2026-09-27) — 재고일수·경보 기준값(키-값). 값은 숫자 열
-  settings:   { name: '설정', headers: ['키', '값', '설명'], text: [0, 2] }
+  settings:   { name: '설정', headers: ['키', '값', '설명'], text: [0, 2] },
+  // 파트 홈(2026-09-29) — 공동구매 월 목표. 키 (연월, 벤더, 품목군, 모델). 로직은 apps-script-home.js
+  gonguTargets: { name: '공구목표_월', headers: ['연월', '벤더', '대분류', '품목군', '모델', '목표수량', '목표금액', '출처', '수정일', '수정자'], text: [0, 1, 2, 3, 4, 7, 8, 9] }
 };
 var OFF_TAB_ORDER = ['readme', 'sku', 'channel', 'mapping', 'store', 'sales', 'stockDaily', 'stockStore', 'himartSnap', 'uploadLog', 'unmatched',
-  'targets', 'prices', 'migrationLog', 'settings'];
+  'targets', 'prices', 'migrationLog', 'settings', 'gonguTargets'];
 
 /* 설정 기본값 — 설정 탭에 없는 키는 setup이 이 값으로 채우고(있는 값은 덮어쓰지 않음), 읽을 때도 없거나 잘못된 값은 이 값을 쓴다.
    재고 지표(apps-script-offline-inventory.js)가 이 네 값을 읽는다. */
@@ -207,7 +209,8 @@ function _offReadmeRows() {
     ['목표실적_월', '채널×품목군×모델×월 목표·실적(구분 IN=Sell-in, OUT=Sell-out). 출처 input = 대시보드 목표 관리에서 입력(이관이 덮어쓰지 않음), migration = 기존 진행현황에서 이관. OUT 실적은 업로드시작월 이전 달·업로드 없는 채널만 쓰고, 그 뒤로는 판매원장에서 집계한다. 대분류 열: 모델 단위 행은 대분류·품목군·모델 모두, 대분류 단위 행(모델 구분이 없는 과거 수치 — 예: 진행현황의 "건조기" 행)은 대분류만 채운다.'],
     ['단가마스터', '채널×품목군×모델 공급가 이력. 금액 = 수량 × 그 달 1일 기준 가장 최근 적용시작일의 공급가.'],
     ['이관로그', '기존 스프레드시트(진행현황·납품가 수수료) 이관 1회 = 1행. 대시보드에서 단가 행을 삭제한 기록(대상 "단가 삭제")도 여기에 남는다.'],
-    ['설정', '재고 지표 기준값(키-값). 재고일수_판매기준일수·재고경보_과다일수·재고경보_결품위험일수·데이터지연_경고일수. 대시보드 재고 현황의 설정(관리자)에서 고친다 — 키 이름은 바꾸지 말 것.']
+    ['설정', '재고 지표 기준값(키-값). 재고일수_판매기준일수·재고경보_과다일수·재고경보_결품위험일수·데이터지연_경고일수. 대시보드 재고 현황의 설정(관리자)에서 고친다 — 키 이름은 바꾸지 말 것.'],
+    ['공구목표_월', '공동구매 월 목표(벤더×품목군×모델, 목표수량·목표금액 — 원, VAT 포함). 출처 input = 대시보드 목표 관리 [공구 목표]에서 입력(이관이 덮어쓰지 않음), migration = 기존 \'공동구매 26년 목표\' 탭에서 이관. 파트 홈의 파트 목표 = 오프라인 IN 목표 금액 + 이 탭의 목표금액.']
   ];
 }
 
@@ -806,7 +809,7 @@ function _offAppendLog(ctx, meta, auth, status, unmatchedCount) {
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // ── API 라우팅 (doPost → 여기) ──
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// apps-script.js 의 doPost가 세션을 확인한 뒤 action이 offline_ 로 시작하면 여기로 보낸다.
+// apps-script.js 의 doPost가 세션을 확인한 뒤 action이 offline_ · home_ 으로 시작하면 여기로 보낸다.
 function _offlineHandle(action, data, auth) {
   try {
     var out;
@@ -830,6 +833,11 @@ function _offlineHandle(action, data, auth) {
     else if (action === 'offline_getDailySales') out = _offGetDailySales(data || {});
     else if (action === 'offline_getInventoryTrend') out = _offGetInventoryTrend(data || {});
     else if (action === 'offline_saveSettings') out = _offSaveSettings(data || {}, auth);
+    // 파트 홈 (apps-script-home.js)
+    else if (action === 'offline_getGonguTargets') out = _gtGet(data || {});
+    else if (action === 'offline_saveGonguTargets') out = _gtSave(data || {}, auth);
+    else if (action === 'offline_migrateGonguTargets') out = _gtMigrate(data || {}, auth);
+    else if (action === 'home_getSummary') out = _homeGetSummary(data || {});
     else throw new Error('알 수 없는 오프라인 액션: ' + action);
     return _json(out);
   } catch (err) {

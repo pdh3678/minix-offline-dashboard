@@ -1,4 +1,4 @@
-/* 오프라인 원장 GAS(apps-script.js + apps-script-offline.js + apps-script-offline-targets.js + apps-script-offline-inventory.js)를 node vm에서 실코드 그대로 띄운다.
+/* 오프라인 원장 GAS(apps-script.js + apps-script-offline.js + apps-script-offline-targets.js + apps-script-offline-inventory.js + apps-script-home.js)를 node vm에서 실코드 그대로 띄운다.
    구글 API는 mock-sheets.js 목을 쓰고, 오프라인 스프레드시트(openById)만 여기서 따로 만든다.
 
    목과 실제 시트가 다른 점 중 오프라인 코드가 기대는 것만 맞춘다:
@@ -104,7 +104,7 @@ function loadOfflineGas(opts) {
   const ctx = vm.createContext(global);
   vm.runInContext(fs.readFileSync(path.join(PROJ, 'apps-script.js'), 'utf8'), ctx, { filename: 'apps-script.js' });
   vm.runInContext(fs.readFileSync(path.join(PROJ, 'apps-script-offline.js'), 'utf8'), ctx, { filename: 'apps-script-offline.js' });
-  ['apps-script-offline-targets.js', 'apps-script-offline-inventory.js'].forEach(f => {
+  ['apps-script-offline-targets.js', 'apps-script-offline-inventory.js', 'apps-script-home.js'].forEach(f => {
     const p = path.join(PROJ, f);
     if (fs.existsSync(p)) vm.runInContext(fs.readFileSync(p, 'utf8'), ctx, { filename: f });
   });

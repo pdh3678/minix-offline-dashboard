@@ -1,7 +1,7 @@
 /* 오프라인 스프레드시트 구조 — offline_setupSheets와 시트 입출력 헬퍼.
 
    지키려는 성질:
-     · 15개 탭이 정해진 순서·헤더로 만들어지고, 1행 헤더 고정·굵게, 날짜·코드 열은 텍스트 서식
+     · 16개 탭이 정해진 순서·헤더로 만들어지고, 1행 헤더 고정·굵게, 날짜·코드 열은 텍스트 서식
      · 두 번 실행해도 안전 — 새로 만들지 않고, 데이터(채널 초기값 포함)를 중복시키지 않는다
      · 헤더가 다르면 고치지 않고 보고만 한다
      · OFFLINE_SHEET_ID는 Script Properties에서만 — 없으면 무엇을 넣어야 하는지 알려주며 실패
@@ -33,7 +33,8 @@ const EXPECT = [
   ['목표실적_월', ['연월', 'channel_id', '품목군', '모델', '구분', '목표수량', '실적수량', '출처', '수정일', '수정자', '비고', '대분류']],
   ['단가마스터', ['channel_id', '품목군', '모델', '공급가', '적용시작일', '비고', '수정일', '수정자']],
   ['이관로그', ['실행시각', '실행자', '대상', '월 범위', '반영 행수', '미매핑 항목', '상태']],
-  ['설정', ['키', '값', '설명']]
+  ['설정', ['키', '값', '설명']],
+  ['공구목표_월', ['연월', '벤더', '대분류', '품목군', '모델', '목표수량', '목표금액', '출처', '수정일', '수정자']]
 ];
 // 텍스트 서식이어야 하는 열(날짜·코드·id) — 숫자 열은 절대 텍스트가 되면 안 된다(합계가 깨짐)
 const NUMERIC = {
@@ -42,7 +43,7 @@ const NUMERIC = {
   '재고_점포최신': ['재고수량', '이동중수량', '예약수량', '당월입고', '당월판매'],
   '하이마트_누적스냅샷': ['당월실판매', '당월판매', '금주판매', '당일판매', '잔여재고'],
   '업로드로그': ['원본행수', '반영행수', '미매칭코드수'], '미매칭코드': ['발견횟수'],
-  '목표실적_월': ['목표수량', '실적수량'], '단가마스터': ['공급가'], '이관로그': ['반영 행수'], '설정': ['값']
+  '목표실적_월': ['목표수량', '실적수량'], '단가마스터': ['공급가'], '이관로그': ['반영 행수'], '설정': ['값'], '공구목표_월': ['목표수량', '목표금액']
 };
 function textColsFromFormats(sheet) {
   const cols = new Set();
@@ -51,12 +52,12 @@ function textColsFromFormats(sheet) {
 }
 
 (function main() {
-  console.log('\n[1] 빈 스프레드시트에서 실행 — 15개 탭 생성');
+  console.log('\n[1] 빈 스프레드시트에서 실행 — 16개 탭 생성');
   {
     const { ctx, off, tab } = loadOfflineGas();
     const rep = ctx.offline_setupSheets();
-    check('15개 탭을 만들었다고 보고', rep.created.length === 15 && rep.verified.length === 0 && rep.extended.length === 0 && rep.mismatched.length === 0, rep);
-    check('탭 순서 = README → 설정', JSON.stringify(off._order) === JSON.stringify(EXPECT.map(e => e[0])), off._order);
+    check('16개 탭을 만들었다고 보고', rep.created.length === 16 && rep.verified.length === 0 && rep.extended.length === 0 && rep.mismatched.length === 0, rep);
+    check('탭 순서 = README → 공구목표_월', JSON.stringify(off._order) === JSON.stringify(EXPECT.map(e => e[0])), off._order);
     EXPECT.forEach(([name, headers]) => {
       const sh = tab(name);
       check(name + ' 헤더', JSON.stringify(sh._grid[0].slice(0, headers.length)) === JSON.stringify(headers), sh._grid[0]);
@@ -83,7 +84,7 @@ function textColsFromFormats(sheet) {
     console.log('\n[2] 두 번째 실행 — 만들지 않고 헤더만 확인, 데이터 불변');
     const before = JSON.stringify(off.getSheets().map(s => s._grid));
     const rep2 = ctx.offline_setupSheets();
-    check('새로 만든 탭 없음, 15개 모두 확인', rep2.created.length === 0 && rep2.verified.length === 15, rep2);
+    check('새로 만든 탭 없음, 16개 모두 확인', rep2.created.length === 0 && rep2.verified.length === 16, rep2);
     check('시트 내용이 그대로(채널 초기값 중복 없음)', JSON.stringify(off.getSheets().map(s => s._grid)) === before);
 
     console.log('\n[3] 헤더가 바뀐 탭 — 고치지 않고 보고만');
@@ -99,7 +100,7 @@ function textColsFromFormats(sheet) {
     const sh = off.insertSheet('채널마스터');
     sh.getRange(1, 1, 1, 5).setValues([['channel_id', '채널명', '유형', '활성', '정렬순서']]);
     const rep = ctx.offline_setupSheets();
-    check('채널마스터는 열 확장, 나머지 14개 생성', rep.extended.length === 1 && rep.extended[0].tab === '채널마스터' && rep.created.length === 14, rep);
+    check('채널마스터는 열 확장, 나머지 15개 생성', rep.extended.length === 1 && rep.extended[0].tab === '채널마스터' && rep.created.length === 15, rep);
     check('초기 데이터 7행(업로드시작월 포함)', dataRows(tab('채널마스터')).length === 7 && dataRows(tab('채널마스터'))[0][5] === '2026-09');
   }
 
@@ -174,7 +175,7 @@ function textColsFromFormats(sheet) {
     check('README에 새 탭 설명이 추가됨', ['목표실적_월', '단가마스터', '이관로그'].every(n => dataRows(tab('README')).some(r => r[0] === n)));
     ch._grid[1][5] = ''; // 사람이 하이마트 업로드시작월을 비움
     const rep2 = ctx.offline_setupSheets();
-    check('다시 실행하면 확장 없이 확인만', rep2.extended.length === 0 && rep2.verified.length === 15, rep2);
+    check('다시 실행하면 확장 없이 확인만', rep2.extended.length === 0 && rep2.verified.length === 16, rep2);
     check('  ↳ 사람이 비운 업로드시작월을 다시 채우지 않음', dataRows(ch)[0][5] === '');
   }
 
