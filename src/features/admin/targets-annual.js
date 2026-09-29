@@ -70,6 +70,7 @@ function _tgaCell(row,ym){
 function _tgaCatCell(cr,ym,f){return _tgaOrig(cr,ym,f);}
 
 /* 합계 — scope: cat:ch|대분류 · ln:ch|품목군 · ch:ch · all. 대분류·채널·전체에는 대분류 단위(이관) 행도 더한다(월별 입력 탭과 같은 규칙).
+   채널·전체 = 본품 합계(필터·기타는 자기 대분류 합계에만 — 월별 입력 탭과 같은 규칙).
    반환 {ym|'Y': {t, a}} — t = 목표 합(고친 값 포함), a = 실적 합 */
 function _tgaTotals(){
   const T={},months=_tgaMonths();
@@ -81,12 +82,12 @@ function _tgaTotals(){
   const shown={};
   _TGA.rows.forEach(r=>{shown[r.ch]=true;months.forEach(ym=>{
     const t=_tgaTarget(r,ym),a=_tgaOrig(r.months,ym,'actual');
-    ['cat:'+r.ch+'|'+r.category,'ln:'+r.ch+'|'+r.line,'ch:'+r.ch,'all','row:'+r.key].forEach(s=>{add(s,ym,t,a);add(s,'Y',t,a);});
+    ['cat:'+r.ch+'|'+r.category,'ln:'+r.ch+'|'+r.line,'row:'+r.key].concat(_tgIsMain(r.category)?['ch:'+r.ch,'all']:[]).forEach(s=>{add(s,ym,t,a);add(s,'Y',t,a);});
   });});
   Object.keys(_TGA.cat||{}).forEach(k=>{
-    const ch=k.split('|')[0];if(!shown[ch])return;
+    const [ch,cat]=k.split('|');if(!shown[ch])return;
     months.forEach(ym=>{const t=_tgaOrig(_TGA.cat[k],ym,'target'),a=_tgaOrig(_TGA.cat[k],ym,'actual');
-      ['cat:'+k,'ch:'+ch,'all','catrow:'+k].forEach(s=>{add(s,ym,t,a);add(s,'Y',t,a);});});
+      ['cat:'+k,'catrow:'+k].concat(_tgIsMain(cat)?['ch:'+ch,'all']:[]).forEach(s=>{add(s,ym,t,a);add(s,'Y',t,a);});});
   });
   return T;
 }
@@ -107,7 +108,7 @@ function _tgaHtml(){
       <select class="f-sel" onchange="_tgaSetYear(this.value)">${[Y-1,Y,Y+1].map(y=>`<option value="${y}"${String(y)===_TGA.year?' selected':''}>${y}년</option>`).join('')}</select>
       <select class="f-sel" onchange="_tgaSetCh(this.value)"><option value="">활성 채널 전체</option>${(m.channels||[]).map(c=>
         `<option value="${_escAttr(c.channelId)}"${_TGA.ch===c.channelId?' selected':''}>${_escHtml(c.name)}${c.active==='Y'?'':' (비활성)'}</option>`).join('')}</select>
-      ${tog('side',[['IN','IN'],['OUT','OUT']])}${tog('view',[['target','목표'],['actual','실적'],['rate','달성률']])}
+      ${tog('side',[['IN','IN'],['OUT','OUT']])}${tog('view',[['target','목표'],['actual','실적'],['rate','달성률']])}${_tgNonMainToggleHtml()}
       ${_TGA.view==='target'?`<button type="button" class="btn-primary up-btn" id="tgaSaveBtn" ${_TGA.saving?'disabled':''} onclick="_tgaSave()">저장</button>
         <button type="button" class="btn-cancel up-btn" onclick="_tgaRevert()">되돌리기</button>`:''}
       <span class="off-muted" id="tgaDirty"></span>
@@ -120,20 +121,24 @@ function _tgaHtml(){
   let body='';
   chans.forEach(c=>{
     body+=`<tr class="tg-ch"><td colspan="14">${_escHtml(c.name)}${c.active==='Y'?'':' <span class="up-chip">비활성</span>'}${_TGA.side==='OUT'&&c.uploadStartMonth?` <span class="up-chip ready">OUT 실적 = 업로드 원장(${_escHtml(c.uploadStartMonth)}~)</span>`:''}</td></tr>`;
-    PRODUCT_CATEGORIES.forEach(cat=>{
+    // 본품 대분류 → 채널 합계(본품) → "비본품 표시"면 구분선 뒤에 필터·기타
+    const catBody=cat=>{
+      let h='';
       const ck=c.channelId+'|'+cat,cr=(_TGA.cat||{})[ck],lines=PRODUCT_CATALOG.filter(l=>l.category===cat);
       const closed=_tgaCatClosed(ck);
-      body+=totRow('cat:'+ck,`<button type="button" class="tg-fold" onclick="_tgaFold('${_escAttr(ck)}')">${closed?'▸':'▾'}</button> ${_escHtml(cat)}${cr?' <span class="up-chip">이관 대분류 합계 포함</span>':''}`,'tg-cat');
-      if(closed)return;
-      if(cr)body+=`<tr class="tg-catrow"><td class="tg-model">이관(모델 구분 없음)</td>${months.map(ym=>{
+      h+=totRow('cat:'+ck,`<button type="button" class="tg-fold" onclick="_tgaFold('${_escAttr(ck)}')">${closed?'▸':'▾'}</button> ${_escHtml(cat)}${cr?' <span class="up-chip">이관 대분류 합계 포함</span>':''}`,'tg-cat');
+      if(closed)return h;
+      if(cr)h+=`<tr class="tg-catrow"><td class="tg-model">이관(모델 구분 없음)</td>${months.map(ym=>{
         const t=_tgaCatCell(cr,ym,'target'),a=_tgaCatCell(cr,ym,'actual');
         return `<td class="num-col tg-ro">${_TGA.view==='target'?_tgFmt(t):_TGA.view==='actual'?_tgFmt(a):_tgRate(a,t)}</td>`;}).join('')}<td class="num-col tg-ro" id="${_tgaId('catrow:'+ck)}_Y"></td></tr>`;
       lines.forEach(line=>{
-        if(lines.length>1)body+=totRow('ln:'+c.channelId+'|'+line.key,_escHtml(line.label),'tg-line');
-        _TGA.rows.forEach((r,i)=>{if(r.ch===c.channelId&&r.line===line.key)body+=_tgaRowHtml(r,i,months);});
+        if(lines.length>1)h+=totRow('ln:'+c.channelId+'|'+line.key,_escHtml(line.label),'tg-line');
+        _TGA.rows.forEach((r,i)=>{if(r.ch===c.channelId&&r.line===line.key)h+=_tgaRowHtml(r,i,months);});
       });
-    });
-    body+=totRow('ch:'+c.channelId,_escHtml(c.name)+' 합계','tg-chtot');
+      return h;
+    };
+    body+=PRODUCT_MAIN_CATEGORIES.map(catBody).join('')+totRow('ch:'+c.channelId,_escHtml(c.name)+' 합계','tg-chtot');
+    if(_TG.nonMain)body+=`<tr class="tg-sep"><td colspan="14">본품 외 — ${_escHtml(c.name)} 합계·전체 합계에 들어가지 않습니다</td></tr>`+PRODUCT_EXTRA_CATEGORIES.map(catBody).join('');
   });
   body+=totRow('all','전체 합계','tg-grand');
   return head+`<div class="card"><div class="tbl-wrap"><table class="tg-tbl tga-tbl"><thead>${th}</thead><tbody>${body}</tbody></table></div></div>`;

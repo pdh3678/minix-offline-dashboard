@@ -4,11 +4,14 @@
           [단가] offline_getPrices·savePrices·deletePrice /
           [이관] offline_migrateProgress·migratePrices(미리보기 → 매핑 확인 → 반영)
 
+   본품 외 대분류(필터·기타) 행은 기본으로 숨기고 "비본품 표시"(월별 입력·연간 보기 공유)로 채널 합계 아래에 보인다.
+   채널·전체 합계는 켜도 본품 합계다.
+
    월별 입력 표는 칸을 고칠 때 표를 다시 그리지 않는다 — 다시 그리면 Tab으로 옮겨 간 입력칸이 사라져
    키보드로 연달아 입력할 수 없다. 대신 그 줄의 달성률·금액과 합계 칸만 id로 찾아 갱신한다. */
 
 const _TG_FIELDS=['inT','inA','outT','outA'];
-const _TG={tab:'monthly',ym:'',ch:'',data:null,err:'',loading:false,edits:{},collapsed:{},saving:false,view:[],
+const _TG={tab:'monthly',ym:'',ch:'',data:null,err:'',loading:false,edits:{},collapsed:{},saving:false,view:[],nonMain:false,
   prices:null,priceErr:'',priceCh:'',priceEditKey:null,priceEdit:null,priceForm:null,priceBusy:false,
   mig:{prog:null,progErr:'',progBusy:false,progMap:null,progResult:null,progConfirm:false,
     price:null,priceErr:'',priceBusy:false,priceRows:{},priceStart:'',priceResult:null,priceConfirm:false,log:null}};
@@ -101,12 +104,18 @@ function _tgChanged(row,f){
   const v=_tgVal(row,f),o=row.orig[f]==null?'':row.orig[f];
   return !(v===o||(v!==''&&o!==''&&Number(v)===Number(o)));
 }
+// 본품 대분류인지(본품합계포함 Y) / 화면에 보이는 대분류인지 — 본품 외(필터·기타)는 "비본품 표시"를 켰을 때만
+function _tgIsMain(cat){return !PRODUCT_CATEGORY_ATTR[cat]||PRODUCT_CATEGORY_ATTR[cat].main==='Y';}
+function _tgCatShown(cat){return _TG.nonMain||_tgIsMain(cat);}
+function _tgSetNonMain(on){_TG.nonMain=!!on;_tgRender();}
+function _tgNonMainToggleHtml(){return `<label class="of-fl" title="필터·기타 행 — 채널·전체 합계(본품)에는 켜도 들어가지 않습니다"><input type="checkbox"${_TG.nonMain?' checked':''} onchange="_tgSetNonMain(this.checked)"> 비본품 표시</label>`;}
 function _tgChangedCount(){return _TG.view.reduce((n,r)=>n+_TG_FIELDS.filter(f=>_tgChanged(r,f)).length,0);}
 function _tgInvalidCount(){return _TG.view.reduce((n,r)=>n+_TG_FIELDS.filter(f=>{const v=_tgVal(r,f);return v!==''&&!isFinite(v);}).length,0);}
 function _tgEditable(row,f){return !(f==='outA'&&row.upload);}
 
 // 합계: 대분류(cat:ch|대분류) · 품목군(ln:ch|line) · 채널(ch:ch) · 전체(all)
 // 대분류·채널·전체 합계에는 대분류 단위(이관) 행도 더한다 — 대분류 합계 = 대분류 단위 행 + 그 대분류 모델 행
+// 채널·전체 합계 = 본품 합계 — 본품 외 대분류(필터·기타)는 자기 대분류 합계에만 들어간다(비본품 표시와 무관)
 function _tgTotals(){
   const t={};
   const bucket=scope=>t[scope]||(t[scope]={inT:null,inA:null,outT:null,outA:null,inAAmt:null,outAAmt:null});
@@ -117,11 +126,11 @@ function _tgTotals(){
     if(p!=null){const a=_tgVal(row,'inA'),o=_tgVal(row,'outA');if(a!==''&&isFinite(a))s.inAAmt=(s.inAAmt||0)+a*p;if(o!==''&&isFinite(o))s.outAAmt=(s.outAAmt||0)+o*p;}
   };
   const addCat=(scope,cr)=>{const s=bucket(scope);_TG_FIELDS.forEach(f=>{const v=_tgCatVal(cr,f);if(v!=='')s[f]=(s[f]||0)+v;});};
-  _TG.view.forEach(r=>{add('cat:'+r.ch+'|'+r.category,r);add('ln:'+r.ch+'|'+r.line,r);add('ch:'+r.ch,r);add('all',r);});
+  _TG.view.forEach(r=>{add('cat:'+r.ch+'|'+r.category,r);add('ln:'+r.ch+'|'+r.line,r);if(_tgIsMain(r.category)){add('ch:'+r.ch,r);add('all',r);}});
   const shown={};_TG.view.forEach(r=>{shown[r.ch]=true;});
   Object.keys(_TG.catRows||{}).forEach(k=>{
     const cr=_TG.catRows[k];if(!shown[cr.channelId])return;
-    addCat('cat:'+k,cr);addCat('ch:'+cr.channelId,cr);addCat('all',cr);
+    addCat('cat:'+k,cr);if(_tgIsMain(cr.category)){addCat('ch:'+cr.channelId,cr);addCat('all',cr);}
   });
   return t;
 }
@@ -161,6 +170,7 @@ function _tgMonthlyHtml(){
       <button type="button" class="btn-cancel up-btn" ${_TG.loading||_TG.saving?'disabled':''} onclick="_tgCopyPrev()">전월 목표 복사</button>
       <button type="button" class="btn-primary up-btn" id="tgSaveBtn" ${_TG.saving?'disabled':''} onclick="_tgSave()">저장</button>
       <button type="button" class="btn-cancel up-btn" onclick="_tgRevert()">되돌리기</button>
+      ${_tgNonMainToggleHtml()}
       <span class="off-muted" id="tgDirty"></span>
     </div>
     ${_TG.confirmDiscard?`<div class="up-err">저장하지 않은 변경이 있습니다. <button type="button" class="btn-cancel up-btn" onclick="_tgKeepEdits()">계속 편집</button> <button type="button" class="btn-cancel up-btn cm-danger" onclick="_tgDiscardAndGo()">버리고 ${_escHtml(_TG.confirmDiscard)}로 이동</button></div>`:''}
@@ -189,21 +199,26 @@ function _tgChannelHtml(c){
   let html=`<tr class="tg-ch"><td colspan="8">${_escHtml(c.name)} ${up?`<span class="up-chip ready">OUT 실적 = 업로드 원장(${_escHtml(c.uploadStartMonth)}~)</span>`:(c.uploadStartMonth?`<span class="up-chip">업로드 ${_escHtml(c.uploadStartMonth)}부터 — 이 달은 입력값</span>`:'<span class="up-chip">업로드 없는 채널 — OUT 실적 입력</span>')}</td></tr>`;
   // 대분류 → 품목군 → 모델. 접기는 대분류 단위(데이터 없는 대분류는 접힌 채로 시작).
   // 품목군이 둘 이상인 대분류(건조기 = 더 에어드라이 + 미니 건조기)만 품목군 합계 줄을 따로 보여 준다.
-  PRODUCT_CATEGORIES.forEach(cat=>{
+  // 본품 대분류 → 채널 합계(본품) → "비본품 표시"면 구분선 뒤에 필터·기타
+  const catHtml=cat=>{
+    let h='';
     const lines=PRODUCT_CATALOG.filter(l=>l.category===cat);
     const cr=(_TG.catRows||{})[c.channelId+'|'+cat];
     const ck=c.channelId+'|'+cat;
     const closed=_tgCatClosed(ck);
-    html+=_tgTotalRowHtml('cat:'+ck,`<button type="button" class="tg-fold" onclick="_tgFold('${_escAttr(ck)}')">${closed?'▸':'▾'}</button> ${_escHtml(cat)}${cr?' <span class="up-chip">이관 대분류 합계 포함</span>':''}`,'tg-cat');
-    if(closed)return;
-    if(cr)html+=_tgCatRowHtml(cr);
+    h+=_tgTotalRowHtml('cat:'+ck,`<button type="button" class="tg-fold" onclick="_tgFold('${_escAttr(ck)}')">${closed?'▸':'▾'}</button> ${_escHtml(cat)}${cr?' <span class="up-chip">이관 대분류 합계 포함</span>':''}`,'tg-cat');
+    if(closed)return h;
+    if(cr)h+=_tgCatRowHtml(cr);
     lines.forEach(line=>{
       const lr=rows.filter(r=>r.line===line.key);
-      if(lines.length>1)html+=_tgTotalRowHtml('ln:'+c.channelId+'|'+line.key,_escHtml(line.label),'tg-line');
-      lr.forEach(r=>{html+=_tgRowHtml(r,_TG.view.indexOf(r));});
+      if(lines.length>1)h+=_tgTotalRowHtml('ln:'+c.channelId+'|'+line.key,_escHtml(line.label),'tg-line');
+      lr.forEach(r=>{h+=_tgRowHtml(r,_TG.view.indexOf(r));});
     });
-  });
-  return html+_tgTotalRowHtml('ch:'+c.channelId,_escHtml(c.name)+' 합계','tg-chtot');
+    return h;
+  };
+  html+=PRODUCT_MAIN_CATEGORIES.map(catHtml).join('')+_tgTotalRowHtml('ch:'+c.channelId,_escHtml(c.name)+' 합계','tg-chtot');
+  if(_TG.nonMain)html+=`<tr class="tg-sep"><td colspan="8">본품 외 — ${_escHtml(c.name)} 합계·전체 합계에 들어가지 않습니다</td></tr>`+PRODUCT_EXTRA_CATEGORIES.map(catHtml).join('');
+  return html;
 }
 function _tgCatHas(ck){
   const [ch,cat]=ck.split('|');
@@ -297,7 +312,7 @@ async function _tgCopyPrev(){
     const byKey={};(pd.rows||[]).forEach(r=>{byKey[_tgKey(r.channelId,r.line,r.model)]=r;});
     let n=0;
     _TG.view.forEach(r=>{
-      const p=byKey[r.key];if(!p)return;
+      const p=byKey[r.key];if(!p||!_tgCatShown(r.category))return; // 숨긴 본품 외 줄에는 몰래 채우지 않는다
       [['inT',p.in.target],['outT',p.out.target]].forEach(([f,v])=>{if(v!=null&&_tgVal(r,f)===''){_tgSetEdit(r,f,String(v));n++;}});
     });
     // 복사한 값이 들어간 품목군은 펼쳐서 보여 준다

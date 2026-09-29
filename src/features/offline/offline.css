@@ -77,6 +77,10 @@
 .of-tbl .of-lv-note td{font-size:11.5px;color:var(--warn);background:var(--warn-bg);padding-left:30px}
 .of-tbl .of-lv-total td{font-weight:800;border-top:2px solid var(--border);background:var(--minix-lt);color:var(--minix)}
 .of-tbl .of-lv-um td{color:var(--warn)}
+/* 본품 외 대분류(필터·기타) — 본품 합계 줄 아래 구분선 뒤에 / 카드·채널 상세의 "필터 판매 · 필터 재고" 한 줄 */
+.of-tbl .of-lv-sep td{border-top:2px dashed var(--border-s);padding-top:12px;font-size:11px;font-weight:700;color:var(--text-3);background:var(--surface)}
+.of-extra{font-size:11.5px;color:var(--text-2);font-variant-numeric:tabular-nums}
+.of-card .of-extra{border-top:1px dashed var(--border);padding-top:8px}
 .of-fold{border:none;background:none;cursor:pointer;font-size:11px;color:var(--text-2);padding:0 4px 0 0;font-family:inherit}
 .of-cell-rate{border-radius:4px;padding:1px 6px;font-weight:800;display:inline-block;min-width:48px;text-align:right}
 .of-dim{color:var(--text-3)}

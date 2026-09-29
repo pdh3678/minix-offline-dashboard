@@ -19,7 +19,9 @@
  *                당월판매 = 판매원장에서 재고 기준일이 속한 달의 점포 판매 합 — 업태명으로 점포별 일별 판매를 받는 채널(원천업태명이
  *                있는 이마트·트레이더스)과 재고 파일에 당월판매 열이 없는 채널(전자랜드). 그 외(하이마트)는 재고_점포최신의 당월판매(당월 누적)
  *   경보         재고일수 > 과다일수 → over(과다) / 재고일수 < 결품위험일수 → risk(결품 위험) / 점포 결품
- *   미매칭       매핑 없는 코드의 재고·판매는 합계에서 빼지 않고 unmatched 로 따로 준다(채널 전체 = SKU 합 + 미매칭).
+ *                경보 대상이 아닌 대분류(OFFLINE_CATEGORY_ATTR alert N — 기타)는 alert '' · 점포 결품 제외
+ *   본품 합계    채널 단위 그룹(level 'channel')은 본품합계포함 Y 대분류 SKU만 — 필터·기타는 대분류 이하 그룹에만 있다
+ *   미매칭       매핑 없는 코드의 재고·판매는 합계에서 빼지 않고 unmatched 로 따로 준다(채널 전체 = 본품 + 본품 외 대분류 + 미매칭).
  *                점포 수·점포 결품은 SKU로 해석된 코드만 센다(다른 브랜드 상품이 섞여 있어서)
  */
 
@@ -126,9 +128,10 @@ function _offInventoryCompute(input) {
     }
     return G[k];
   }
-  // 한 SKU 값이 들어가는 모든 그룹(그 채널 + 전체 채널 × 다섯 단계)
+  // 한 SKU 값이 들어가는 모든 그룹(그 채널 + 전체 채널 × 다섯 단계). 채널 단위 그룹 = 본품 합계라 필터·기타 SKU는 넣지 않는다
   function each(ch, sku, fn) {
-    [ch, '*'].forEach(function (c) { OFF_INV_LEVELS.forEach(function (lv) { fn(grp(c, lv, lv === 'channel' ? null : sku)); }); });
+    var main = _offCatMain(sku.category);
+    [ch, '*'].forEach(function (c) { OFF_INV_LEVELS.forEach(function (lv) { if (lv !== 'channel' || main) fn(grp(c, lv, lv === 'channel' ? null : sku)); }); });
   }
   chans.forEach(function (c) { grp(c.channelId, 'channel', null); });
   grp('*', 'channel', null);
@@ -207,7 +210,7 @@ function _offInventoryCompute(input) {
   cellOrder.forEach(function (k) {
     var c = cell[k], total = c.stock['정상'] + c.stock['전시'] + c.stock['리퍼'] + c.other;
     var info = storeInfo[c.channelId + OFF_KEY_SEP + c.store] || { name: '', region: '' };
-    var out = !!c.skuId && c.monthSale > 0 && total === 0;
+    var out = !!c.skuId && c.monthSale > 0 && total === 0 && _offCatAlert(R.skus[c.skuId].category);
     if (c.skuId) {
       var sku = R.skus[c.skuId];
       each(c.channelId, sku, function (g) {
@@ -237,7 +240,7 @@ function _offInventoryCompute(input) {
     g.handlingStores = Object.keys(g._hand).length;
     var st = ch === '*' ? totalStores : (storeTotal[ch] || 0);
     g.coverage = st ? g.handlingStores / st : null;
-    g.alert = g.days == null ? '' : (g.days > OVER ? 'over' : (g.days < RISK ? 'risk' : ''));
+    g.alert = g.days == null || !_offCatAlert(g.category) ? '' : (g.days > OVER ? 'over' : (g.days < RISK ? 'risk' : ''));
     delete g._disp; delete g._hand;
     return g;
   });

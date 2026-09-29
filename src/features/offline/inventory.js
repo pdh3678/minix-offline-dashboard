@@ -1,7 +1,8 @@
 'use strict';
 /* 재고 현황(#offline/inventory) — SKU × 채널 재고와 경보. 지표는 전부 offline_getInventory(서버 _offInventoryCompute) 값 그대로.
    · 매트릭스: 셀 = 재고수량(재고구분 토글 [정상 / 전시 / 리퍼 / 전체]) + 재고일수(항상 정상 기준), 경보 색. 대분류 필터
-   · 경보 목록: [과다 / 결품 위험 / 점포 결품] — 채널 상세(해당 SKU·점포)로 이동
+     대분류 '전체'면 본품 → 합계(본품) → 구분선 → 본품 외(필터·기타)
+   · 경보 목록: [과다 / 결품 위험 / 점포 결품] — 채널 상세(해당 SKU·점포)로 이동. 기타는 서버가 경보에서 뺀다(필터는 포함)
    · 재고 추이: 모델 또는 SKU → 채널별 선(offline_getInventoryTrend, 재고_채널일별)
    · 설정 모달(관리자): 재고일수 판매 기준일수·과다일수·결품위험일수·데이터 지연 경고일수 → offline_saveSettings */
 
@@ -23,8 +24,8 @@ async function _oivLoad(force){
   try{
     const [,inv]=await Promise.all([_offlineLoadMasters(),_offlineCached('offline_getInventory',{},force)]);
     _OIV.inv=inv;_OIV.err='';
-    if(!_OIV.trend.sel){ // 재고가 가장 많은 모델로 시작
-      const m=(inv.groups||[]).filter(g=>g.channelId==='*'&&g.level==='model').sort((a,b)=>b.total-a.total)[0];
+    if(!_OIV.trend.sel){ // 재고가 가장 많은 본품 모델로 시작
+      const m=(inv.groups||[]).filter(g=>g.channelId==='*'&&g.level==='model'&&PRODUCT_MAIN_CATEGORIES.indexOf(g.category)>=0).sort((a,b)=>b.total-a.total)[0];
       _OIV.trend.sel=m?'model:'+m.key:'';
     }
   }catch(e){_OIV.err=e.message;}
@@ -73,22 +74,24 @@ function _oivMatrixHtml(){
     return `<td><span class="of-mx-cell${cls}${click}"><span class="of-mx-main">${_ofNum(q)}</span><span class="of-mx-sub">${_ofDays(g)}${g.storeOuts?' · 결품 '+g.storeOuts:''}</span></span></td>`;
   };
   const skus=(inv.groups||[]).filter(g=>g.channelId==='*'&&g.level==='sku'&&(!cat||g.category===cat));
-  let body='';
-  PRODUCT_CATEGORIES.filter(c=>!cat||c===cat).forEach(c=>{
+  // 대분류 필터가 없으면 본품 → 미매칭 → 합계(본품) → 구분선 → 본품 외(필터·기타)
+  const catRows=c=>{
     const list=skus.filter(g=>g.category===c);
-    if(!list.length)return;
-    body+=`<tr class="of-lv-cat"><td>${_escHtml(c)}</td>${chans.map(ch=>cell(ch.channelId,G(ch.channelId,'category',c))).join('')}${cell('*',G('*','category',c))}</tr>`;
-    list.forEach(s=>{
-      body+=`<tr class="of-lv-sku"><td>${_escHtml(s.name)} <span class="of-sub">${_escHtml(s.skuId)}${s.active==='N'?' · 비활성':''}</span></td>${chans.map(ch=>cell(ch.channelId,G(ch.channelId,'sku',s.key),s.skuId)).join('')}${cell('*',s)}</tr>`;
-    });
-  });
+    if(!list.length)return '';
+    return `<tr class="of-lv-cat"><td>${_escHtml(c)}</td>${chans.map(ch=>cell(ch.channelId,G(ch.channelId,'category',c))).join('')}${cell('*',G('*','category',c))}</tr>`+
+      list.map(s=>`<tr class="of-lv-sku"><td>${_escHtml(s.name)} <span class="of-sub">${_escHtml(s.skuId)}${s.active==='N'?' · 비활성':''}</span></td>${chans.map(ch=>cell(ch.channelId,G(ch.channelId,'sku',s.key),s.skuId)).join('')}${cell('*',s)}</tr>`).join('');
+  };
+  let body=(cat?[cat]:PRODUCT_MAIN_CATEGORIES).map(catRows).join('');
   // 미매칭 — 재고구분을 몰라서 [전체]에서만 수량을 보여 준다
   if(!cat){
     const u=chans.map(ch=>{const ci=_ofChannelInv(inv,ch.channelId);return ci?ci.unmatchedStock:0;});
     const tot=u.reduce((s,v)=>s+v,0);
     if(tot)body+=`<tr class="of-lv-um"><td>미매칭 코드 <a class="of-link" onclick="_ofGo('admin-code-mapping')">매핑 →</a></td>${u.map(v=>`<td>${v?(_OIV.type==='all'?_ofNum(v):'<span class="of-dim" title="재고구분을 모름 — [전체]에서 보임">('+_ofNum(v)+')</span>'):'<span class="of-dim">—</span>'}</td>`).join('')}<td>${_OIV.type==='all'?_ofNum(tot):'<span class="of-dim">('+_ofNum(tot)+')</span>'}</td></tr>`;
     const totalG=G('*','channel','');
-    body+=`<tr class="of-lv-total"><td>합계${_OIV.type==='all'?' (미매칭 포함)':''}</td>${chans.map((ch,i)=>{const g=G(ch.channelId,'channel','');return `<td>${_ofNum((_oivQty(g)||0)+(_OIV.type==='all'?u[i]:0))}</td>`;}).join('')}<td>${_ofNum((_oivQty(totalG)||0)+(_OIV.type==='all'?tot:0))}</td></tr>`;
+    const extra=PRODUCT_EXTRA_CATEGORIES.map(catRows).join('');
+    const lb=extra?(_OIV.type==='all'?' (본품 + 미매칭)':' (본품)'):(_OIV.type==='all'?' (미매칭 포함)':'');
+    body+=`<tr class="of-lv-total"><td>합계${lb}</td>${chans.map((ch,i)=>{const g=G(ch.channelId,'channel','');return `<td>${_ofNum((_oivQty(g)||0)+(_OIV.type==='all'?u[i]:0))}</td>`;}).join('')}<td>${_ofNum((_oivQty(totalG)||0)+(_OIV.type==='all'?tot:0))}</td></tr>`;
+    if(extra)body+=`<tr class="of-lv-sep"><td colspan="${chans.length+2}">본품 외 — 위 합계에 들어가지 않습니다</td></tr>`+extra;
   }
   return `<div class="card"><div class="card-hd"><span>SKU × 채널 재고 <span class="axis-toggle">${_OIV_TYPES.map(([v,l])=>`<button type="button" class="${_OIV.type===v?'on':''}" onclick="_oivSetType('${v}')">${l}</button>`).join('')}</span></span>
       <span class="card-hd-r">셀 = 재고수량 · 아래 = 재고일수(정상 기준) · <span class="of-badge of-b-over">과다</span> <span class="of-badge of-b-risk">결품 위험</span> · 셀을 누르면 채널 상세</span></div>

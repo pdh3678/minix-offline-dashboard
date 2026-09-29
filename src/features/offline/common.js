@@ -86,6 +86,15 @@ function _ofAlertCounts(inv,ch){
   ((inv&&inv.storeOuts)||[]).forEach(s=>{if((!ch||s.channelId===ch)&&(!cat||skuCat[s.skuId]===cat))o.storeOut++;});
   return o;
 }
+/* 필터 따로 한 줄 — 필터는 본품합계포함 N이라 위의 본품 숫자(달성률·재고·재고일수)에 없다. ch '' = 전체 채널
+   판매 = 선택 범위(월 / 연 누적) OUT 실적(월별 해석) · 재고 = 최신 기준일 재고(재고구분 합). 둘 다 0이면 숨김.
+   대분류 필터가 걸려 있으면 숨긴다 — 그때 위 숫자는 이미 그 대분류다(필터를 고르면 필터 숫자) */
+function _ofFilterLineHtml(mon,inv,ch){
+  if(OFFLINE_FILTER.category)return '';
+  const sold=_ofTotals(mon,ch,null,'필터').out.actual||0,g=_ofGroup(inv,ch||'*','category','필터'),stock=g?g.total:0;
+  if(!sold&&!stock)return '';
+  return `<div class="of-extra" title="필터는 본품 합계(달성률·IN−OUT 갭·정상재고·재고일수·진열 점포)에 들어가지 않습니다">필터 판매 ${_ofNum(sold)}개 · 필터 재고 ${_ofNum(stock)}개</div>`;
+}
 function _ofAlertBadges(a){
   const b=[];
   if(a.over)b.push(`<span class="of-badge of-b-over" title="재고일수가 과다일수를 넘은 SKU">과다 ${a.over}</span>`);

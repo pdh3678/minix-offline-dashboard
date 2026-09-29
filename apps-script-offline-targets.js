@@ -115,7 +115,8 @@ function _offRate(actual, target) { return (target && actual != null) ? actual /
 
 /* 순수 계산 — 시트 없이 행 배열만 받는다(테스트·2-B 재사용).
    input: { from, to, channelId?, channels[], targets[], prices[], sales[], mappings[], skus[] } (각 탭의 _offReadRows 행)
-   반환: { months, channels, rows[], totals{byChannelMonth[], byMonth[]}, unmatched[], warnings[] }
+   반환: { months, channels, rows[], totals{byChannelMonth[], byMonth[], byCategory[]}, unmatched[], warnings[] }
+     byChannelMonth·byMonth = 본품 합계(본품합계포함 N 대분류 제외) · byCategory = 대분류마다(필터·기타 포함)
    행 하나 = 연월 × 채널 × 품목군 × 모델
      in  { target, actual, rate, targetAmount, actualAmount }
      out { target, actual, source(upload|manual|migration|''), byType{정상,전시,리퍼}|null, rate, targetAmount, actualAmount } */
@@ -278,6 +279,7 @@ function _offMonthlyCompute(input) {
     });
   }
   // 채널×월·월 합계에는 대분류 단위 행도 넣는다(실제 수량이므로). 대분류 합계 = 대분류 단위 행 + 그 대분류 모델 행
+  // 채널×월·월 합계 = 본품 합계 — 본품합계포함 N 대분류(필터·기타)는 대분류 합계(byCategory)에만 들어간다
   var byCM = {}, byM = {}, byCat = {}, catOrder = [];
   function catTot(r) {
     var k = [r.ym, r.channelId, r.category].join(OFF_KEY_SEP);
@@ -285,10 +287,11 @@ function _offMonthlyCompute(input) {
     return byCat[k];
   }
   list.concat(clist).forEach(function (r) {
+    if (r.category) add(catTot(r), r);
+    if (!_offCatMain(r.category)) return;
     var k = r.ym + OFF_KEY_SEP + r.channelId;
     add(byCM[k] = byCM[k] || emptyTot(), r);
     add(byM[r.ym] = byM[r.ym] || emptyTot(), r);
-    if (r.category) add(catTot(r), r);
   });
   clist.forEach(function (r) { catTot(r).hasCategoryRow = true; });
   // 중복 경고 — 같은 연월·채널·대분류·항목에 대분류 단위(이관) 값과 **직접 입력한** 모델 단위 값이 둘 다 있으면
@@ -315,7 +318,7 @@ function _offMonthlyCompute(input) {
   var byChannelMonth = Object.keys(byCM).sort().map(function (k) {
     var p = k.split(OFF_KEY_SEP), t = finish(byCM[k]);
     // 그 달·채널에 "대분류 합계로만 존재하는 수치"가 있는 대분류(모델 행만 보면 빠져 보이는 몫)
-    var catOnly = clist.filter(function (c) { return c.ym === p[0] && c.channelId === p[1]; }).map(function (c) { return c.category; });
+    var catOnly = clist.filter(function (c) { return c.ym === p[0] && c.channelId === p[1] && _offCatMain(c.category); }).map(function (c) { return c.category; });
     return { ym: p[0], channelId: p[1], 'in': t['in'], out: t.out, categoryOnly: catOnly };
   });
   var byMonth = Object.keys(byM).sort().map(function (ym) { var t = finish(byM[ym]); return { ym: ym, 'in': t['in'], out: t.out }; });
@@ -805,6 +808,7 @@ function _offCompareUploadStart(ss, parsed, plan, channelRows) {
       var isCat = !p[1];
       out.push({ ym: ym, channelId: ch, category: p[3], line: p[1], model: isCat ? '(대분류) ' + p[3] + ' 합계' : p[2], level: isCat ? 'category' : 'model',
         legacy: l, ledger: d, diff: d - (l || 0) });
+      if (!_offCatMain(p[3])) return; // 채널 합계 = 본품 합계(필터·기타 줄은 보여 주기만)
       sumL = _offSumOrNull(sumL, l); sumD += d;
     });
     var um = mon.totals.byChannelMonth.length ? mon.totals.byChannelMonth[0].out.unmatchedQty : 0;

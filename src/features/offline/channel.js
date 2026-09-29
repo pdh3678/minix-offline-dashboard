@@ -4,7 +4,7 @@
    (b) 일별 Sell-out offline_getDailySales(기본 최근 60일, SKU 단위) — day는 막대, period는 기간 전체를 덮는 블록(높이 = 일평균)
                     하이마트는 [판매등록 / 설치완료]
    (c) 모델·SKU 표 대분류 → 품목군 → 모델 → SKU. 목표·실적은 월별 해석(모델 단위), SKU 행 OUT 실적은 판매원장 기준,
-                    재고 열은 offline_getInventory 그룹 지표 그대로
+                    재고 열은 offline_getInventory 그룹 지표 그대로. 채널 합계 = 본품 합계, 본품 외(필터·기타)는 그 아래 구분선 뒤
    (d) 점포 표     offline_getInventory(이 채널 점포 표) — 검색·정렬·지역·SKU 필터, 결품 강조, CSV 다운로드 */
 
 const _OCD={ch:'',mon:null,inv:null,skuOut:null,daily:null,err:'',dailyErr:'',dailyRange:null,dmode:'qty',open:{},skuOpen:{},
@@ -87,7 +87,7 @@ function _ocdRender(){
   if(!_OCD.mon||!_OCD.inv){host.innerHTML=tabs+bar+_ofLoadingHtml();return;}
   const ci=_ofChannelInv(_OCD.inv,_OCD.ch)||{};
   const up=ci.hasStock||ci.hasSales;
-  host.innerHTML=tabs+bar+_ofFreshnessHtml(_OCD.inv,_OCD.ch)+
+  host.innerHTML=tabs+bar+_ofFreshnessHtml(_OCD.inv,_OCD.ch)+_ofFilterLineHtml(_OCD.mon,_OCD.inv,_OCD.ch)+
     `<div class="of-row2">
       <div class="card"><div class="card-hd"><span>월별 추이 <span class="of-sub">${_escHtml(_ofYear())}년 · ${OFFLINE_FILTER.unit==='amount'?'금액':'수량'}${OFFLINE_FILTER.category?' · '+_escHtml(OFFLINE_FILTER.category):''}</span></span><span class="card-hd-r">막대 = 실적 · 선 = 목표</span></div>
         <div class="of-chart"><canvas id="ocdMonthlyCanvas"></canvas></div></div>
@@ -201,8 +201,10 @@ function _ocdTableHtml(ci){
   // SKU OUT(원장) — 선택 범위, day+period
   const skuOut={};((_OCD.skuOut&&_OCD.skuOut.days)||[]).concat((_OCD.skuOut&&_OCD.skuOut.periods)||[]).forEach(x=>{if(x.key)skuOut[x.key]=(skuOut[x.key]||0)+x.qty;});
   const hasAny=(t,g)=>(t&&[t.in.target,t.in.actual,t.out.target,t.out.actual].some(v=>v!=null))||(g&&(g.total||g.windowQty));
-  let html='';
+  // 본품 대분류는 채널 합계 위, 본품 외(필터·기타)는 채널 합계(= 본품 합계) 아래 구분선 뒤에. 대분류 필터가 있으면 그 대분류만
+  const main=[],extra=[];
   PRODUCT_CATEGORIES.filter(c=>!cat||c===cat).forEach(c=>{
+    const buf=cat||PRODUCT_CATEGORY_ATTR[c].main==='Y'?main:extra;
     const ct=_ofTotals(_OCD.mon,ch,null,c),cg=G('category',c);
     const crs=catRows.filter(x=>x.category===c);
     const lines=PRODUCT_CATALOG.filter(l=>l.category===c);
@@ -234,24 +236,25 @@ function _ocdTableHtml(ci){
     });
     if(!hasAny(ct,cg)&&!lineHtml.length&&!crs.length)return;
     const open=_OCD.open[c]!==false;
-    html+=`<tr class="of-lv-cat"><td><button type="button" class="of-fold" onclick="_ocdToggleCat('${_escAttr(c)}')">${open?'▾':'▸'}</button>${_escHtml(c)}</td>${_ocdCells(ct,cg)}</tr>`;
+    buf.push(`<tr class="of-lv-cat"><td><button type="button" class="of-fold" onclick="_ocdToggleCat('${_escAttr(c)}')">${open?'▾':'▸'}</button>${_escHtml(c)}</td>${_ocdCells(ct,cg)}</tr>`);
     if(!open)return;
     // 대분류 단위 이관 행이 있는 달 — 모델 행을 더해도 대분류 합계가 안 나온다(모델 구분 없는 과거 수치)
     if(crs.length){
       const ms=[...new Set(crs.map(x=>x.ym))].sort();
-      html+=`<tr class="of-lv-note"><td colspan="13">ⓘ ${_escHtml(ms.map(m=>+m.slice(5)+'월').join('·'))}은(는) 대분류 합계만 존재 — 모델 구분 없는 이관 수치라 모델 행에는 나오지 않고 위 ${_escHtml(c)} 합계에만 들어 있습니다.${crs.some(x=>x.duplicateFields&&x.duplicateFields.length)?' ⚠ 같은 달에 모델 단위 입력도 있어 중복 가능.':''}</td></tr>`;
+      buf.push(`<tr class="of-lv-note"><td colspan="13">ⓘ ${_escHtml(ms.map(m=>+m.slice(5)+'월').join('·'))}은(는) 대분류 합계만 존재 — 모델 구분 없는 이관 수치라 모델 행에는 나오지 않고 위 ${_escHtml(c)} 합계에만 들어 있습니다.${crs.some(x=>x.duplicateFields&&x.duplicateFields.length)?' ⚠ 같은 달에 모델 단위 입력도 있어 중복 가능.':''}</td></tr>`);
     }
-    html+=lineHtml.join('');
+    buf.push(lineHtml.join(''));
   });
   const tt=_ofTotals(_OCD.mon,ch,null,cat),tg=cat?G('category',cat):G('channel','');
   const um=!cat?`<tr class="of-lv-um"><td>미매칭 코드 <a class="of-link" onclick="_ofGo('admin-code-mapping')">매핑 →</a></td><td class="num-col"></td><td class="num-col"></td><td></td><td class="num-col"></td>
     <td class="num-col" title="매핑 안 된 코드의 판매 — OUT 실적 합계에 들어가지 않은 수량">${tt.out.unmatchedQty?_ofNum(tt.out.unmatchedQty):'—'}</td><td></td>
     <td class="num-col" title="매핑 안 된 코드의 재고(재고구분 모름)">${ci.unmatchedStock?_ofNum(ci.unmatchedStock):'—'}</td><td colspan="5"></td></tr>`:'';
-  if(!html)return '<div class="mp-empty">이 범위에 목표·실적·재고가 없습니다.</div>';
+  if(!main.length&&!extra.length)return '<div class="mp-empty">이 범위에 목표·실적·재고가 없습니다.</div>';
+  const sep=extra.length?'<tr class="of-lv-sep"><td colspan="13">본품 외 — 위 채널 합계(본품)에 들어가지 않습니다</td></tr>'+extra.join(''):'';
   return `<div class="tbl-wrap"><table class="of-tbl"><thead><tr><th>대분류 / 품목군 / 모델 / SKU</th><th class="num-col">IN 목표</th><th class="num-col">IN 실적</th><th class="num-col">IN 달성률</th>
     <th class="num-col">OUT 목표</th><th class="num-col">OUT 실적</th><th class="num-col">OUT 달성률</th><th class="num-col">정상재고</th><th class="num-col">전시재고</th><th class="num-col">리퍼재고</th>
     <th class="num-col">재고일수</th><th class="num-col">진열 점포</th><th>경보</th></tr></thead>
-    <tbody>${html}${um}<tr class="of-lv-total"><td>${cat?_escHtml(cat)+' 합계':'채널 합계'}</td>${_ocdCells(tt,tg)}</tr></tbody></table></div>`;
+    <tbody>${main.join('')}${um}<tr class="of-lv-total"><td>${cat?_escHtml(cat)+' 합계':'채널 합계'+(extra.length?' (본품)':'')}</td>${_ocdCells(tt,tg)}</tr>${sep}</tbody></table></div>`;
 }
 function _ocdToggleCat(c){_OCD.open[c]=_OCD.open[c]===false;_ocdRender();}
 function _ocdToggleSku(k){_OCD.skuOpen[k]=!_OCD.skuOpen[k];_OCD.focusSku='';_ocdRender();}

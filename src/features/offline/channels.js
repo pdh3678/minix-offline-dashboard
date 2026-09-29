@@ -2,7 +2,8 @@
 /* 채널 현황(#offline/channels) — 채널별 목표 대비 실적(IN = Sell-in, OUT = Sell-out)과 재고 요약.
    데이터: offline_getMonthly(그 해 1~12월 합계만, totalsOnly — 월/연 누적은 여기서 더한다) + offline_getInventory(전체 채널)
    위: 요약 KPI / 가운데: 채널 카드(누르면 채널 상세) / 아래: 채널 × 대분류 매트릭스(달성률 색, IN/OUT 전환).
-   재고 지표(정상재고·재고일수·진열 점포·경보)는 서버 계산값을 그대로 쓴다 — 채널 상세·재고 현황과 같은 정의. */
+   재고 지표(정상재고·재고일수·진열 점포·경보)는 서버 계산값을 그대로 쓴다 — 채널 상세·재고 현황과 같은 정의.
+   대분류 필터 '전체'의 숫자는 본품 합계(서버가 필터·기타를 뺀다) — 필터는 카드 아래 "필터 판매 · 필터 재고" 한 줄로 따로. */
 
 const _OCS={mon:null,inv:null,err:'',year:'',mx:'out'};
 
@@ -86,13 +87,14 @@ function _ocsCardHtml(c){
     <div class="of-card-hd"><span class="of-card-name">${_escHtml(c.name)}</span><span class="of-card-type">${_escHtml(c.type||'')}${c.active==='Y'?'':' · 비활성'}</span><span class="of-badges">${up?_ofAlertBadges(_ofAlertCounts(_OCS.inv,c.channelId)):''}</span></div>
     ${_ocsMeter('IN',t.in)}${_ocsMeter('OUT',t.out)}
     <div class="of-gap" title="IN 실적 − OUT 실적. 양수가 계속 쌓이면 채널 재고가 늘고 있다는 신호">IN−OUT 갭 <b class="${gap>0?'of-gap-pos':''}">${gap==null?'—':(gap>0?'+':'')+_ofFmtUnit(gap)}</b></div>
-    ${stock}</div>`;
+    ${stock}${_ofFilterLineHtml(_OCS.mon,_OCS.inv,c.channelId)}</div>`;
 }
 
 // 채널 × 대분류 — 셀 = 표시 중인 쪽(IN/OUT) 달성률, 색도 그 달성률(100% 이상 초록 · 80% 미만 빨강)
+// 열은 본품 대분류(합계 = 본품 합계). 필터·기타는 대분류 필터로 골랐을 때만 그 한 열
 function _ocsMatrixHtml(chans){
   const side=_OCS.mx,cat=OFFLINE_FILTER.category;
-  const cats=cat?[cat]:PRODUCT_CATEGORIES;
+  const cats=cat?[cat]:PRODUCT_MAIN_CATEGORIES;
   const cell=(ch,c)=>{
     const t=_ofTotals(_OCS.mon,ch,null,c)[side];
     const a=_ofPick(t,'actual'),tg=_ofPick(t,'target'),r=_ofRate(a,tg);

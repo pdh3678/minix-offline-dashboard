@@ -107,6 +107,7 @@
 /* 목표 관리 — 대분류 합계 줄, 대분류 단위 이관 줄(모델 구분 없음, 읽기 전용) */
 .tg-cat td{font-weight:800;background:var(--surface-2)}
 .tg-catrow td{color:var(--text-2)}
+.tg-sep td{border-top:2px dashed var(--border-s);padding-top:10px;font-size:11px;font-weight:700;color:var(--text-3)}
 .tg-catrow .tg-model{font-style:italic}
 .tg-line td:first-child{padding-left:20px!important}
 
