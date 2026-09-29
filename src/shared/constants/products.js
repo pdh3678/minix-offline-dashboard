@@ -18,7 +18,7 @@
            st    품목별 실적 페이지의 ST.prod 값(= 사이드바 data-prod, filteredProd의 분기 키)
            slug  해시 라우팅용 ASCII 슬러그(#product-<slug>) — 한글 슬러그는 퍼센트 인코딩돼 읽을 수 없어짐
            label 표시 이름 · icon 사이드바 아이콘
-           category 대분류(오프라인 집계·이관용 — 음식물처리기·김치냉장고·청소기·건조기·식세기). 품목군 위 단계라
+           category 대분류(오프라인 집계·이관용 — 음식물처리기·김치냉장고·청소기·건조기·식세기 + 본품 외 필터·기타). 품목군 위 단계라
                  더 에어드라이와 미니 건조기가 같은 '건조기'에 묶이지만, 품목군은 그대로 따로다(공구 화면 무관).
                  GAS apps-script-offline-targets.js 의 OFFLINE_CATALOG 와 같아야 한다(테스트가 대조).
    모델    key   배지 색·집계 키(productColorKey 결과와 같아야 함)
@@ -61,9 +61,28 @@ const PRODUCT_CATALOG=[
     {key:'미니식기세척기', label:'미니 식기세척기', gongu:false},
     {key:'미니식기세척기PRO', label:'미니 식기세척기 PRO', gongu:false},
   ]},
+  // 본품이 아닌 품목(2026-09-29) — 본품 뒤에 둔다(대분류 필터 순서 = 이 순서). 본품 합계 제외는 PRODUCT_CATEGORY_ATTR
+  {key:'필터', label:'필터', category:'필터', gongu:false, models:[ // 더 플렌더 전용 필터
+    {key:'하드락필터', label:'하드락필터', gongu:false},
+    {key:'하드필터', label:'하드필터', gongu:false},
+  ]},
+  // 판매용이 아닌 전시대·타 브랜드 리퍼 등. 모델은 하나, 품명은 SKU 옵션에 적는다(skuOptionHint가 있으면 새 SKU 만들기에서 옵션 필수)
+  {key:'기타', label:'기타', category:'기타', gongu:false, skuOptionHint:'품명 입력 (예: 3kg 건조기 전시대)', models:[
+    {key:'기타', label:'기타', gongu:false},
+  ]},
 ];
 // 대분류 목록(카탈로그 등장 순) — 오프라인 목표 관리 표·이관 매핑이 쓴다. 공구 화면은 쓰지 않는다.
 const PRODUCT_CATEGORIES=[...new Set(PRODUCT_CATALOG.map(l=>l.category))];
+/* 대분류 속성 — main = 본품합계포함(Y/N). N이면 채널 현황 KPI·채널 카드·달성률·IN−OUT 갭·정상재고·재고일수·진열 점포 수와
+   목표 관리 채널·전체 합계(= 본품 합계)에서 빠지고, 대분류 단위로만 따로 보인다. 재고 경보 대상 여부는 GAS가 정한다.
+   GAS apps-script-offline-targets.js 의 OFFLINE_CATEGORY_ATTR 와 main 값이 같아야 한다(테스트가 대조). */
+const PRODUCT_CATEGORY_ATTR={
+  '음식물처리기':{main:'Y'},'김치냉장고':{main:'Y'},'청소기':{main:'Y'},'건조기':{main:'Y'},'식세기':{main:'Y'},
+  '필터':{main:'N'}, // 본품 합계에서 빼고 "필터 판매 n개 · 필터 재고 n개" 한 줄로 따로 보여 준다
+  '기타':{main:'N'}, // 본품 합계·재고 경보 모두 제외
+};
+const PRODUCT_MAIN_CATEGORIES=PRODUCT_CATEGORIES.filter(c=>PRODUCT_CATEGORY_ATTR[c].main==='Y');
+const PRODUCT_EXTRA_CATEGORIES=PRODUCT_CATEGORIES.filter(c=>PRODUCT_CATEGORY_ATTR[c].main!=='Y'); // 본품 외(필터 → 기타)
 // 공구 화면에 노출되는 품목군과 그 모델만(순서 유지)
 const _GONGU_LINES=PRODUCT_CATALOG.filter(l=>l.gongu).map(l=>({line:l,models:l.models.filter(m=>m.gongu)}));
 

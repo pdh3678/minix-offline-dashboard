@@ -24,8 +24,24 @@ var OFFLINE_CATALOG = [
   { line: '더슬림', category: '청소기', models: ['더 슬림'] },
   { line: '더에어드라이', category: '건조기', models: ['더 에어드라이'] },
   { line: '미니건조기', category: '건조기', models: ['미니 건조기', '미니 건조기 PRO', '미니 건조기 PRO+'] },
-  { line: '미니식기세척기', category: '식세기', models: ['미니 식기세척기', '미니 식기세척기 PRO'] }
+  { line: '미니식기세척기', category: '식세기', models: ['미니 식기세척기', '미니 식기세척기 PRO'] },
+  // 본품이 아닌 품목(2026-09-29) — 더 플렌더 전용 필터 / 판매용이 아닌 전시대·타 브랜드 리퍼(품명은 SKU 옵션)
+  { line: '필터', category: '필터', models: ['하드락필터', '하드필터'] },
+  { line: '기타', category: '기타', models: ['기타'] }
 ];
+/* 대분류 속성 — 프론트 PRODUCT_CATEGORY_ATTR 와 main 이 같아야 한다(테스트가 대조)
+   main  본품합계포함 Y/N. N이면 월별 해석의 채널·월 합계(byChannelMonth·byMonth)와 재고 지표의 채널 단위 그룹(본품 합계)에서 빠진다.
+         대분류 합계(byCategory)·대분류/품목군/모델/SKU 그룹에는 그대로 있다
+   alert 재고 경보(과다·결품 위험·점포 결품) 대상 Y/N — 필터는 경보 대상, 기타(전시대·타사 리퍼)는 아니다 */
+var OFFLINE_CATEGORY_ATTR = {
+  '음식물처리기': { main: 'Y', alert: 'Y' }, '김치냉장고': { main: 'Y', alert: 'Y' }, '청소기': { main: 'Y', alert: 'Y' },
+  '건조기': { main: 'Y', alert: 'Y' }, '식세기': { main: 'Y', alert: 'Y' },
+  '필터': { main: 'N', alert: 'Y' },
+  '기타': { main: 'N', alert: 'N' }
+};
+// 카탈로그 밖 품목군(시트를 손으로 고친 경우 — 대분류 '')은 본품·경보 대상으로 둔다(이 속성이 생기기 전과 같게)
+function _offCatMain(cat) { var a = OFFLINE_CATEGORY_ATTR[cat]; return !a || a.main !== 'N'; }
+function _offCatAlert(cat) { var a = OFFLINE_CATEGORY_ATTR[cat]; return !a || a.alert !== 'N'; }
 // 파생 — 품목군 → 모델 목록 / 품목군 → 대분류 / 대분류 목록(등장 순)
 var OFFLINE_PRODUCT_MODELS = {}, OFFLINE_LINE_CATEGORY = {}, OFFLINE_CATEGORIES = [];
 OFFLINE_CATALOG.forEach(function (l) {

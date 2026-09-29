@@ -83,7 +83,13 @@ const base = () => ({ from: '2026-08', to: '2026-09', channels: CHANNELS, target
     check('품목군 목록 = OFFLINE_PRODUCT_LINES', J(Object.keys(ctx.OFFLINE_PRODUCT_MODELS)) === J(ctx.OFFLINE_PRODUCT_LINES));
     const frontCat = box.__C.map(l => ({ line: l.key, category: l.category, models: l.models.map(m => m.label) }));
     check('GAS OFFLINE_CATALOG(품목군·대분류·모델) = 프론트 PRODUCT_CATALOG', J(ctx.OFFLINE_CATALOG) === J(frontCat), { gas: ctx.OFFLINE_CATALOG, front: frontCat });
-    check('대분류: 더 에어드라이·미니 건조기 → 건조기(품목군은 따로)', ctx.OFFLINE_LINE_CATEGORY['더에어드라이'] === '건조기' && ctx.OFFLINE_LINE_CATEGORY['미니건조기'] === '건조기' && J(ctx.OFFLINE_CATEGORIES) === J(['음식물처리기', '김치냉장고', '청소기', '건조기', '식세기']));
+    check('대분류: 더 에어드라이·미니 건조기 → 건조기(품목군은 따로)', ctx.OFFLINE_LINE_CATEGORY['더에어드라이'] === '건조기' && ctx.OFFLINE_LINE_CATEGORY['미니건조기'] === '건조기' && J(ctx.OFFLINE_CATEGORIES) === J(['음식물처리기', '김치냉장고', '청소기', '건조기', '식세기', '필터', '기타']));
+    const frontAttr = vm.runInContext('PRODUCT_CATEGORY_ATTR', vm.createContext(box));
+    check('대분류 속성(본품합계포함) GAS = 프론트, 대분류마다 하나씩', J(Object.keys(ctx.OFFLINE_CATEGORY_ATTR)) === J(ctx.OFFLINE_CATEGORIES) &&
+      ctx.OFFLINE_CATEGORIES.every(c => frontAttr[c] && frontAttr[c].main === ctx.OFFLINE_CATEGORY_ATTR[c].main), { gas: ctx.OFFLINE_CATEGORY_ATTR, front: frontAttr });
+    check('본품 = 기존 5개 대분류(Y), 필터·기타 = N / 경보 대상: 필터 Y, 기타 N / 카탈로그 밖(대분류 없음)은 본품·경보 대상',
+      J(ctx.OFFLINE_CATEGORIES.filter(c => ctx._offCatMain(c))) === J(['음식물처리기', '김치냉장고', '청소기', '건조기', '식세기']) &&
+      ctx._offCatAlert('필터') && !ctx._offCatAlert('기타') && ctx._offCatMain('') && ctx._offCatAlert(''));
   }
 
   console.log('\n[2] 모델 표기 정규화');

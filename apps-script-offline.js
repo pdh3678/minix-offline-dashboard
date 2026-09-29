@@ -26,7 +26,7 @@ var OFFLINE_SHEET_ID_PROP = 'OFFLINE_SHEET_ID';
 
 // 품목군 — 프론트 src/shared/constants/products.js 의 PRODUCT_CATALOG 품목군 key와 **같은 목록**이어야 한다
 // (tests/offline-gas.test.js 가 두 목록이 같은지 확인한다). 제품마스터 품목군은 이 값만 허용.
-var OFFLINE_PRODUCT_LINES = ['더플렌더', '더시프트', '더슬림', '더에어드라이', '미니건조기', '미니식기세척기'];
+var OFFLINE_PRODUCT_LINES = ['더플렌더', '더시프트', '더슬림', '더에어드라이', '미니건조기', '미니식기세척기', '필터', '기타'];
 var OFF_STOCK_TYPES = ['정상', '전시', '리퍼'];
 
 // 파일 유형 → 채널과 반영 방식. period = 기간 교체형, snapshot = 스냅샷형, himart = 스냅샷형 + 누적 차이 계산
