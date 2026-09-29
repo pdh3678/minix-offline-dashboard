@@ -1,0 +1,52 @@
+/* 파트 홈(#home) — home.js. 공용 카드·필터 바·표(.of-*)는 offline.css, KPI 토큰은 index.html :root */
+#page-home .card{margin-bottom:16px}
+.home-2col{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:16px}
+.home-2col>.card{margin-bottom:16px}
+@media(max-width:960px){.home-2col{grid-template-columns:minmax(0,1fr)}}
+
+/* ① 파트 실적 — 큰 숫자 + 채널군 미니 카드 */
+.home-hero{display:flex;flex-wrap:wrap;align-items:flex-end;gap:12px 36px;padding:4px 2px 14px}
+.home-hero-lb{font-size:11px;font-weight:700;color:var(--text-2);margin-bottom:4px}
+.home-hero-v{font-size:34px;font-weight:800;line-height:1.1;color:var(--text);font-variant-numeric:tabular-nums}
+.home-hero-v2{font-size:22px;font-weight:800;line-height:1.2;color:var(--text);font-variant-numeric:tabular-nums}
+.home-mini-row{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
+@media(max-width:760px){.home-mini-row{grid-template-columns:minmax(0,1fr)}.home-hero-v{font-size:28px}}
+.home-mini{border:1px solid var(--border);border-radius:var(--r);padding:12px 14px;background:var(--surface)}
+.home-mini-hd{display:flex;align-items:center;gap:6px;font-size:12px;font-weight:800;color:var(--text)}
+.home-mini-v{font-size:20px;font-weight:800;margin:6px 0 4px;color:var(--text);font-variant-numeric:tabular-nums}
+.home-mini-sub{font-size:11px;color:var(--text-2);line-height:1.6}
+.home-dot{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:4px;vertical-align:-1px}
+.home-part .of-extra,.home-part .of-note{margin-top:12px}
+
+/* ② 연간 추이 · ⑤ 대분류 차트 */
+.home-chart{position:relative;height:280px}
+.home-chart-cat{height:240px;margin-bottom:12px}
+.home-tbl{margin-top:10px}
+.home-tbl summary{cursor:pointer;font-size:12px;font-weight:700;color:var(--text-2)}
+.home-tbl .of-tbl{margin-top:8px}
+.home-sel td{background:var(--minix-lt)}
+
+/* ③ 오늘 챙길 것 */
+.home-todo-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+@media(max-width:520px){.home-todo-grid{grid-template-columns:minmax(0,1fr)}}
+.home-todo{border:1px solid var(--border);border-radius:var(--r);padding:12px 14px;cursor:pointer;background:var(--surface);transition:border-color .15s}
+.home-todo:hover,.home-todo:focus{border-color:var(--minix);outline:none}
+.home-todo.bad{border-color:#F5C77E;background:#FFFBF0}
+.home-todo-t{font-size:11px;font-weight:700;color:var(--text-2)}
+.home-todo-v{margin:6px 0 2px;font-size:20px;font-weight:800}
+.home-todo-n{color:var(--warn)}
+.home-todo-n small{font-size:12px;font-weight:700;margin-left:2px}
+.home-todo-ok{font-size:14px;color:var(--ok)}
+.home-todo-sub{font-size:11px;color:var(--text-2);line-height:1.5;min-height:16px}
+
+/* ④ 공구 일정 */
+.home-click{cursor:pointer}
+.home-click:hover td{background:var(--surface-2)}
+
+/* 불러오는 중 — 스켈레톤 */
+.home-skel{padding:6px 0 4px}
+.home-skel-bar{height:14px;border-radius:6px;margin:10px 0;background:linear-gradient(90deg,var(--surface-2) 25%,#E9ECF3 50%,var(--surface-2) 75%);background-size:200% 100%;animation:homeSkel 1.2s ease-in-out infinite}
+.home-skel-bar:nth-child(2n){width:72%}
+.home-skel-bar:nth-child(3n){width:48%}
+@keyframes homeSkel{0%{background-position:200% 0}100%{background-position:-200% 0}}
+@media(prefers-reduced-motion:reduce){.home-skel-bar{animation:none}}
