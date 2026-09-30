@@ -134,7 +134,7 @@ const base = () => ({ from: '2026-08', to: '2026-09', channels: CHANNELS, target
   console.log('\n[4] 미매칭 — 합계에 넣지 않고 따로 + 경고');
   {
     check('미매칭 2건(매핑 없음 MNFD-RF3 4, 비활성 매핑 OLD-CODE 1)', J(res.unmatched) === J([
-      { ym: '2026-09', channelId: 'himart', code: 'MNFD-RF3', qty: 4 }, { ym: '2026-09', channelId: 'himart', code: 'OLD-CODE', qty: 1 }]), res.unmatched);
+      { ym: '2026-09', channelId: 'himart', code: 'MNFD-RF3', qty: 4, amount: null }, { ym: '2026-09', channelId: 'himart', code: 'OLD-CODE', qty: 1, amount: null }]), res.unmatched);
     const t = res.totals.byChannelMonth.find(x => x.ym === '2026-09' && x.channelId === 'himart');
     check('채널 합계 OUT 실적 = 6+2−1 = 7(미매칭 제외), 미매칭 수량 5 따로', t.out.actual === 7 && t.out.unmatchedQty === 5, t.out);
     check('경고 문구에 건수·수량', res.warnings.some(w => /매핑 안 된 코드 2건\(수량 5\)/.test(w)), res.warnings);

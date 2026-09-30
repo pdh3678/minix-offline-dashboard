@@ -43,8 +43,8 @@ function upload(ctx, rows, fileName, edits) {
   if (!r.ok) throw new Error('픽스처 파싱 실패: ' + r.error);
   return ctx._offUpload(P.toUploadPayload(r, Object.assign({ fileName }, edits || {})), AUTH);
 }
-// 비교용 — upload_id(마지막 열)는 업로드마다 달라서 뺀다
-const noId = rows => rows.map(r => r.slice(0, r.length - 1));
+// 비교용 — upload_id(10번째 열)는 업로드마다 달라서 뺀다. 그 뒤 금액·수수료는 ERP 매출이익리스트 전용(포털 채널은 빈칸 — tests/offline-erp.test.js)
+const noId = rows => rows.map(r => r.slice(0, 9));
 const sorted = rows => noId(rows).map(r => J(r)).sort();
 const ledger = t => dataRows(t('판매원장'));
 const himartLedger = t => ledger(t).filter(r => r[3] === 'himart');

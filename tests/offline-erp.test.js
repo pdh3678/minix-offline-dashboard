@@ -5,6 +5,7 @@
      [1] 채널·거래처 설정 — 운영 모양(채널마스터 10열·7채널)에 setup: IN실적원천 열, 신세계·디에이블앤 켜기(erp·upload), 없는 ERP 채널 3개 추가,
          거래처매핑 초기값 9행, 거래처 = 점포마스터 점포. 재실행 불변·사람이 고친 값 그대로. 마스터에 codeSystems·customers·inSource,
          erp 코드체계로 매핑 저장, 채널군 렌탈 = 특수
+     [2] 판매원장 금액·수수료 — 금액이 있는 행은 그 값, 빈 행은 수량 × 공급가(포털 채널 숫자 불변), 섞이면 미완성 표시, 미매칭 금액 따로
 
    실행: node tests/offline-erp.test.js  (또는 node tests/run-all.js) */
 const path = require('path');
@@ -88,6 +89,34 @@ function env() {
     check('erp로 온 매핑 · ERP 채널(다파라솔루션)로 온 매핑 모두 erp 한 벌로 저장', r1.success && r2.success && J(g.rows('코드매핑').map(r => r[0] + ':' + r[1])) === J(['erp:9812365001397', 'erp:9812365001472']), [r1, r2, g.rows('코드매핑')]);
     check('채널도 코드체계도 아닌 id는 거절', /채널마스터에 없는/.test(g.call('offline_saveMapping', { items: [{ op: 'upsert', channelId: 'nope', code: 'X', skuId: 'SKU-0001' }] }).error || ''));
     check('채널군 — 백화점 = 오프라인, 폐쇄몰·렌탈 = 특수', g.ctx._offChannelGroup('백화점') === 'offline' && g.ctx._offChannelGroup('폐쇄몰') === 'closed' && g.ctx._offChannelGroup('렌탈') === 'closed');
+  }
+
+  console.log('\n[2] 판매원장 금액·수수료 — 금액이 있으면 그 값, 없으면 수량 × 공급가');
+  {
+    const g = env(), T = g.ctx.OFF_TABS, read = k => g.ctx._offReadRows(g.tab(T[k].name), T[k]);
+    check('판매원장 헤더 끝에 금액·수수료(숫자 열)', J(g.tab('판매원장')._grid[0].slice(9, 12)) === J(['upload_id', '금액', '수수료']) && T.sales.text.indexOf(10) < 0 && T.sales.text.indexOf(11) < 0);
+    const SKUS = [['SKU-0001', '더 플렌더 MAX', '더플렌더', '더 플렌더 MAX', '', 'Y', '', ''], ['SKU-0002', '더 슬림', '더슬림', '더 슬림', '', 'Y', '', '']];
+    const MAPS = [['himart', 'MNFD-200G', 'SKU-0001', '정상', '', '', '', ''], ['erp', 'E-MAX', 'SKU-0001', '정상', '', '', '', ''], ['erp', 'E-SLIM', 'SKU-0002', '정상', '', '', '', '']];
+    const SL = (d, ch, store, code, q, amt, fee) => [d, d, 'day', ch, store, code, q, '', 'upload', 'U', amt == null ? '' : amt, fee == null ? '' : fee];
+    const sales = [
+      SL('2026-09-03', 'himart', 'S1', 'MNFD-200G', 3),                            // 포털 채널 — 금액 빈칸 → 수량 × 공급가
+      SL('2026-09-04', 'shinsegae', '00476', 'E-MAX', 2, 700000, 70000),
+      SL('2026-09-05', 'shinsegae', '00440', 'E-MAX', -1, -350000, -35000),       // 반품 — 음수 그대로
+      SL('2026-09-06', 'theablen', '00474', 'E-SLIM', 1),                          // 금액 없는 ERP 행(가정) — 단가도 없으면 금액 미완성
+      SL('2026-09-06', 'theablen', '00474', 'E-SLIM', 2, 400000, 0),
+      SL('2026-09-07', 'theablen', '00474', 'E-NEW', 3, 90000, 9000),             // 미매칭 — 금액도 따로
+      SL('2026-09-08', 'theablen', '00474', 'E-MAX', 0, 5000, 0)];                 // 수량 0, 금액만(가격 조정) — 금액에 들어간다
+    const mon = g.ctx._offMonthlyCompute({ from: '2026-09', to: '2026-09', channels: read('channel'), targets: [], sales, mappings: MAPS, skus: SKUS,
+      prices: [['himart', '더플렌더', '더 플렌더 MAX', 400000, '2026-01-01', '', '', '']] });
+    const R = (ch, model) => mon.rows.find(r => r.channelId === ch && r.model === model);
+    const byCM = ch => mon.totals.byChannelMonth.find(x => x.channelId === ch);
+    check('포털 채널(하이마트) = 수량 3 × 공급가 400,000 = 1,200,000, 미완성 아님(기존과 같음)', R('himart', '더 플렌더 MAX').out.actualAmount === 1200000 && !byCM('himart').out.amountIncomplete);
+    check('신세계 = 원장 금액 700,000 − 350,000 = 350,000 (수량 1, 단가 없어도 완성)', R('shinsegae', '더 플렌더 MAX').out.actual === 1 && R('shinsegae', '더 플렌더 MAX').out.actualAmount === 350000 && !byCM('shinsegae').out.amountIncomplete, R('shinsegae', '더 플렌더 MAX').out);
+    check('디에이블앤 더 슬림 = 원장 금액 400,000 + 금액 없는 1대(단가 없음 → 미완성 표시)', R('theablen', '더 슬림').out.actual === 3 && R('theablen', '더 슬림').out.actualAmount === 400000 && byCM('theablen').out.amountIncomplete &&
+      mon.warnings.some(w => /단가 없음.*theablen/.test(w)), [R('theablen', '더 슬림').out, mon.warnings]);
+    check('수량 0·금액만 있는 행도 금액에 더함(더 플렌더 MAX 5,000)', R('theablen', '더 플렌더 MAX').out.actual === 0 && R('theablen', '더 플렌더 MAX').out.actualAmount === 5000);
+    check('미매칭 — 수량·금액 따로(합계에 안 들어감) + 경고에 금액', J(mon.unmatched) === J([{ ym: '2026-09', channelId: 'theablen', code: 'E-NEW', qty: 3, amount: 90000 }]) &&
+      byCM('theablen').out.unmatchedQty === 3 && byCM('theablen').out.unmatchedAmount === 90000 && byCM('himart').out.unmatchedAmount == null && mon.warnings.some(w => /수량 3 · 금액 90000/.test(w)), [mon.unmatched, byCM('theablen').out]);
   }
 
   console.log('\n' + '─'.repeat(50));

@@ -189,17 +189,21 @@ function _offMonthlyCompute(input) {
   var cs = _offCodeSystem(input.channels);
   var mapByKey = {};
   input.mappings.forEach(function (m) { if (m[0] && m[1] && m[2]) mapByKey[cs(m[0]) + OFF_KEY_SEP + m[1]] = m; });
+  //    금액(판매원장 금액 열 — ERP 매출이익리스트)이 있는 행은 그 금액, 빈 행은 3)에서 수량 × 공급가. ledgerAmount·ledgerQty = 금액이 있는 행의 합
   var unmatched = {};
   input.sales.forEach(function (s) {
     var ch = s[3], ym = String(s[1] || '').slice(0, 7);
     if (!inRange[ym] || !chInfo[ch] || !isUploadMonth(ch, ym)) return;
     var qty = Number(s[6]) || 0;
-    if (!qty) return;
+    var amt = (s[10] === '' || s[10] == null) ? null : (Number(s[10]) || 0);
+    if (!qty && !amt) return;
     var m = mapByKey[cs(ch) + OFF_KEY_SEP + s[5]];
     var sku = m && skuById[m[2]];
     if (!sku || !sku[2]) {
       var uk = [ym, ch, s[5]].join(OFF_KEY_SEP);
-      unmatched[uk] = (unmatched[uk] || 0) + qty;
+      var u = unmatched[uk] || (unmatched[uk] = { qty: 0, amount: null });
+      u.qty += qty;
+      if (amt != null) u.amount = (u.amount || 0) + amt;
       return;
     }
     var r = row(ym, ch, sku[2], _offCanonModel(sku[2], sku[3]).model);
@@ -207,6 +211,7 @@ function _offMonthlyCompute(input) {
     r.out.byType = r.out.byType || { '정상': 0, '전시': 0, '리퍼': 0 };
     r.out.byType[st] += qty;
     r.out.actual = (r.out.actual || 0) + qty;
+    if (amt != null) { r.out.ledgerAmount = (r.out.ledgerAmount || 0) + amt; r.out.ledgerQty = (r.out.ledgerQty || 0) + qty; }
     r.out.source = 'upload';
   });
   // 업로드 달인데 원장에 판매가 없는 행 = 0 (목표만 있는 행도 원천은 upload)
@@ -217,7 +222,7 @@ function _offMonthlyCompute(input) {
     }
   });
 
-  // 3) 금액·달성률
+  // 3) 금액·달성률 — 실적 금액 = 판매원장 금액 + (금액 없는 수량) × 공급가. amountMissing = 공급가가 필요한데 없음(합계의 amountIncomplete)
   var priceFor = _offPriceLookup(input.prices);
   order.forEach(function (k) {
     var r = rows[k];
@@ -225,10 +230,13 @@ function _offMonthlyCompute(input) {
     r.price = p;
     ['in', 'out'].forEach(function (side) {
       var s = r[side];
+      var rest = s.actual == null ? 0 : s.actual - (s.ledgerQty || 0);
       s.targetAmount = (p != null && s.target != null) ? s.target * p : null;
-      s.actualAmount = (p != null && s.actual != null) ? s.actual * p : null;
+      s.actualAmount = s.actual == null ? null : s.ledgerAmount == null ? (p != null ? s.actual * p : null)
+        : (rest && p != null ? s.ledgerAmount + rest * p : s.ledgerAmount);
       s.rate = _offRate(s.actual, s.target);
-      if (p == null && (s.target || s.actual)) {
+      s.amountMissing = p == null && !!(s.target || rest);
+      if (s.amountMissing) {
         warn('price' + OFF_KEY_SEP + r.channelId + OFF_KEY_SEP + r.line + OFF_KEY_SEP + r.model,
           '단가 없음(금액 미계산): ' + r.channelId + ' / ' + r.model + ' (' + r.ym + '~)');
       }
@@ -255,6 +263,7 @@ function _offMonthlyCompute(input) {
     ['in', 'out'].forEach(function (side) {
       var s = r[side];
       s.targetAmount = null; s.actualAmount = null; s.rate = _offRate(s.actual, s.target);
+      s.amountMissing = !!(s.target || s.actual);
     });
     if (r['in'].target != null || r['in'].actual != null || r.out.target != null || r.out.actual != null) {
       warn('catprice', '대분류 단위 행(모델 구분 없는 이관 수치)은 단가가 모델 단위라 금액이 계산되지 않습니다.');
@@ -264,18 +273,18 @@ function _offMonthlyCompute(input) {
   // 5) 합계 — 채널×월, 월. null만 있으면 null. 금액은 단가 없는 행이 섞이면 incomplete
   var unmatchedList = Object.keys(unmatched).sort().map(function (k) {
     var p = k.split(OFF_KEY_SEP);
-    return { ym: p[0], channelId: p[1], code: p[2], qty: unmatched[k] };
+    return { ym: p[0], channelId: p[1], code: p[2], qty: unmatched[k].qty, amount: unmatched[k].amount };
   });
   function emptyTot() {
     return { 'in': { target: null, actual: null, targetAmount: null, actualAmount: null, amountIncomplete: false },
-      out: { target: null, actual: null, targetAmount: null, actualAmount: null, amountIncomplete: false, unmatchedQty: 0 } };
+      out: { target: null, actual: null, targetAmount: null, actualAmount: null, amountIncomplete: false, unmatchedQty: 0, unmatchedAmount: null } };
   }
   function add(tot, r) {
     ['in', 'out'].forEach(function (side) {
       var s = r[side], t = tot[side];
       t.target = _offSumOrNull(t.target, s.target); t.actual = _offSumOrNull(t.actual, s.actual);
       t.targetAmount = _offSumOrNull(t.targetAmount, s.targetAmount); t.actualAmount = _offSumOrNull(t.actualAmount, s.actualAmount);
-      if (r.price == null && (s.target || s.actual)) t.amountIncomplete = true;
+      if (s.amountMissing) t.amountIncomplete = true;
     });
   }
   // 채널×월·월 합계에는 대분류 단위 행도 넣는다(실제 수량이므로). 대분류 합계 = 대분류 단위 행 + 그 대분류 모델 행
@@ -311,8 +320,10 @@ function _offMonthlyCompute(input) {
   });
   unmatchedList.forEach(function (u) {
     var k = u.ym + OFF_KEY_SEP + u.channelId;
-    (byCM[k] = byCM[k] || emptyTot()).out.unmatchedQty += u.qty;
-    (byM[u.ym] = byM[u.ym] || emptyTot()).out.unmatchedQty += u.qty;
+    [byCM[k] = byCM[k] || emptyTot(), byM[u.ym] = byM[u.ym] || emptyTot()].forEach(function (t) {
+      t.out.unmatchedQty += u.qty;
+      t.out.unmatchedAmount = _offSumOrNull(t.out.unmatchedAmount, u.amount);
+    });
   });
   function finish(t) { t['in'].rate = _offRate(t['in'].actual, t['in'].target); t.out.rate = _offRate(t.out.actual, t.out.target); return t; }
   var byChannelMonth = Object.keys(byCM).sort().map(function (k) {
@@ -331,7 +342,8 @@ function _offMonthlyCompute(input) {
   });
   if (unmatchedList.length) {
     var q = unmatchedList.reduce(function (s, u) { return s + u.qty; }, 0);
-    warnings.push('매핑 안 된 코드 ' + unmatchedList.length + '건(수량 ' + q + ')은 OUT 실적 합계에 들어가지 않았습니다 — 코드 매핑에서 연결하세요.');
+    var qa = unmatchedList.reduce(function (s, u) { return _offSumOrNull(s, u.amount); }, null);
+    warnings.push('매핑 안 된 코드 ' + unmatchedList.length + '건(수량 ' + q + (qa != null ? ' · 금액 ' + qa : '') + ')은 OUT 실적 합계에 들어가지 않았습니다 — 코드 매핑에서 연결하세요.');
   }
   return { months: months, channels: channels, rows: list, categoryRows: clist,
     totals: { byChannelMonth: byChannelMonth, byMonth: byMonth, byCategory: byCategory },
