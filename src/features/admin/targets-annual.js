@@ -142,7 +142,7 @@ function _tgaHtml(){
   const totRow=(scope,label,cls)=>`<tr class="${cls}"><td>${label}</td>${months.concat(['Y']).map(ym=>`<td class="num-col" id="${_tgaId(scope)}_${ym.slice(-2)}"></td>`).join('')}</tr>`;
   let body='';
   chans.forEach(c=>{
-    body+=`<tr class="tg-ch"><td colspan="14">${_escHtml(c.name)}${c.active==='Y'?'':' <span class="up-chip">비활성</span>'}${_TGA.side==='OUT'&&c.uploadStartMonth?` <span class="up-chip ready">OUT 실적 = 업로드 원장(${_escHtml(c.uploadStartMonth)}~)</span>`:''}</td></tr>`;
+    body+=`<tr class="tg-ch"><td colspan="14">${_escHtml(c.name)}${c.active==='Y'?'':' <span class="up-chip">비활성</span>'}${c.uploadStartMonth&&(_TGA.side==='OUT'||c.inSource==='upload')?` <span class="up-chip ready">${_TGA.side} 실적 = 업로드 원장(${_escHtml(c.uploadStartMonth)}~)</span>`:''}</td></tr>`;
     // 본품 대분류 → 채널 합계(본품) → "비본품 표시"면 구분선 뒤에 필터·기타
     const catBody=cat=>{
       let h='';

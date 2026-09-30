@@ -97,9 +97,10 @@ function _ocdRender(){
         <div id="ocdDailyCtl"></div><div id="ocdDailyBody">${up?'<div class="mp-empty">불러오는 중…</div>':'<div class="of-chart-empty">업로드 데이터 없음 — 이 채널은 판매원장이 없습니다.</div>'}</div></div>
     </div>`+
     `<div class="card"><div class="card-hd"><span>모델·SKU <span class="of-sub">${_escHtml(_ofRangeLabel())}</span></span>
-      <span class="card-hd-r">▸ 누르면 펼침 · 재고는 최신 기준일${ci.stockDate?' '+_escHtml(ci.stockDate):''} · SKU 행 OUT 실적은 판매원장 기준</span></div>${_ocdTableHtml(ci)}</div>`+
+      <span class="card-hd-r">▸ 누르면 펼침 · ${up&&!ci.hasStock?'재고 데이터 없음':'재고는 최신 기준일'+(ci.stockDate?' '+_escHtml(ci.stockDate):'')} · SKU 행 OUT 실적은 판매원장 기준</span></div>${_ocdTableHtml(ci)}</div>`+
     '<div class="card" id="ocdSalesCard"></div>'+
-    `<div class="card" id="ocdStoreCard">${up?_ocdStoreHtml(ci):'<div class="card-hd">점포</div><div class="of-chart-empty">업로드 데이터 없음</div>'}</div>`;
+    // 판매만 있고 재고 파일이 없는 채널(ERP 채널)은 점포 재고 표 대신 안내 — 점포(거래처)별 판매는 위 판매 분석
+    `<div class="card" id="ocdStoreCard">${up&&ci.hasStock?_ocdStoreHtml(ci):`<div class="card-hd">점포</div><div class="of-chart-empty">${up?'재고 데이터 없음 — 이 채널은 재고 파일이 없습니다. 점포(거래처)별 판매는 위 판매 분석의 지점별 판매량에서 봅니다.':'업로드 데이터 없음'}</div>`}</div>`;
   _ocdDrawMonthly();
   _osaRender();
   if(up){_ocdRenderDailyCtl();_ocdRenderDaily();}
@@ -200,7 +201,8 @@ function _ocdTableHtml(ci){
   const ch=_OCD.ch,cat=OFFLINE_FILTER.category,mset={};_ofRangeMonths().forEach(m=>{mset[m]=true;});
   const rows=(_OCD.mon.rows||[]).filter(r=>r.channelId===ch&&mset[r.ym]);
   const catRows=(_OCD.mon.categoryRows||[]).filter(r=>r.channelId===ch&&mset[r.ym]);
-  const groups=(_OCD.inv.groups||[]).filter(g=>g.channelId===ch);
+  // 재고 데이터가 없는 채널은 재고 칸을 '—'로(재고 0이 아니다) — SKU 줄은 판매원장(skuOut)에서
+  const groups=ci.hasStock===false&&ci.hasSales?[]:(_OCD.inv.groups||[]).filter(g=>g.channelId===ch);
   const G=(lv,k)=>groups.find(g=>g.level===lv&&g.key===k)||null;
   // SKU OUT(원장) — 선택 범위, day+period
   const skuOut={};((_OCD.skuOut&&_OCD.skuOut.days)||[]).concat((_OCD.skuOut&&_OCD.skuOut.periods)||[]).forEach(x=>{if(x.key)skuOut[x.key]=(skuOut[x.key]||0)+x.qty;});

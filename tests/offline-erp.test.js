@@ -13,6 +13,9 @@
      [5] 화면 — 거래처 → 채널 표(없는 거래처는 ERP 채널만 선택), 채널별·브랜드별(미닉스 외 강조)·무상 동봉 제외, 안 고르면 반영 막음, 요청에 고른 거래처만
      [6] 코드 매핑 — 상품명의 모델명 · '[이마트]' 접두어를 뺀 상품명으로 기존 SKU 제안, 필터 구성품 → 필터(모델 없는 필터는 새 모델 필요 안내),
          미닉스 외 브랜드 → 기타(새 SKU 옵션 = 상품명), 포털 코드는 대분류 제안 없음, 코드 매핑 화면의 ERP 공통 그룹·안내
+     [7] IN실적원천 upload — 업로드 달 IN 실적 = OUT 실적(원장 금액), 본품·필터·기타 합 = 파일 거래처 금액, 포털 채널 숫자 불변, IN 실적 입력 거절,
+         재고 지표(ERP 채널 경보 없음·전체 채널 불변), 판매 분석 점포 = 거래처, 파트 홈 채널군, 채널 현황·상세 "재고 데이터 없음",
+         목표 관리 IN 실적 읽기 전용, 이관 대조 IN/OUT·IN 실적 이관 제외
 
    실행: node tests/offline-erp.test.js  (또는 node tests/run-all.js) */
 const path = require('path');
@@ -22,7 +25,7 @@ const { loadFrontend } = require(path.join(__dirname, 'lib', 'front-sandbox.js')
 const PROJ = path.join(__dirname, '..');
 const P = require(path.join(PROJ, 'src', 'features', 'offline', 'parsers.js'));
 const tick = () => new Promise(r => setTimeout(r, 0));
-async function settle() { for (let i = 0; i < 8; i++) await tick(); }
+async function settle() { for (let i = 0; i < 20; i++) await tick(); }
 
 /* ── 합성 ERP 매출이익리스트 — 실파일과 같은 2줄 헤더·57열(열 이름은 실파일 그대로, 값은 전부 가짜).
    개인정보 칸에는 찾기 쉬운 가짜 값을 넣어 두고, 어디에도(행·파싱 결과·전송 페이로드·시트·로그·화면) 남지 않는지 본다. ── */
@@ -264,6 +267,7 @@ async function main() {
 
   await uploadUi();
   mappingUi();
+  await inUploadAll();
 
   console.log('\n' + '─'.repeat(50));
   console.log('통과 ' + pass + ' / 실패 ' + fail);
@@ -337,8 +341,6 @@ async function uploadUi() {
   check('"이번엔 반영 안 함" — 새 거래처를 싣지 않는다(서버가 보류)', J(calls.find(c => c.action === 'offline_upload').data.meta.customers) === J([]));
 }
 
-main();
-
 /* ── 코드 매핑 — ERP 공통 그룹 · 자동 제안(모델명·접두어 무시·필터·기타) ── */
 function mappingUi() {
   console.log('\n[6] 코드 매핑 — 제안(모델명 · [이마트] 접두어 무시 · 필터 · 기타) · ERP 공통 그룹');
@@ -400,3 +402,127 @@ function mappingUi() {
   const tbl = box.cmTable.innerHTML;
   check('  ↳ ERP 그룹으로 거르면 erp 매핑만, 채널 칸 = ERP 공통 이름', tbl.indexOf(CODE.MINI) >= 0 && tbl.indexOf('MNFD-200G') < 0 && tbl.indexOf('<td>ERP (백화점·폐쇄몰·렌탈 공통)</td>') >= 0);
 }
+
+/* ── [7] IN실적원천 upload — 월별 집계(IN = OUT)·목표 관리 읽기 전용·이관 대조·재고 지표·파트 홈·채널 화면(GAS 실코드 + 프론트 실코드 직결) ── */
+function erpLedgerEnv() {
+  const g = env(), T = g.ctx.OFF_TABS;
+  const w = (key, rows) => g.ctx._offWriteBlock(g.tab(T[key].name), T[key], g.tab(T[key].name).getLastRow() + 1, rows);
+  w('sku', [['SKU-0001', '더 플렌더 MAX', '더플렌더', '더 플렌더 MAX', '', 'Y', '', ''], ['SKU-0002', '더 플렌더 mini', '더플렌더', '더 플렌더 mini', '', 'Y', '', ''],
+    ['SKU-0003', '필터 하드락필터', '필터', '하드락필터', '', 'Y', '', ''], ['SKU-0004', '기타 톰 더 글로우', '기타', '기타', '톰 더 글로우', 'Y', '', ''], ['SKU-0005', '더 슬림', '더슬림', '더 슬림', '', 'Y', '', '']]);
+  w('mapping', [['himart', 'MNFD-200G', 'SKU-0001', '정상', '', '', '', ''], ['erp', CODE.MAX, 'SKU-0001', '정상', '', '', '', ''], ['erp', CODE.MINI, 'SKU-0002', '정상', '', '', '', ''],
+    ['erp', CODE.LOCK, 'SKU-0003', '정상', '', '', '', ''], ['erp', CODE.TOM, 'SKU-0004', '정상', '', '', '', ''], ['erp', CODE.SLIM_EM, 'SKU-0005', '정상', '', '', '', '']]);
+  // 포털 채널(하이마트): 9월 판매·재고·단가 — ERP 반영 전후로 숫자가 같아야 한다
+  w('sales', [['2026-09-03', '2026-09-03', 'day', 'himart', 'S1', 'MNFD-200G', 8, 8, 'upload', 'U0', '', ''], ['2026-09-20', '2026-09-20', 'day', 'himart', 'S1', 'MNFD-200G', 20, 20, 'upload', 'U0', '', '']]);
+  w('stockDaily', [['2026-09-24', 'himart', 'MNFD-200G', 30, '', '', 'U0']]);
+  w('uploadLog', [['U0', '2026-09-24 10:00:00', 'a', 'f', 'HIMART_SALES_STOCK', 'himart', '2026-09-24', 1, 1, 0, '', '성공']]);
+  w('prices', [['himart', '더플렌더', '더 플렌더 MAX', 400000, '2026-01-01', '', '', '']]);
+  g.ctx._offInvalidateCache();
+  return g;
+}
+async function inUploadAll() {
+  console.log('\n[7] IN실적원천 upload — IN = OUT(판매원장 금액), 포털 채널 불변, 목표 관리 읽기 전용, 이관 대조, 재고 지표, 파트 홈, 채널 화면');
+  const g = erpLedgerEnv(), AUTH = { email: EMAIL };
+  const monthly = () => g.call('offline_getMonthly', { from: '2026-01', to: '2026-12' });
+  const himartOf = mm => J(mm.rows.filter(r => r.channelId === 'himart')) + J(mm.totals.byChannelMonth.filter(x => x.channelId === 'himart'));
+  const himartBefore = himartOf(monthly());
+  const invBefore = g.call('offline_getInventory', {});
+  const parsed = P.parseRows(P.dropUnusedColumns(erpGrid()), { fileName: ERP_FILE, today: TODAY });
+  g.ctx._offUpload(P.toUploadPayload(parsed, { fileName: ERP_FILE, customers: [{ code: '00999', name: '가상상사', channelId: 'dapara' }] }), AUTH);
+  g.call('offline_saveTargets', { items: [{ ym: '2026-09', channelId: 'shinsegae', line: '더플렌더', model: '더 플렌더 MAX', type: 'IN', target: 5 }] });
+  const m = monthly();
+  const R = (ch, model, ym) => m.rows.find(r => r.channelId === ch && r.model === model && r.ym === (ym || '2026-09'));
+  const sMax = R('shinsegae', '더 플렌더 MAX');
+  check('신세계 9월 IN 실적 = OUT 실적 = 2 · 금액 = 원장 660,000 · 원천 upload, IN 목표 5는 입력값', sMax.in.actual === 2 && sMax.out.actual === 2 && sMax.in.actualAmount === 660000 && sMax.out.actualAmount === 660000 &&
+    sMax.in.source === 'upload' && sMax.in.target === 5 && sMax.in.rate === 0.4, sMax);
+  const cat = (ch, c) => m.totals.byCategory.filter(x => x.ym === '2026-09' && x.channelId === ch && (!c || x.category === c));
+  const cm = ch => m.totals.byChannelMonth.find(x => x.ym === '2026-09' && x.channelId === ch);
+  check('디에이블앤 — 본품(IN 금액) 460,000 · 필터 29,000 · 기타 500,000 = 파일 거래처 금액 989,000', cm('theablen').in.actualAmount === 460000 && cm('theablen').out.actualAmount === 460000 &&
+    cat('theablen', '필터')[0].in.actualAmount === 29000 && cat('theablen', '기타')[0].in.actualAmount === 500000 && cat('theablen').reduce((s, x) => s + x.in.actualAmount, 0) === 989000, cat('theablen'));
+  check('다파라솔루션 = 다파라(빌리고) 460,000 + 미리보기에서 지정한 거래처 300,000', cm('dapara').in.actualAmount === 760000 && cm('dapara').in.actual === 3);
+  check('ERP 채널 실적 금액은 단가 없이도 완성(미완성 표시 없음) — 목표를 넣은 신세계만 목표 금액용 단가 없음 경고', ['theablen', 'dapara'].every(ch => !cm(ch).in.amountIncomplete && !cm(ch).out.amountIncomplete) &&
+    !cm('shinsegae').out.amountIncomplete && cm('shinsegae').in.amountIncomplete && sMax.in.targetAmount == null && J(m.warnings.filter(w => /단가 없음/.test(w))) === J(['단가 없음(금액 미계산): shinsegae / 더 플렌더 MAX (2026-09~)']), m.warnings);
+  check('포털 채널(하이마트) 9월 행·합계는 ERP 반영 전과 같다(IN 실적은 입력값 방식 그대로)', himartOf(m) === himartBefore);
+  const bad = g.call('offline_saveTargets', { items: [{ ym: '2026-09', channelId: 'shinsegae', line: '더플렌더', model: '더 플렌더 MAX', type: 'IN', actual: 9 }] });
+  const okAug = g.call('offline_saveTargets', { items: [{ ym: '2026-08', channelId: 'shinsegae', line: '더플렌더', model: '더 플렌더 MAX', type: 'IN', target: 3, actual: 4 }] });
+  const okHm = g.call('offline_saveTargets', { items: [{ ym: '2026-09', channelId: 'himart', line: '더플렌더', model: '더 플렌더 MAX', type: 'IN', actual: 25 }] });
+  const m2 = monthly();
+  const aug = m2.rows.find(r => r.channelId === 'shinsegae' && r.ym === '2026-08');
+  check('IN실적원천 upload 채널의 업로드 달 IN 실적은 입력 거절 · 업로드 전 달(8월)과 포털 채널 IN 실적은 입력 가능',
+    /IN 실적은 판매원장에서 집계됩니다/.test(bad.error || '') && okAug.success && okHm.success && aug.in.actual === 4 && aug.in.source === 'manual' &&
+    m2.rows.find(r => r.channelId === 'himart' && r.ym === '2026-09').in.actual === 25, bad);
+
+  // 재고 지표 — ERP 채널은 재고 데이터가 없다
+  const inv = g.call('offline_getInventory', {});
+  const Gi = (ch, lv, key) => inv.groups.find(x => x.channelId === ch && x.level === lv && x.key === (key || ''));
+  const ci = id => inv.channels.find(c => c.channelId === id);
+  const star = x => x && J({ stock: x.stock, windowQty: x.windowQty, days: x.days, alert: x.alert });
+  check('ERP 채널: 판매만 있고 재고 없음 — 재고일수 없음·경보 없음(0재고 결품 위험으로 보지 않음)', ci('theablen').hasSales && !ci('theablen').hasStock &&
+    inv.groups.filter(x => x.channelId === 'theablen').every(x => x.days == null && !x.alert && !x.noSales) && Gi('theablen', 'sku', 'SKU-0002').windowQty === 2, Gi('theablen', 'sku', 'SKU-0002'));
+  check('  ↳ 전체 채널(*) 재고·판매·재고일수는 재고 있는 채널만 — ERP 반영 전과 같다', star(Gi('*', 'channel')) === star(invBefore.groups.find(x => x.channelId === '*' && x.level === 'channel')),
+    [star(Gi('*', 'channel')), star(invBefore.groups.find(x => x.channelId === '*' && x.level === 'channel'))]);
+
+  // 판매 분석 — 백화점은 점포(거래처)별
+  const sb = g.call('offline_getSalesBreakdown', { channelId: 'shinsegae', from: '2026-09', to: '2026-09' });
+  check('신세계 판매 분석 — 점포 = 거래처(점포명 = 거래처매핑 이름)', sb.totals.qty === 2 && J(sb.stores.map(s => [s.store, s.storeName, s.total])) === J([['00476', '신세계(센텀시티점)', 2]]), sb.stores);
+
+  // 파트 홈 — 채널군
+  const home = g.call('home_getSummary', { ym: '2026-09', mode: 'month', category: '' });
+  const himartIn = m2.totals.byChannelMonth.find(x => x.ym === '2026-09' && x.channelId === 'himart').in.actualAmount;
+  check('파트 홈 — 오프라인 = 하이마트 + 신세계(백화점) · 특수 = 디에이블앤 + 다파라솔루션(폐쇄몰·렌탈)', home.series.offline['2026-09'].actual === himartIn + 660000 &&
+    home.series.closed['2026-09'].actual === 460000 + 760000 && home.groups[1].label === '특수(폐쇄몰·특판·렌탈)', [home.series.offline['2026-09'], home.series.closed['2026-09'], himartIn]);
+  check('  ↳ 필터 IN 금액에 ERP 필터(29,000) 포함 · 대분류별 판매의 특수 = 디에이블앤·다파라 OUT', home.filter.amount === 29000 &&
+    home.categorySales.find(c => c.category === '음식물처리기').closed.qty === 3 && home.categorySales.find(c => c.category === '청소기').closed.qty === 2, [home.filter, home.categorySales]);
+  check('  ↳ ERP 채널은 재고 경보에 안 잡힘(오늘 챙길 것 경보 = ERP 반영 전 경보 수 그대로)', home.today.alerts.over + home.today.alerts.risk === invBefore.groups.filter(x => x.level === 'sku' && x.channelId !== '*' && x.alert).length);
+
+  // 화면 — 프론트 실코드를 GAS에 직결
+  const { ctx, X } = loadFrontend(PROJ, 'get OF(){return OFFLINE_FILTER;}, get TG(){return _TG;}');
+  const box = {};
+  ctx.document.getElementById = id => (box[id] = box[id] || { id, innerHTML: '', value: '', textContent: '', dataset: {}, style: {}, getContext: () => ({}), scrollIntoView() {},
+    classList: { _s: new Set(), add(c) { this._s.add(c); }, remove(c) { this._s.delete(c); }, toggle() {}, contains(c) { return this._s.has(c); } } });
+  ctx.Chart = function () { return { destroy() {} }; };
+  ctx._getToken = () => 'T';
+  ctx._gasFetch = async (url, opts) => { const b = JSON.parse(opts.body); return g.call(b.action, b.data); };
+  X.OF.ym = '2026-09';
+  ctx.navPage('offline-channels', null); await settle();
+  const chh = box['page-offline-channels'].innerHTML;
+  const card = name => (chh.split('class="of-card"').find(x => x.indexOf('of-card-name">' + name + '<') >= 0) || '');
+  check('채널 현황 — ERP 채널 카드(백화점·폐쇄몰·렌탈)에 "재고 데이터 없음", 경보 배지 없음', ['신세계', '디에이블앤', '다파라솔루션'].every(n => card(n).indexOf('재고 데이터 없음') >= 0 && card(n).indexOf('class="of-badge ') < 0) &&
+    card('하이마트').indexOf('재고 데이터 없음') < 0 && card('신세계').indexOf('백화점') >= 0 && card('다파라솔루션').indexOf('렌탈') >= 0, card('신세계').slice(0, 600));
+  ctx.navPage('offline-channel', null, 'shinsegae'); await settle();
+  const cd = box['page-offline-channel'].innerHTML;
+  check('채널 상세(신세계) — 점포 카드 "재고 데이터 없음", 모델 표 헤더 안내', cd.indexOf('재고 데이터 없음 — 이 채널은 재고 파일이 없습니다') >= 0 && cd.indexOf('▸ 누르면 펼침 · 재고 데이터 없음') >= 0, cd.slice(0, 300));
+  ctx.navPage('admin-targets', null); await settle();
+  X.TG.ym = '2026-09'; X.TG.ch = 'shinsegae'; await ctx._tgLoad(); await settle();
+  const tg = box['page-admin-targets'].innerHTML;
+  check('목표 관리 — 신세계 IN·OUT 실적 칸 읽기 전용(upload) + 칩, 금액 = 원장 금액', tg.indexOf('IN·OUT 실적 = 업로드 원장(2026-09~)') >= 0 &&
+    tg.indexOf('판매원장 집계(IN실적원천 upload — IN 실적 = OUT 실적)">2 <span class="tg-src">upload') >= 0 && tg.indexOf('IN ₩660,000<br>OUT ₩660,000') >= 0, tg.slice(0, 300));
+  const maxRow = X.TG.view.find(r => r.ch === 'shinsegae' && r.model === '더 플렌더 MAX');
+  check('  ↳ IN 실적은 편집 칸이 아니다(목표·OUT 목표는 편집)', maxRow && maxRow.inUpload && !ctx._tgEditable(maxRow, 'inA') && ctx._tgEditable(maxRow, 'inT') && ctx._tgEditable(maxRow, 'outT'));
+
+  // 이관 대조는 마지막에 — loadOfflineGas가 전역(SpreadsheetApp)을 다시 깔아 앞의 g는 이 뒤로 쓰지 않는다
+  // 이관 대조 — 신세계 9월 IN·OUT, 하이마트는 OUT만
+  const lgGrid = () => {
+    const W = 20, row = c => { const r = new Array(W).fill(''); Object.keys(c).forEach(k => { r[k] = c[k]; }); return r; };
+    return { grid: [row({}), row({ 1: '26년 매출 목표 / 진행현황' }), row({ 1: '구분', 2: '채널', 3: '품목', 5: '8월', 13: '9월' }),
+      row({ 5: '목표 (IN)', 6: '실적 (IN)', 9: '목표(OUT)', 10: '실적(OUT)', 13: '목표 (IN)', 14: '실적 (IN)', 17: '목표(OUT)', 18: '실적(OUT)' }),
+      row({ 1: '백화점', 2: '신세계', 3: '더플렌더 MAX', 5: 10, 6: 8, 9: 10, 10: 7, 13: 20, 14: 15, 17: 20, 18: 14 }),
+      row({ 1: '오프라인', 2: '하이마트', 3: '더플렌더 MAX', 13: 100, 14: 90, 17: 100, 18: 80 })], merges: [] };
+  };
+  const lg = loadOfflineGas({ setup: true, today: TODAY, legacy: { '26년 진행현황': lgGrid() } });
+  ['sku', 'mapping', 'sales'].forEach(k => { const T = lg.ctx.OFF_TABS[k]; lg.ctx._offWriteBlock(lg.tab(T.name), T, 2, g.ctx._offReadRows(g.tab(T.name), T)); });
+  const map = { channels: { '신세계': 'shinsegae', '하이마트': 'himart' }, products: { '더플렌더 MAX': { line: '더플렌더', model: '더 플렌더 MAX' } } };
+  const pv = lg.ctx._offMigrateProgress({ mode: 'preview', mapping: map }, AUTH);
+  const cmp = pv.compare.filter(x => x.total).map(x => [x.channelId, x.side, x.legacy, x.ledger].join(':'));
+  check('이관 대조 — 신세계 9월 OUT(14 vs 2)·IN(15 vs 2) 둘 다, 하이마트는 OUT만, 원본에 없는 디에이블앤·다파라도 원장 값으로(IN/OUT)', J(cmp) === J(['himart:OUT:80:28', 'shinsegae:OUT:14:2', 'shinsegae:IN:15:2',
+    'theablen:OUT::2', 'theablen:IN::2', 'dapara:OUT::3', 'dapara:IN::3']), cmp);
+  check('  ↳ 업로드 달 제외 — OUT 실적 2칸(하이마트·신세계) · IN 실적 1칸(신세계 9월만, 8월과 하이마트는 이관)', pv.outSkippedUploadMonths === 2 && pv.inSkippedUploadMonths === 1, [pv.outSkippedUploadMonths, pv.inSkippedUploadMonths]);
+  lg.ctx._offMigrateProgress({ mode: 'apply', mapping: map }, AUTH);
+  const rd = k => lg.ctx._offReadRows(lg.tab(lg.ctx.OFF_TABS[k].name), lg.ctx.OFF_TABS[k]);
+  const lm = lg.ctx._offMonthlyCompute({ from: '2026-08', to: '2026-09', channels: rd('channel'), targets: rd('targets'), prices: [], sales: rd('sales'), mappings: rd('mapping'), skus: rd('sku') });
+  const L = (ch, ym) => lm.rows.find(r => r.channelId === ch && r.ym === ym);
+  check('  ↳ 이관 후 신세계 8월 IN 실적 8(이관) · 9월 IN 실적 2(원장, 이관 값 15 무시) · 9월 IN 목표 20(이관) · 하이마트 9월 IN 실적 90(이관)',
+    L('shinsegae', '2026-08').in.actual === 8 && L('shinsegae', '2026-09').in.actual === 2 && L('shinsegae', '2026-09').in.target === 20 && L('himart', '2026-09').in.actual === 90,
+    [L('shinsegae', '2026-08').in, L('shinsegae', '2026-09').in]);
+}
+
+main();

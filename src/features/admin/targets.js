@@ -66,6 +66,11 @@ function _tgIsUpload(ch,ym){
   const c=((OFFLINE_MASTERS&&OFFLINE_MASTERS.channels)||[]).find(x=>x.channelId===ch);
   return !!(c&&c.uploadStartMonth&&ym>=c.uploadStartMonth);
 }
+// IN실적원천 upload(ERP 채널 — 우리 창고 직접 출고) — 업로드 달의 IN 실적도 판매원장 집계(서버 값, 읽기 전용)
+function _tgIsInUpload(ch,ym){
+  const c=((OFFLINE_MASTERS&&OFFLINE_MASTERS.channels)||[]).find(x=>x.channelId===ch);
+  return _tgIsUpload(ch,ym)&&!!c&&c.inSource==='upload';
+}
 
 // ── 표 모델: 채널 × 대분류 × 품목군 × 모델(품목 상수) + 데이터에만 있는 모델 ──
 // 대분류 단위 행(이관 전용, 모델 구분 없는 과거 수치)은 _TG.catRows[채널|대분류]로 따로 — 읽기 전용
@@ -85,8 +90,10 @@ function _tgBuildView(){
       models.forEach(model=>{
         const k=_tgKey(c.channelId,line.key,model),r=byKey[k];
         const orig={inT:r?r.in.target:null,inA:r?r.in.actual:null,outT:r?r.out.target:null,outA:r?r.out.actual:null};
+        // amt = 서버가 계산한 실적 금액(판매원장 금액 + 금액 없는 수량 × 공급가) — 읽기 전용(원장) 칸의 금액에 쓴다
         view.push({key:k,ch:c.channelId,chName:c.name,category:line.category,line:line.key,lineLabel:line.label,model,orig,
-          outSource:r?r.out.source:'',byType:r?r.out.byType:null,upload:_tgIsUpload(c.channelId,_TG.ym)});
+          outSource:r?r.out.source:'',byType:r?r.out.byType:null,upload:_tgIsUpload(c.channelId,_TG.ym),inUpload:_tgIsInUpload(c.channelId,_TG.ym),
+          amt:{inA:r?r.in.actualAmount:null,outA:r?r.out.actualAmount:null}});
       });
     });
   });
@@ -113,7 +120,14 @@ function _tgSetNonMain(on){_TG.nonMain=!!on;_tgRender();}
 function _tgNonMainToggleHtml(){return `<label class="of-fl" title="필터·기타 행 — 채널·전체 합계(본품)에는 켜도 들어가지 않습니다"><input type="checkbox"${_TG.nonMain?' checked':''} onchange="_tgSetNonMain(this.checked)"> 비본품 표시</label>`;}
 function _tgChangedCount(){return _TG.view.reduce((n,r)=>n+_TG_FIELDS.filter(f=>_tgChanged(r,f)).length,0);}
 function _tgInvalidCount(){return _TG.view.reduce((n,r)=>n+_TG_FIELDS.filter(f=>{const v=_tgVal(r,f);return v!==''&&!isFinite(v);}).length,0);}
-function _tgEditable(row,f){return !(f==='outA'&&row.upload);}
+function _tgEditable(row,f){return !(f==='outA'&&row.upload)&&!(f==='inA'&&row.inUpload);}
+// 실적 금액 — 원장 칸(읽기 전용)은 서버 금액(ERP는 판매원장 금액), 입력 칸은 고친 값 × 공급가. 없으면 null
+// (서버 응답에 금액이 아예 없으면 — undefined — 원장 칸도 수량 × 공급가)
+function _tgRowAmt(row,f,p){
+  if(!_tgEditable(row,f)&&row.amt[f]!==undefined)return row.amt[f];
+  const v=_tgVal(row,f);
+  return p==null||v===''||!isFinite(v)?null:v*p;
+}
 
 // 합계: 대분류(cat:ch|대분류) · 품목군(ln:ch|line) · 채널(ch:ch) · 전체(all)
 // 대분류·채널·전체 합계에는 대분류 단위(이관) 행도 더한다 — 대분류 합계 = 대분류 단위 행 + 그 대분류 모델 행
@@ -124,8 +138,9 @@ function _tgTotals(){
   const add=(scope,row)=>{
     const s=bucket(scope);
     _TG_FIELDS.forEach(f=>{const v=_tgVal(row,f);if(v!==''&&isFinite(v))s[f]=(s[f]||0)+v;});
-    const p=_tgPriceFor(row.ch,row.line,row.model,_TG.ym);
-    if(p!=null){const a=_tgVal(row,'inA'),o=_tgVal(row,'outA');if(a!==''&&isFinite(a))s.inAAmt=(s.inAAmt||0)+a*p;if(o!==''&&isFinite(o))s.outAAmt=(s.outAAmt||0)+o*p;}
+    const p=_tgPriceFor(row.ch,row.line,row.model,_TG.ym),a=_tgRowAmt(row,'inA',p),o=_tgRowAmt(row,'outA',p);
+    if(a!=null)s.inAAmt=(s.inAAmt||0)+a;
+    if(o!=null)s.outAAmt=(s.outAAmt||0)+o;
   };
   const addCat=(scope,cr)=>{const s=bucket(scope);_TG_FIELDS.forEach(f=>{const v=_tgCatVal(cr,f);if(v!=='')s[f]=(s[f]||0)+v;});};
   _TG.view.forEach(r=>{add('cat:'+r.ch+'|'+r.category,r);add('ln:'+r.ch+'|'+r.line,r);if(_tgIsMain(r.category)){add('ch:'+r.ch,r);add('all',r);}});
@@ -165,7 +180,7 @@ function _tgRender(){
 
 function _tgMonthlyHtml(){
   const m=OFFLINE_MASTERS||{};
-  const head=`<div class="card"><div class="card-hd">월별 목표·실적<span class="card-hd-r">IN = Sell-in(입고) · OUT = Sell-out(판매) · 업로드 채널은 업로드시작월부터 OUT 실적을 판매원장에서 집계</span></div>
+  const head=`<div class="card"><div class="card-hd">월별 목표·실적<span class="card-hd-r">IN = Sell-in(입고) · OUT = Sell-out(판매) · 업로드 채널은 업로드시작월부터 OUT 실적을 판매원장에서 집계(ERP 채널은 IN 실적도)</span></div>
     <div class="cm-filters">
       <input type="month" class="f-inp" value="${_TG.ym}" onchange="_tgSetYm(this.value)">
       <select class="f-sel" onchange="_tgSetCh(this.value)"><option value="">활성 채널 전체</option>${(m.channels||[]).map(c=>
@@ -183,8 +198,8 @@ function _tgMonthlyHtml(){
   const d=_TG.data;
   const warn=[];
   if(d.unmatched&&d.unmatched.length){
-    const q=d.unmatched.reduce((a,u)=>a+u.qty,0);
-    warn.push(`<div class="up-err">⚠ 매핑 안 된 코드 ${d.unmatched.length}건(수량 ${q})은 OUT 실적에 들어가지 않았습니다 — <a href="#admin/code-mapping">코드 매핑</a>에서 연결하세요. <span class="off-muted">${d.unmatched.map(u=>_escHtml(_offlineChannelName(u.channelId)+' '+u.code+' '+u.qty)).join(' · ')}</span></div>`);
+    const q=d.unmatched.reduce((a,u)=>a+u.qty,0),qa=d.unmatched.reduce((a,u)=>u.amount==null?a:(a||0)+u.amount,null);
+    warn.push(`<div class="up-err">⚠ 매핑 안 된 코드 ${d.unmatched.length}건(수량 ${q}${qa!=null?' · 금액 '+_tgWon(qa):''})은 실적에 들어가지 않았습니다 — <a href="#admin/code-mapping">코드 매핑</a>에서 연결하세요. <span class="off-muted">${d.unmatched.map(u=>_escHtml(_offlineChannelName(u.channelId)+' '+u.code+' '+u.qty)).join(' · ')}</span></div>`);
   }
   const priceWarn=(d.warnings||[]).filter(w=>/^단가 없음/.test(w));
   if(priceWarn.length)warn.push(`<details class="tg-warn"><summary>단가 없는 모델 ${priceWarn.length}개 — 금액이 계산되지 않습니다(단가 탭에서 추가)</summary>${priceWarn.map(w=>'<div>'+_escHtml(w)+'</div>').join('')}</details>`);
@@ -199,7 +214,8 @@ function _tgMonthlyHtml(){
 function _tgChannelHtml(c){
   const rows=_TG.view.filter(r=>r.ch===c.channelId);
   const up=c.uploadStartMonth&&_TG.ym>=c.uploadStartMonth;
-  let html=`<tr class="tg-ch"><td colspan="8">${_escHtml(c.name)} ${up?`<span class="up-chip ready">OUT 실적 = 업로드 원장(${_escHtml(c.uploadStartMonth)}~)</span>`:(c.uploadStartMonth?`<span class="up-chip">업로드 ${_escHtml(c.uploadStartMonth)}부터 — 이 달은 입력값</span>`:'<span class="up-chip">업로드 없는 채널 — OUT 실적 입력</span>')}</td></tr>`;
+  const inUp=up&&c.inSource==='upload';
+  let html=`<tr class="tg-ch"><td colspan="8">${_escHtml(c.name)} ${up?`<span class="up-chip ready">${inUp?'IN·OUT':'OUT'} 실적 = 업로드 원장(${_escHtml(c.uploadStartMonth)}~)</span>${inUp?' <span class="off-muted">IN실적원천 upload — 직접 출고라 판매가 곧 매출</span>':''}`:(c.uploadStartMonth?`<span class="up-chip">업로드 ${_escHtml(c.uploadStartMonth)}부터 — 이 달은 입력값</span>`:'<span class="up-chip">업로드 없는 채널 — OUT 실적 입력</span>')}</td></tr>`;
   // 대분류 → 품목군 → 모델. 접기는 대분류 단위(데이터 없는 대분류는 접힌 채로 시작).
   // 품목군이 둘 이상인 대분류(건조기 = 더 에어드라이 + 미니 건조기)만 품목군 합계 줄을 따로 보여 준다.
   // 본품 대분류 → 채널 합계(본품) → "비본품 표시"면 구분선 뒤에 필터·기타
@@ -239,7 +255,8 @@ function _tgRowHtml(r,i){
   const cell=f=>{
     if(!_tgEditable(r,f)){
       const bt=r.byType?Object.keys(r.byType).filter(k=>r.byType[k]).map(k=>k+' '+r.byType[k]).join(' · '):'';
-      return `<td class="num-col tg-ro" title="판매원장 집계${bt?' — '+_escAttr(bt):''}">${_tgFmt(r.orig.outA)} <span class="tg-src">upload</span></td>`;
+      const tip=f==='inA'?'판매원장 집계(IN실적원천 upload — IN 실적 = OUT 실적)':'판매원장 집계'+(bt?' — '+bt:'');
+      return `<td class="num-col tg-ro" title="${_escAttr(tip)}">${_tgFmt(r.orig[f])} <span class="tg-src">upload</span></td>`;
     }
     const v=_tgVal(r,f);
     const src=f==='outA'&&r.outSource&&r.outSource!=='upload'&&!_tgChanged(r,f)?`<span class="tg-src">${_escHtml(r.outSource)}</span>`:'';
@@ -249,10 +266,9 @@ function _tgRowHtml(r,i){
     ${cell('outT')}${cell('outA')}<td class="num-col" id="tgRo${i}">${_tgRate(_tgVal(r,'outA'),_tgVal(r,'outT'))}</td><td class="num-col tg-amt" id="tgAm${i}">${_tgAmtHtml(r)}</td></tr>`;
 }
 function _tgAmtHtml(r){
-  const p=_tgPriceFor(r.ch,r.line,r.model,_TG.ym);
-  if(p==null)return '<span class="off-muted" title="단가 없음">—</span>';
-  const a=_tgVal(r,'inA'),o=_tgVal(r,'outA');
-  return `<span title="공급가 ${_tgFmt(p)}">IN ${a===''||!isFinite(a)?'—':_tgWon(a*p)}<br>OUT ${o===''||!isFinite(o)?'—':_tgWon(o*p)}</span>`;
+  const p=_tgPriceFor(r.ch,r.line,r.model,_TG.ym),a=_tgRowAmt(r,'inA',p),o=_tgRowAmt(r,'outA',p);
+  if(p==null&&a==null&&o==null)return '<span class="off-muted" title="단가 없음">—</span>';
+  return `<span title="${p!=null?'공급가 '+_tgFmt(p):'판매원장 금액(단가 없음)'}">IN ${a==null?'—':_tgWon(a)}<br>OUT ${o==null?'—':_tgWon(o)}</span>`;
 }
 function _tgTotalRowHtml(scope,label,cls){
   const id=f=>'tgT'+scope.replace(/[^A-Za-z0-9]/g,c=>'_'+c.charCodeAt(0))+f;
@@ -330,7 +346,7 @@ async function _tgSave(){
   const items=[];
   _TG.view.forEach(r=>{
     const base={ym:_TG.ym,channelId:r.ch,line:r.line,model:r.model};
-    if(_tgChanged(r,'inT')||_tgChanged(r,'inA'))items.push(Object.assign({type:'IN',target:_tgVal(r,'inT'),actual:_tgVal(r,'inA')},base));
+    if(_tgChanged(r,'inT')||_tgChanged(r,'inA'))items.push(Object.assign({type:'IN',target:_tgVal(r,'inT'),actual:r.inUpload?'':_tgVal(r,'inA')},base));
     if(_tgChanged(r,'outT')||_tgChanged(r,'outA'))items.push(Object.assign({type:'OUT',target:_tgVal(r,'outT'),actual:r.upload?'':_tgVal(r,'outA')},base));
   });
   if(!items.length){showToast('고친 칸이 없습니다.');return;}
@@ -519,16 +535,16 @@ function _tgProgPreviewHtml(pv){
       <td><select class="f-sel" onchange="_tgProgSetLine('${_escAttr(p.legacy)}',this.value)"><option value="">— 품목군 —</option>${_tgLineOpts(isCat?'':cur.line)}${catOpts}</select></td>
       <td>${isCat?'<span class="off-muted">모델 구분 없음 — 대분류 합계</span>':`<select class="f-sel" onchange="_tgProgSetModel('${_escAttr(p.legacy)}',this.value)">${_tgModelOpts(cur.line,cur.model)}</select>`}</td></tr>`;
   }).join('');
-  const cmp=(pv.compare||[]).map(x=>`<tr class="${x.total?'tg-chtot':''}"><td>${_escHtml(_offlineChannelName(x.channelId))}</td><td>${_escHtml(x.model)}</td>
+  const cmp=(pv.compare||[]).map(x=>`<tr class="${x.total?'tg-chtot':''}"><td>${_escHtml(_offlineChannelName(x.channelId))}</td><td>${_escHtml(x.side||'OUT')}</td><td>${_escHtml(x.model)}</td>
     <td class="num-col">${x.legacy==null?'—':_tgFmt(x.legacy)}</td><td class="num-col">${_tgFmt(x.ledger)}</td>
     <td class="num-col ${x.diff?'tg-diff':''}">${x.diff>0?'+':''}${_tgFmt(x.diff)}</td><td class="cm-reg">${x.total&&x.unmatchedQty?'미매칭 '+x.unmatchedQty:''}</td></tr>`).join('');
   return `<div class="up-stats">원본 <b>${_escHtml(pv.sheetName)}</b> · ${pv.months.length?_escHtml(pv.months[0]+' ~ '+pv.months[pv.months.length-1]):'-'} (${pv.months.length}개월) · 품목 행 <b>${pv.legacyRows}</b> ·
-      반영 예정 <b>${pv.planRows}</b>행${pv.skippedInput?` · 입력값 보존 ${pv.skippedInput}`:''} · 업로드 달이라 제외한 OUT 실적 ${pv.outSkippedUploadMonths}칸${pv.badCells?` · 오류 칸 ${pv.badCells}개(빈칸 처리)`:''}</div>
+      반영 예정 <b>${pv.planRows}</b>행${pv.skippedInput?` · 입력값 보존 ${pv.skippedInput}`:''} · 업로드 달이라 제외한 OUT 실적 ${pv.outSkippedUploadMonths}칸${pv.inSkippedUploadMonths?` · IN 실적(IN실적원천 upload) ${pv.inSkippedUploadMonths}칸`:''}${pv.badCells?` · 오류 칸 ${pv.badCells}개(빈칸 처리)`:''}</div>
     ${pv.unmapped&&pv.unmapped.length?`<div class="up-err">미매핑(이관하지 않음): ${_escHtml(pv.unmapped.join(', '))}</div>`:''}
     <div class="tg-2col"><div><div class="f-lbl">채널 연결</div><table class="cm-tbl"><tbody>${chRows}</tbody></table></div>
       <div><div class="f-lbl">품목 연결 — 품목군+모델, 또는 여러 모델을 합친 원본 행은 "대분류 합계(모델 구분 없음)" → [매핑으로 다시 계산]</div><table class="cm-tbl"><thead><tr><th>원본 품목명</th><th>나오는 채널</th><th>품목군</th><th>모델</th></tr></thead><tbody>${prRows}</tbody></table></div></div>
-    <div class="f-lbl" style="margin-top:14px">업로드시작월 대조 — 진행현황 OUT 실적 vs 원장 집계 (이관하지 않음)</div>
-    ${cmp?`<div class="tbl-wrap"><table class="cm-tbl"><thead><tr><th>채널</th><th>모델</th><th class="num-col">진행현황</th><th class="num-col">원장</th><th class="num-col">차이</th><th></th></tr></thead><tbody>${cmp}</tbody></table></div>`:'<div class="mp-empty">대조할 업로드 채널·월이 없습니다.</div>'}`;
+    <div class="f-lbl" style="margin-top:14px">업로드시작월 대조 — 진행현황 실적 vs 원장 집계 (이관하지 않음 · OUT, IN실적원천 upload 채널은 IN도)</div>
+    ${cmp?`<div class="tbl-wrap"><table class="cm-tbl"><thead><tr><th>채널</th><th>구분</th><th>모델</th><th class="num-col">진행현황</th><th class="num-col">원장</th><th class="num-col">차이</th><th></th></tr></thead><tbody>${cmp}</tbody></table></div>`:'<div class="mp-empty">대조할 업로드 채널·월이 없습니다.</div>'}`;
 }
 async function _tgPricePreview(){
   const g=_TG.mig;g.priceBusy=true;g.priceErr='';g.priceConfirm=false;_tgRender();

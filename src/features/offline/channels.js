@@ -77,14 +77,16 @@ function _ocsCardHtml(c){
   const inA=_ofPick(t.in,'actual'),outA=_ofPick(t.out,'actual');
   const gap=inA==null&&outA==null?null:(inA||0)-(outA||0);
   const up=ci&&(ci.hasStock||ci.hasSales);
-  const stock=up&&g?`<div class="of-kv">
+  // 판매만 있고 재고 파일이 없는 채널(ERP 채널 — 우리 창고에서 직접 출고)
+  const noStock=up&&!ci.hasStock?`<div class="of-nodata">재고 데이터 없음 — 판매(매출이익리스트)만 업로드되는 채널입니다.</div><div class="of-card-foot">기준일 판매 ${_escHtml(_ofMD(ci.salesDate))||'—'}${ci.staleSales?' <span class="of-stale">⚠</span>':''}</div>`:'';
+  const stock=noStock||(up&&g?`<div class="of-kv">
       <div><div class="of-kv-lb">정상재고</div><div class="of-kv-v">${_ofNum(g.stock['정상'])}</div></div>
       <div><div class="of-kv-lb">재고일수</div><div class="of-kv-v${g.alert==='over'?' cw':g.alert==='risk'?' of-t-bad':''}">${_ofDays(g)}</div></div>
       <div><div class="of-kv-lb">진열 점포</div><div class="of-kv-v">${_ofNum(g.displayStores)} <small>/ ${_ofNum(ci.storeTotal)}</small></div></div>
     </div><div class="of-card-foot">기준일 재고 ${_escHtml(_ofMD(ci.stockDate))||'—'}${ci.staleStock?' <span class="of-stale">⚠</span>':''} · 판매 ${_escHtml(_ofMD(ci.salesDate))||'—'}${ci.staleSales?' <span class="of-stale">⚠</span>':''}${ci.unmatchedStock&&!cat?` · 미매칭 재고 ${_ofNum(ci.unmatchedStock)}`:''}</div>`
-    :'<div class="of-nodata">업로드 데이터 없음 — 목표·실적만 표시합니다(OUT 실적은 목표 관리에서 입력·이관한 값).</div>';
+    :'<div class="of-nodata">업로드 데이터 없음 — 목표·실적만 표시합니다(OUT 실적은 목표 관리에서 입력·이관한 값).</div>');
   return `<div class="of-card" role="button" tabindex="0" onclick="_ofGo('offline-channel','${_escAttr(c.channelId)}')" onkeydown="if(event.key==='Enter')_ofGo('offline-channel','${_escAttr(c.channelId)}')">
-    <div class="of-card-hd"><span class="of-card-name">${_escHtml(c.name)}</span><span class="of-card-type">${_escHtml(c.type||'')}${c.active==='Y'?'':' · 비활성'}</span><span class="of-badges">${up?_ofAlertBadges(_ofAlertCounts(_OCS.inv,c.channelId)):''}</span></div>
+    <div class="of-card-hd"><span class="of-card-name">${_escHtml(c.name)}</span><span class="of-card-type">${_escHtml(c.type||'')}${c.active==='Y'?'':' · 비활성'}</span><span class="of-badges">${up&&ci.hasStock?_ofAlertBadges(_ofAlertCounts(_OCS.inv,c.channelId)):''}</span></div>
     ${_ocsMeter('IN',t.in)}${_ocsMeter('OUT',t.out)}
     <div class="of-gap" title="IN 실적 − OUT 실적. 양수가 계속 쌓이면 채널 재고가 늘고 있다는 신호">IN−OUT 갭 <b class="${gap>0?'of-gap-pos':''}">${gap==null?'—':(gap>0?'+':'')+_ofFmtUnit(gap)}</b></div>
     ${stock}${_ofFilterLineHtml(_OCS.mon,_OCS.inv,c.channelId)}</div>`;

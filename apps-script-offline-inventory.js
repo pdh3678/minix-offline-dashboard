@@ -12,7 +12,8 @@
  *                창 = [판매 최신 기준일 − N + 1, 판매 최신 기준일] — 판매 최신 기준일은 업로드로그 기준(채널마다 다름).
  *                "오늘"이 아니라 데이터가 있는 마지막 날에서 세야 업로드가 며칠 밀려도 판매가 적게 잡히지 않는다.
  *                period 레코드는 기간종료일이 창 안이면 통째로 포함. 재고구분과 무관하게 합산
- *   재고일수     정상재고 ÷ 일평균 판매. 일평균이 0 이하면 null('판매 없음')
+ *   재고일수     정상재고 ÷ 일평균 판매. 일평균이 0 이하면 null('판매 없음'). 재고 데이터가 없는 채널(ERP 채널)은 null·경보 없음,
+ *                그 채널의 판매는 전체 채널('*') 그룹에 넣지 않는다
  *   진열 점포 수 재고_점포최신에서 '전시' 재고 > 0 인 점포 수
  *   취급 점포 수 재고구분 무관 재고 > 0 인 점포 수. 커버리지 = 취급 ÷ 점포마스터의 그 채널 점포 수
  *   점포 결품    당월판매 > 0 인데 현재 재고(재고구분 합) 0 인 점포 × SKU
@@ -128,10 +129,11 @@ function _offInventoryCompute(input) {
     }
     return G[k];
   }
-  // 한 SKU 값이 들어가는 모든 그룹(그 채널 + 전체 채널 × 다섯 단계). 채널 단위 그룹 = 본품 합계라 필터·기타 SKU는 넣지 않는다
+  // 한 SKU 값이 들어가는 모든 그룹(그 채널 + 전체 채널 × 다섯 단계). 채널 단위 그룹 = 본품 합계라 필터·기타 SKU는 넣지 않는다.
+  // 재고 데이터가 없는 채널(ERP 채널 — 우리 창고에서 직접 출고)의 판매는 전체 채널('*')에 넣지 않는다 — 채널 재고 ÷ 판매인 재고일수가 줄어 보이지 않게
   function each(ch, sku, fn) {
     var main = _offCatMain(sku.category);
-    [ch, '*'].forEach(function (c) { OFF_INV_LEVELS.forEach(function (lv) { if (lv !== 'channel' || main) fn(grp(c, lv, lv === 'channel' ? null : sku)); }); });
+    (stockDate[ch] ? [ch, '*'] : [ch]).forEach(function (c) { OFF_INV_LEVELS.forEach(function (lv) { if (lv !== 'channel' || main) fn(grp(c, lv, lv === 'channel' ? null : sku)); }); });
   }
   chans.forEach(function (c) { grp(c.channelId, 'channel', null); });
   grp('*', 'channel', null);
@@ -231,11 +233,12 @@ function _offInventoryCompute(input) {
   chans.forEach(function (c) { totalStores += storeTotal[c.channelId] || 0; });
   var groups = gOrder.map(function (k) {
     var g = G[k], ch = g.channelId;
-    var hasSales = ch === '*' ? Object.keys(win).length > 0 : !!win[ch];
+    var hasSales = ch === '*' ? Object.keys(win).some(function (c) { return stockDate[c]; }) : !!win[ch];
+    var noStock = ch !== '*' && !stockDate[ch]; // 재고 데이터가 없는 채널 — 재고일수·경보를 셀 수 없다('재고 0'이 아니다)
     g.total = g.stock['정상'] + g.stock['전시'] + g.stock['리퍼'];
     g.dailyAvg = hasSales ? g.windowQty / N : null;
-    g.noSales = hasSales && !(g.dailyAvg > 0);
-    g.days = g.dailyAvg > 0 ? g.stock['정상'] / g.dailyAvg : null;
+    g.noSales = hasSales && !noStock && !(g.dailyAvg > 0);
+    g.days = g.dailyAvg > 0 && !noStock ? g.stock['정상'] / g.dailyAvg : null;
     g.displayStores = Object.keys(g._disp).length;
     g.handlingStores = Object.keys(g._hand).length;
     var st = ch === '*' ? totalStores : (storeTotal[ch] || 0);

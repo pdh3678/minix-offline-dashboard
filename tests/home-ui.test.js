@@ -110,7 +110,7 @@ function deals(ctx) {
   let h = page('home');
   check('다섯 섹션 모두 그려짐', ['① 파트 실적', '② 연간 추이', '③ 오늘 챙길 것', '④ 공구 일정', '⑤ 대분류별 이번 달 판매'].every(s => h.indexOf(s) >= 0) && !/home-skel/.test(h));
   check('home_getSummary를 필터 그대로 부름', F.calls.some(c => c.action === 'home_getSummary' && J(c.data) === J({ ym: '2026-09', mode: 'month', category: '' })));
-  check('매출 기준 안내 문구', h.indexOf('매출 기준: 오프라인 Sell-in × 공급가 + 공구 판매 × 공구가 (VAT 포함') >= 0);
+  check('매출 기준 안내 문구', h.indexOf('매출 기준: 오프라인 Sell-in × 공급가(ERP 매출이익리스트 채널은 파일의 금액) + 공구 판매 × 공구가 (VAT 포함') >= 0);
   check('판매 기준 안내 문구', h.indexOf('판매 기준: 오프라인 Sell-out + 공구 판매') >= 0);
   check('데이터 기준일 — 오프라인 채널별 최신일 + 공구 실시간', /of-fresh-ch">하이마트/.test(h) && /of-fresh-ch">공구<\/span> 실시간/.test(h));
 

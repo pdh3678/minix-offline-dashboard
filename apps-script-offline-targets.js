@@ -9,6 +9,8 @@
  *   IN 목표·IN 실적·OUT 목표          목표실적_월(대시보드 입력 또는 이관)
  *   OUT 실적  연월 ≥ 채널 업로드시작월 → 판매원장 집계(원본코드 → 코드매핑 → sku → 품목군·모델)
  *             그 외(이전 달·업로드 없는 채널) → 목표실적_월의 OUT 실적수량
+ *   IN 실적   채널마스터 IN실적원천 upload(ERP 채널)이고 연월 ≥ 업로드시작월 → OUT 실적과 같은 판매원장 집계, 그 외 → 목표실적_월
+ *   금액      판매원장 금액이 있는 행은 그 금액, 없는 수량은 × 단가마스터 공급가
  */
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -129,11 +131,13 @@ function _offMonthlyCompute(input) {
   function warn(key, msg) { if (!warned[key]) { warned[key] = true; warnings.push(msg); } }
 
   var channels = input.channels.filter(function (r) { return r[0] && (!onlyCh || r[0] === onlyCh); }).map(function (r) {
-    return { channelId: r[0], name: r[1], active: r[3], order: r[4], uploadStartMonth: _offIsYm(r[5]) ? r[5] : '' };
+    return { channelId: r[0], name: r[1], active: r[3], order: r[4], uploadStartMonth: _offIsYm(r[5]) ? r[5] : '', inSource: _offInSourceOf(r) };
   });
   var chInfo = {};
   channels.forEach(function (c) { chInfo[c.channelId] = c; });
   function isUploadMonth(ch, ym) { var s = chInfo[ch] && chInfo[ch].uploadStartMonth; return !!s && ym >= s; }
+  // IN실적원천 upload(ERP 채널 — 우리 창고 직접 출고) — 업로드 달의 IN 실적 = 판매원장 집계(OUT과 같은 값). 목표실적_월의 IN 실적은 쓰지 않는다
+  function isInUpload(ch, ym) { return isUploadMonth(ch, ym) && chInfo[ch].inSource === 'upload'; }
 
   var rows = {}, order = [];
   function row(ym, ch, line, model) {
@@ -172,9 +176,13 @@ function _offMonthlyCompute(input) {
       var side = type === 'IN' ? 'in' : 'out';
       r.inputFields = r.inputFields || {};
       if (num(t[5]) != null) r.inputFields[side + '.target'] = true;
-      if (num(t[6]) != null && !(type === 'OUT' && isUploadMonth(ch, ym))) r.inputFields[side + '.actual'] = true;
+      if (num(t[6]) != null && !(type === 'OUT' && isUploadMonth(ch, ym)) && !(type === 'IN' && isInUpload(ch, ym))) r.inputFields[side + '.actual'] = true;
     }
-    if (type === 'IN') { r['in'].target = num(t[5]); r['in'].actual = num(t[6]); return; }
+    if (type === 'IN') {
+      r['in'].target = num(t[5]);
+      if (!isInUpload(ch, ym)) { r['in'].actual = num(t[6]); if (r['in'].actual != null) r['in'].source = t[7] === 'migration' ? 'migration' : 'manual'; }
+      return;
+    }
     r.out.target = num(t[5]);
     if (!isUploadMonth(ch, ym) && num(t[6]) != null) {
       r.out.actual = num(t[6]);
@@ -215,10 +223,15 @@ function _offMonthlyCompute(input) {
     r.out.source = 'upload';
   });
   // 업로드 달인데 원장에 판매가 없는 행 = 0 (목표만 있는 행도 원천은 upload)
+  // IN실적원천 upload 채널은 IN 실적 = OUT 실적(수량·원장 금액 그대로 — 3)의 금액 계산도 같다)
   order.forEach(function (k) {
     var r = rows[k];
     if (isUploadMonth(r.channelId, r.ym) && r.out.source !== 'upload') {
       r.out.actual = 0; r.out.source = 'upload'; r.out.byType = { '정상': 0, '전시': 0, '리퍼': 0 };
+    }
+    if (isInUpload(r.channelId, r.ym)) {
+      r['in'].actual = r.out.actual; r['in'].source = 'upload';
+      if (r.out.ledgerAmount != null) { r['in'].ledgerAmount = r.out.ledgerAmount; r['in'].ledgerQty = r.out.ledgerQty; }
     }
   });
 
@@ -419,8 +432,8 @@ function _offSaveTargets(data, auth) {
       if (it.type !== 'IN' && it.type !== 'OUT') throw new Error(what + ' 구분은 IN 또는 OUT 이어야 합니다: ' + it.type);
       var model = _offCatalogModel(it.line, it.model, what);
       var target = _offQty(it.target, what + ' 목표수량'), actual = _offQty(it.actual, what + ' 실적수량');
-      if (it.type === 'OUT' && actual !== '' && _offIsYm(ch[5]) && it.ym >= ch[5]) {
-        throw new Error(what + ': ' + it.channelId + ' ' + it.ym + ' OUT 실적은 판매원장에서 집계됩니다(업로드시작월 ' + ch[5] + ' 이후) — 입력할 수 없습니다.');
+      if (actual !== '' && _offIsYm(ch[5]) && it.ym >= ch[5] && (it.type === 'OUT' || _offInSourceOf(ch) === 'upload')) {
+        throw new Error(what + ': ' + it.channelId + ' ' + it.ym + ' ' + it.type + ' 실적은 판매원장에서 집계됩니다(업로드시작월 ' + ch[5] + ' 이후' + (it.type === 'IN' ? ', IN실적원천 upload' : '') + ') — 입력할 수 없습니다.');
       }
       var cat = OFFLINE_LINE_CATEGORY[it.line] || '';
       var k = _offTargetKey(it.ym, it.channelId, cat, it.line, model, it.type);
@@ -749,7 +762,7 @@ function _offProgressPlan(parsed, channelRows, mapping) {
   products.forEach(function (p) {
     if (p.level) prMap[p.legacy] = { line: p.level === 'model' ? p.line : '', model: p.level === 'model' ? p.model : '', category: p.category };
   });
-  var agg = {}, order = [], unmapped = [], seenUnmapped = {}, outSkipped = 0;
+  var agg = {}, order = [], unmapped = [], seenUnmapped = {}, outSkipped = 0, inSkipped = 0;
   function put(ym, ch, cat, line, model, type, target, actual) {
     if (target == null && actual == null) return;
     var k = _offTargetKey(ym, ch, cat, line, model, type);
@@ -764,36 +777,41 @@ function _offProgressPlan(parsed, channelRows, mapping) {
       if (!seenUnmapped[u]) { seenUnmapped[u] = true; unmapped.push(u); }
       return;
     }
-    var start = _offIsYm(chById[ch][5]) ? chById[ch][5] : '';
+    var start = _offIsYm(chById[ch][5]) ? chById[ch][5] : '', inUp = _offInSourceOf(chById[ch]) === 'upload';
     parsed.months.forEach(function (mo) {
       var o = r.values[mo.ym];
-      put(mo.ym, ch, pm.category, pm.line, pm.model, 'IN', o.inT, o.inA);
+      // IN실적원천 upload 채널은 업로드 달 IN 실적도 판매원장에서 집계하므로 이관하지 않는다(OUT과 같게)
+      var inA = o.inA;
+      if (inA != null && inUp && start && mo.ym >= start) { inA = null; inSkipped++; }
+      put(mo.ym, ch, pm.category, pm.line, pm.model, 'IN', o.inT, inA);
       var outA = o.outA;
       if (outA != null && start && mo.ym >= start) { outA = null; outSkipped++; }
       put(mo.ym, ch, pm.category, pm.line, pm.model, 'OUT', o.outT, outA);
     });
   });
-  return { channels: channels, products: products, rows: order.map(function (k) { return agg[k]; }), unmapped: unmapped, outSkipped: outSkipped };
+  return { channels: channels, products: products, rows: order.map(function (k) { return agg[k]; }), unmapped: unmapped, outSkipped: outSkipped, inSkipped: inSkipped };
 }
 
 /* 업로드시작월 대조 리포트 — 업로드 채널의 그 달 OUT 실적: 진행현황 값 vs 원장 집계(이관하지 않는다)
+   IN실적원천 upload 채널(ERP 채널)은 IN 실적도 같은 원장 집계와 대조한다(side 'IN' 줄 — 원장 값은 OUT과 같다).
    원본을 대분류 단위로 연결한 품목(예: "건조기")이 있는 채널·대분류는, 원장도 그 대분류의 모델을 모두 더해
    "대분류 합계" 한 줄로 비교한다(원본에 모델 구분이 없으니 모델별로는 비교할 수 없다). */
 function _offCompareUploadStart(ss, parsed, plan, channelRows) {
   var chMap = {}, prMap = {};
   plan.channels.forEach(function (c) { chMap[c.legacy] = c.channelId; });
   plan.products.forEach(function (p) { if (p.level) prMap[p.legacy] = p; });
-  var targets = {}, months = {};
+  var targets = {}, months = {}, inUp = {};
   parsed.months.forEach(function (m) { months[m.ym] = true; });
-  channelRows.forEach(function (c) { if (_offIsYm(c[5]) && months[c[5]]) targets[c[0]] = c[5]; });
-  var legacy = {}, catFold = {};
+  channelRows.forEach(function (c) { if (_offIsYm(c[5]) && months[c[5]]) { targets[c[0]] = c[5]; inUp[c[0]] = _offInSourceOf(c) === 'upload'; } });
+  var legacy = { OUT: {}, IN: {} }, catFold = {};
   var keyOf = function (ch, line, model, cat) { return [ch, line, model, cat].join(OFF_KEY_SEP); };
   parsed.rows.forEach(function (r) {
     var ch = chMap[r.channel], pm = prMap[r.product];
     if (!ch || !pm || !targets[ch]) return;
     if (pm.level === 'category') catFold[ch + OFF_KEY_SEP + pm.category] = true;
-    var k = pm.level === 'category' ? keyOf(ch, '', '', pm.category) : keyOf(ch, pm.line, pm.model, pm.category);
-    legacy[k] = _offSumOrNull(legacy[k] == null ? null : legacy[k], r.values[targets[ch]].outA);
+    var k = pm.level === 'category' ? keyOf(ch, '', '', pm.category) : keyOf(ch, pm.line, pm.model, pm.category), v = r.values[targets[ch]];
+    legacy.OUT[k] = _offSumOrNull(legacy.OUT[k] == null ? null : legacy.OUT[k], v.outA);
+    legacy.IN[k] = _offSumOrNull(legacy.IN[k] == null ? null : legacy.IN[k], v.inA);
   });
   var read = function (k) { return _offReadRows(_offSheet(ss, k), OFF_TABS[k]); };
   var sales = read('sales'), mappings = read('mapping'), skus = read('sku');
@@ -801,32 +819,36 @@ function _offCompareUploadStart(ss, parsed, plan, channelRows) {
   Object.keys(targets).forEach(function (ch) {
     var ym = targets[ch];
     var mon = _offMonthlyCompute({ from: ym, to: ym, channelId: ch, channels: channelRows, targets: [], prices: [], sales: sales, mappings: mappings, skus: skus });
-    var L = {}, D = {};
-    // 대분류로 접을 채널·대분류는 모델 키를 대분류 키로 합친다
-    var fold = function (k) { var p = k.split(OFF_KEY_SEP); return catFold[ch + OFF_KEY_SEP + p[3]] ? keyOf(ch, '', '', p[3]) : k; };
-    Object.keys(legacy).forEach(function (k) { if (k.indexOf(ch + OFF_KEY_SEP) === 0) { var f = fold(k); L[f] = _offSumOrNull(L[f] == null ? null : L[f], legacy[k]); } });
-    mon.rows.forEach(function (r) { var f = fold(keyOf(ch, r.line, r.model, r.category)); D[f] = (D[f] || 0) + (r.out.actual || 0); });
-    var keys = [];
-    Object.keys(L).concat(Object.keys(D)).forEach(function (k) { if (keys.indexOf(k) < 0) keys.push(k); });
-    if (!keys.length) return; // 원본에도 원장에도 없는 채널은 대조할 게 없다
-    var idx = function (k) {
-      var p = k.split(OFF_KEY_SEP);
-      return [OFFLINE_CATEGORIES.indexOf(p[3]), p[1] ? _OFF_LINE_ORDER.indexOf(p[1]) : -1, p[1] ? (OFFLINE_PRODUCT_MODELS[p[1]] || []).indexOf(p[2]) : -1];
-    };
-    keys.sort(function (a, b) { var x = idx(a), y = idx(b); return (x[0] - y[0]) || (x[1] - y[1]) || (x[2] - y[2]); });
-    var sumL = null, sumD = 0;
-    keys.forEach(function (k) {
-      var p = k.split(OFF_KEY_SEP), l = L[k] == null ? null : L[k], d = D[k] == null ? 0 : D[k];
-      var isCat = !p[1];
-      out.push({ ym: ym, channelId: ch, category: p[3], line: p[1], model: isCat ? '(대분류) ' + p[3] + ' 합계' : p[2], level: isCat ? 'category' : 'model',
-        legacy: l, ledger: d, diff: d - (l || 0) });
-      if (!_offCatMain(p[3])) return; // 채널 합계 = 본품 합계(필터·기타 줄은 보여 주기만)
-      sumL = _offSumOrNull(sumL, l); sumD += d;
-    });
-    var um = mon.totals.byChannelMonth.length ? mon.totals.byChannelMonth[0].out.unmatchedQty : 0;
-    out.push({ ym: ym, channelId: ch, line: '', model: '(채널 합계)', legacy: sumL, ledger: sumD, diff: sumD - (sumL || 0), unmatchedQty: um, total: true });
+    (inUp[ch] ? ['OUT', 'IN'] : ['OUT']).forEach(function (side) { _offCompareSide(out, ch, ym, side, legacy[side], catFold, mon, keyOf); });
   });
   return out;
+}
+// 대조 한 쪽(OUT | IN) — 채널 ch 의 줄들을 out 에 덧붙인다. 원장 값은 월별 해석 결과(IN실적원천 upload면 in.actual = out.actual)
+function _offCompareSide(out, ch, ym, side, legacy, catFold, mon, keyOf) {
+  var L = {}, D = {}, f0 = side === 'IN' ? 'in' : 'out';
+  // 대분류로 접을 채널·대분류는 모델 키를 대분류 키로 합친다
+  var fold = function (k) { var p = k.split(OFF_KEY_SEP); return catFold[ch + OFF_KEY_SEP + p[3]] ? keyOf(ch, '', '', p[3]) : k; };
+  Object.keys(legacy).forEach(function (k) { if (k.indexOf(ch + OFF_KEY_SEP) === 0) { var f = fold(k); L[f] = _offSumOrNull(L[f] == null ? null : L[f], legacy[k]); } });
+  mon.rows.forEach(function (r) { var f = fold(keyOf(ch, r.line, r.model, r.category)); D[f] = (D[f] || 0) + (r[f0].actual || 0); });
+  var keys = [];
+  Object.keys(L).concat(Object.keys(D)).forEach(function (k) { if (keys.indexOf(k) < 0) keys.push(k); });
+  if (!keys.length) return; // 원본에도 원장에도 없는 채널은 대조할 게 없다
+  var idx = function (k) {
+    var p = k.split(OFF_KEY_SEP);
+    return [OFFLINE_CATEGORIES.indexOf(p[3]), p[1] ? _OFF_LINE_ORDER.indexOf(p[1]) : -1, p[1] ? (OFFLINE_PRODUCT_MODELS[p[1]] || []).indexOf(p[2]) : -1];
+  };
+  keys.sort(function (a, b) { var x = idx(a), y = idx(b); return (x[0] - y[0]) || (x[1] - y[1]) || (x[2] - y[2]); });
+  var sumL = null, sumD = 0;
+  keys.forEach(function (k) {
+    var p = k.split(OFF_KEY_SEP), l = L[k] == null ? null : L[k], d = D[k] == null ? 0 : D[k];
+    var isCat = !p[1];
+    out.push({ ym: ym, channelId: ch, side: side, category: p[3], line: p[1], model: isCat ? '(대분류) ' + p[3] + ' 합계' : p[2], level: isCat ? 'category' : 'model',
+      legacy: l, ledger: d, diff: d - (l || 0) });
+    if (!_offCatMain(p[3])) return; // 채널 합계 = 본품 합계(필터·기타 줄은 보여 주기만)
+    sumL = _offSumOrNull(sumL, l); sumD += d;
+  });
+  var um = mon.totals.byChannelMonth.length ? mon.totals.byChannelMonth[0].out.unmatchedQty : 0;
+  out.push({ ym: ym, channelId: ch, side: side, line: '', model: '(채널 합계)', legacy: sumL, ledger: sumD, diff: sumD - (sumL || 0), unmatchedQty: um, total: true });
 }
 
 /* offline_migrateProgress — mode 'preview'(쓰기 없음) | 'apply'
@@ -856,7 +878,7 @@ function _offMigrateProgress(data, auth) {
     months.forEach(function (m) { monthSet[m] = true; });
     var res = { success: true, mode: apply ? 'apply' : 'preview', sheetName: LEGACY_PROGRESS_TAB, year: parsed.year, months: months,
       channels: plan.channels, products: plan.products, planRows: newRows.length, skippedInput: skippedInput,
-      outSkippedUploadMonths: plan.outSkipped, unmapped: plan.unmapped, badCells: parsed.badCells,
+      outSkippedUploadMonths: plan.outSkipped, inSkippedUploadMonths: plan.inSkipped, unmapped: plan.unmapped, badCells: parsed.badCells,
       legacyRows: parsed.rows.length, compare: _offCompareUploadStart(ss, parsed, plan, channelRows) };
     if (apply) {
       var rr = _offReplaceRows(sheet, def, existing, function (r) { return !(r[7] === 'migration' && monthSet[r[0]]); }, newRows);

@@ -149,7 +149,7 @@ function _homePartHtml(){
     </div>
     <div class="home-mini-row">${mini}</div>
     ${filterLine}${warn}
-    <div class="of-note">매출 기준: 오프라인 Sell-in × 공급가 + 공구 판매 × 공구가 (VAT 포함, 수수료 차감 전) · 목표 = 오프라인 IN 목표 금액 + 공구 목표 금액</div></div>`;
+    <div class="of-note">매출 기준: 오프라인 Sell-in × 공급가(ERP 매출이익리스트 채널은 파일의 금액) + 공구 판매 × 공구가 (VAT 포함, 수수료 차감 전) · 목표 = 오프라인 IN 목표 금액 + 공구 목표 금액</div></div>`;
 }
 
 // ② 연간 추이 — 채널군별 누적 막대(실적) + 파트 월 목표 선. 막대를 누르면 그 달로
