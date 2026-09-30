@@ -43,7 +43,8 @@ const SUITES = [
   ['home-gas.test.js', '파트 홈 GAS — 공구목표_월·채널군, 공구 목표 저장·이관(블록 찾기·병합·대조·멱등·input 보존), home_getSummary(채널군 금액·필터·경보·캐시)'],
   ['offline-stock-date.test.js', '재고 기준일 보정 — 채널마스터 재고기준일오프셋, 업로드 기준일(새 화면·옛 화면 호환·하이마트 그대로), 데이터 현황·지표·추이, offline_fixStockDates 1회(중복 정리·재실행 방지), 업로드 미리보기'],
   ['offline-sales-breakdown.test.js', '채널 상세 판매 분석 — 점포유형 열, 모델별 = 지점별 = OUT 실적 + 필터 + 미매칭, 모델/SKU·대분류·설치완료, 온라인/오프라인, 캐시, 화면·CSV·임베드'],
-  ['home-ui.test.js', '파트 홈 화면 — 공구 = 공구 분석 총 매출, 오프라인 = 채널 현황 IN 금액, 오늘 챙길 것 = 각 화면 건수, 일정·오류 격리·임베드 + 목표 관리 공구 목표·연간 보기·이관']
+  ['home-ui.test.js', '파트 홈 화면 — 공구 = 공구 분석 총 매출, 오프라인 = 채널 현황 IN 금액, 오늘 챙길 것 = 각 화면 건수, 일정·오류 격리·임베드 + 목표 관리 공구 목표·연간 보기·이관'],
+  ['review-html-embed.test.js', '회고 HTML 임베드 — review_* 세션·첨부 폴더 제한·5MB/20MB, sandbox allow-scripts만·blob 없음, 높이 메시지 출처 검증, 원문 캐시']
 ];
 
 let failed = 0;

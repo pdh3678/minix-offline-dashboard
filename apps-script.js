@@ -20,7 +20,7 @@
 // 배포본 확인용 버전 문자열 — 이 파일을 수정할 때마다 값을 바꿔서, doGet 응답에 포함시켜
 // 프론트(REQUIRED_SCRIPT_VERSION — DASHBOARD_VERSION이 아님, 그쪽은 프론트 전용 버전이라 이 값과
 // 더 이상 짝을 맞추지 않음)와 대조하면 "로컬 파일 = 실제 배포본"인지 바로 확인 가능
-var SCRIPT_VERSION = 'sales-breakdown-2026-09-29-01';
+var SCRIPT_VERSION = 'review-html-embed-2026-09-30-01';
 
 // 메인 데이터 시트명 — 새 스프레드시트의 실제 탭명
 var MAIN_SHEET = '실적통합';
@@ -2638,7 +2638,9 @@ function doPost(e) {
     // 오프라인 원장(apps-script-offline.js) — 업로드 레코드가 수백 KB라 GET 청크 대신 본문으로 받는다
     // 파트 홈 집계(home_, apps-script-home.js)도 같은 창구로 받는다
     if (/^(offline|home)_/.test(String(body.action || ''))) return _offlineHandle(body.action, body.data, auth);
-    throw new Error('doPost는 presence·offline_ 전용입니다(파트 홈 home_ 포함) — 그 외 액션(' + body.action + ')은 doGet(GET)으로 보내야 합니다.');
+    // 회고 첨부 HTML(review_) — 파일 원문이 수 MB라 GET 청크(1,200자 단위)로는 보낼 수 없다
+    if (/^review_/.test(String(body.action || ''))) return _reviewFileHandle(body.action, body.data);
+    throw new Error('doPost는 presence·offline_ 전용입니다(파트 홈 home_, 회고 첨부 review_ 포함) — 그 외 액션(' + body.action + ')은 doGet(GET)으로 보내야 합니다.');
   } catch (err) {
     return _json({ error: err.toString() });
   }
@@ -4127,6 +4129,75 @@ function _shareReviewImages(data) {
     try { _shareFilePublic(DriveApp.getFileById(String(ids[i]))); done++; } catch (e) {}
   }
   return _json({ success: true, shared: done });
+}
+
+// ── 회고 첨부 HTML 파일 (2026-09-30) ──
+// 회고 편집기의 HTML 임베드 블록이 쓰는 원문 저장소. 이미지는 <img>가 lh3 URL을 직접 읽지만,
+// HTML은 프론트가 원문 문자열을 받아 sandbox iframe의 srcdoc에 넣어야 한다 — Drive 파일은 브라우저에서
+// CORS로 직접 읽을 수 없어서 여기서 대신 읽어 JSON으로 내려준다. 회고 본문에는 파일 참조(URL)만 저장한다.
+// doPost(review_*)로만 들어오므로 세션 검증은 doPost가 이미 끝냈다.
+var REVIEW_FILE_FOLDER_NAME = '공동구매_회고_첨부파일';
+var REVIEW_FILE_FOLDER_PROP = 'REVIEW_FILE_FOLDER_ID';
+var REVIEW_FILE_UPLOAD_MAX_BYTES = 20 * 1024 * 1024;  // 업로드 상한 — 5MB 초과분은 프론트가 파일 블록으로 표시
+var REVIEW_FILE_PREVIEW_MAX_BYTES = 5 * 1024 * 1024;  // 원문 조회(미리보기) 상한
+
+function _reviewFileHandle(action, data) {
+  try {
+    if (action === 'review_uploadFile') return _json(_reviewUploadFile(data || {}));
+    if (action === 'review_getFile') return _json(_reviewGetFile(data || {}));
+    throw new Error('알 수 없는 회고 액션: ' + action);
+  } catch (err) {
+    Logger.log('[회고 첨부 실패] action=' + action + ' / ' + err + '\n' + (err && err.stack));
+    return _json({ error: String((err && err.message) || err), action: action });
+  }
+}
+
+// 폴더는 이름이 아니라 ID로 찾는다 — 원문 조회를 "이 폴더 안의 파일"로 제한하는데, 이름으로 찾으면
+// 스크립트 소유자에게 공유된 남의 같은 이름 폴더가 걸릴 수 있다.
+function _reviewFileFolder(create) {
+  var props = PropertiesService.getScriptProperties();
+  var id = props.getProperty(REVIEW_FILE_FOLDER_PROP);
+  if (id) {
+    try { return DriveApp.getFolderById(id); } catch (e) { if (!create) return null; }
+  }
+  if (!create) return null;
+  var folder = DriveApp.createFolder(REVIEW_FILE_FOLDER_NAME);
+  props.setProperty(REVIEW_FILE_FOLDER_PROP, folder.getId());
+  return folder;
+}
+
+function _reviewUploadFile(data) {
+  var name = String(data.name || '').trim().slice(0, 200);
+  if (!/\.html?$/i.test(name)) throw new Error('HTML(.html/.htm) 파일만 올릴 수 있습니다.');
+  if (typeof data.content !== 'string') throw new Error('파일 내용이 없습니다.');
+  var blob = Utilities.newBlob(data.content, 'text/html', name);
+  var size = blob.getBytes().length;
+  if (size > REVIEW_FILE_UPLOAD_MAX_BYTES) throw new Error('파일이 너무 큽니다 (20MB 초과)');
+  var file = _reviewFileFolder(true).createFile(blob);
+  try { _shareFilePublic(file); } catch (e) { /* 공유 실패해도 원문 조회(GAS 경유)는 된다 — 다운로드 링크만 소유자 전용 */ }
+  return {
+    success: true, fileId: file.getId(), name: name, size: size,
+    url: 'https://drive.google.com/uc?export=download&id=' + file.getId()
+  };
+}
+
+// 원문 조회 — 회고 첨부 폴더 안의 HTML 파일만. 스크립트 소유자 권한으로 도는 코드라 제한이 없으면
+// 세션만 있으면 소유자의 Drive 파일을 아무거나 읽을 수 있게 된다.
+function _reviewGetFile(data) {
+  var fileId = String(data.fileId || '');
+  if (!/^[A-Za-z0-9_-]{10,200}$/.test(fileId)) return { error: '파일 ID가 올바르지 않습니다.', code: 'BAD_ID' };
+  var file = null;
+  try { file = DriveApp.getFileById(fileId); } catch (e) { file = null; }
+  if (!file || file.isTrashed()) return { error: '파일을 찾을 수 없습니다.', code: 'NOT_FOUND' };
+  var folder = _reviewFileFolder(false);
+  var inFolder = false;
+  if (folder) {
+    var parents = file.getParents();
+    while (parents.hasNext()) { if (parents.next().getId() === folder.getId()) { inFolder = true; break; } }
+  }
+  if (!inFolder) return { error: '회고에 첨부된 파일이 아닙니다.', code: 'FORBIDDEN' };
+  if (file.getSize() > REVIEW_FILE_PREVIEW_MAX_BYTES) return { error: '파일이 5MB를 넘어 미리보기를 표시하지 않습니다.', code: 'TOO_LARGE' };
+  return { success: true, name: file.getName(), content: file.getBlob().getDataAsString('UTF-8') };
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

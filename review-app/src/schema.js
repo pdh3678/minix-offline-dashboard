@@ -10,6 +10,7 @@ import {
   withMultiColumn,
 } from '@blocknote/xl-multi-column';
 import { calloutBlockSpec, insertCallout } from './callout.js';
+import { htmlAwareFileBlockSpec } from './htmlEmbedBlock.jsx';
 
 // 인라인 코드(code 스타일)는 @tiptap/extension-code 기본 설정이 excludes:'_'라 다른 모든
 // 마크(볼드/이탤릭/밑줄/취소선)와 배타적 — 노션과 달리 코드에 볼드를 얹을 수 없었음. 이건
@@ -28,9 +29,10 @@ const codeStyleSpec = {
 // codeBlock은 기본 스키마에도 이미 있지만(슬래시 메뉴엔 "코드 블록"으로 노출) 구문 강조/언어
 // 목록이 없는 민짜 버전 — @blocknote/code-block의 옵션(Shiki 하이라이터 + 언어 약 50종)으로
 // 교체해 노션과 동등한 코드 블록으로 만듦.
+// file은 같은 type 그대로 HTML 임베드(파일명 헤더 + sandbox 미리보기 + 캡션)를 얹은 버전으로 교체 — htmlEmbedBlock.jsx.
 export const schema = withMultiColumn(
   BlockNoteSchema.create().extend({
-    blockSpecs: { codeBlock: createCodeBlockSpec(codeBlockOptions), callout: calloutBlockSpec },
+    blockSpecs: { codeBlock: createCodeBlockSpec(codeBlockOptions), callout: calloutBlockSpec, file: htmlAwareFileBlockSpec },
     styleSpecs: { code: codeStyleSpec },
   })
 );

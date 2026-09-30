@@ -144,3 +144,41 @@
 .rv2-period-opt{padding:6px 10px;border-radius:6px;font-size:12px;color:var(--text);cursor:pointer;white-space:nowrap}
 .rv2-period-opt:hover{background:var(--surface-2)}
 .rv2-period-opt.sel{color:var(--minix);font-weight:700}
+
+/* HTML 임베드 블록(htmlEmbedBlock.jsx) — 노션처럼 파일명 헤더 + 둥근 카드 안 미리보기 + 캡션.
+   메뉴 팝업은 블록 안에 절대 위치로 둔다(포털 없이) — 에디터 본문 오른쪽 끝이라 사이드바와 겹칠 일이 없다. */
+.rv2-html-embed{width:100%;display:flex;flex-direction:column;gap:6px;padding:2px 0}
+.rv2-html-embed-hd{display:flex;align-items:center;gap:6px;min-height:28px;font-size:13px}
+.rv2-html-embed-ic{flex-shrink:0;color:var(--text-3)}
+.rv2-html-embed-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600;color:var(--text)}
+.rv2-html-embed-menu{position:relative;flex-shrink:0}
+.rv2-html-embed-btn{width:28px;height:24px;display:inline-flex;align-items:center;justify-content:center;border:none;border-radius:6px;background:transparent;color:var(--text-3);font-size:16px;line-height:1;cursor:pointer;font-family:inherit}
+.rv2-html-embed-btn:hover,.rv2-html-embed-btn[aria-expanded="true"]{background:var(--surface-2);color:var(--text)}
+.rv2-html-embed-pop{position:absolute;right:0;top:calc(100% + 4px);z-index:30;min-width:170px;background:var(--surface);border:1px solid var(--border);border-radius:8px;box-shadow:0 8px 24px rgba(17,24,39,.18);padding:4px;display:flex;flex-direction:column}
+.rv2-html-embed-pop button{text-align:left;padding:7px 10px;border:none;border-radius:6px;background:none;font-size:12.5px;color:var(--text);cursor:pointer;font-family:inherit;white-space:nowrap}
+.rv2-html-embed-pop button:hover:not(:disabled){background:var(--surface-2)}
+.rv2-html-embed-pop button:disabled{color:var(--text-3);cursor:default}
+.rv2-html-embed-pop button.danger{color:#DC2626}
+.rv2-html-embed-card{position:relative;border:1px solid var(--border);border-radius:8px;overflow:hidden;background:#fff}
+.rv2-html-embed-body{position:relative}
+/* 대시보드는 라이트 전용 — iframe 요소의 color-scheme을 라이트로 고정해 임베드 문서가 OS 다크 모드를 따라가지 않게 한다 */
+.rv2-html-embed-frame{display:block;width:100%;height:100%;border:0;background:#fff;color-scheme:light}
+.rv2-html-embed-skeleton{height:100%;display:flex;align-items:center;justify-content:center;color:var(--text-3);font-size:12px;background:linear-gradient(90deg,var(--surface-2) 25%,var(--border) 37%,var(--surface-2) 63%);background-size:400% 100%;animation:rv2-shimmer 1.4s ease infinite}
+@keyframes rv2-shimmer{0%{background-position:100% 50%}100%{background-position:0 50%}}
+.rv2-html-embed-error{padding:28px 20px;text-align:center;display:flex;flex-direction:column;align-items:center;gap:8px;background:var(--surface-2)}
+.rv2-html-embed-error-title{font-size:13px;font-weight:700;color:var(--text)}
+.rv2-html-embed-error-detail{font-size:12px;color:var(--text-3);max-width:520px;line-height:1.6}
+.rv2-html-embed-error-actions{display:flex;gap:8px;margin-top:4px}
+.rv2-html-embed-error-actions .rv2-btn-cancel{padding:6px 14px;font-size:12px}
+/* 높이 조절 손잡이 — 카드 아래 가운데. 호버 때만 보인다(iframe 위에 있어도 부모 문서에서는 카드가 호버 상태) */
+.rv2-html-embed-resize{position:absolute;left:50%;bottom:0;transform:translateX(-50%);width:64px;height:14px;padding:0;border:none;background:transparent;cursor:ns-resize;touch-action:none;opacity:0;transition:opacity .12s}
+.rv2-html-embed-resize::after{content:'';position:absolute;left:12px;right:12px;top:5px;height:5px;border-radius:3px;background:var(--text-3)}
+.rv2-html-embed-card:hover .rv2-html-embed-resize,.rv2-html-embed-resize.active{opacity:.7}
+.rv2-html-embed-caption{color:var(--text-2)}
+
+/* 전체 화면 보기 — document.body 직속 포털이라 사이드바(z-index:60)·BlockNote 팝오버(1000대) 위 */
+.rv2-html-modal{position:fixed;inset:0;z-index:2000;background:rgba(17,24,39,.55);display:flex;align-items:center;justify-content:center;padding:32px}
+.rv2-html-modal-box{width:min(1400px,100%);height:100%;background:var(--surface);border-radius:10px;box-shadow:0 20px 60px rgba(0,0,0,.3);display:flex;flex-direction:column;overflow:hidden}
+.rv2-html-modal-hd{display:flex;align-items:center;gap:8px;padding:10px 12px 10px 16px;border-bottom:1px solid var(--border);font-size:13px}
+.rv2-html-modal-frame{flex:1;width:100%;border:0;background:#fff;color-scheme:light}
+.rv2-html-modal-msg{flex:1;display:flex;align-items:center;justify-content:center;color:var(--text-3);font-size:13px}
