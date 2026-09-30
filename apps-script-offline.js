@@ -39,6 +39,8 @@ var OFF_FILE_TYPES = {
   // 트레이더스가 합쳐진 SKU별 합계 파일 — 반영 거절(판별은 브라우저가 해서 안내한다). 점포별 일별 매출을 쓴다
   EMART_DAILY_SALES:  { channelId: 'emart',  kind: 'period', blocked: "트레이더스가 합쳐진 합계 파일이라 반영할 수 없습니다. '기간별매출(상품별)_일별상세' 파일을 사용하세요" },
   ETLAND_SALES:       { channelId: 'etland', kind: 'period' },
+  // ERP 매출이익리스트(백화점·폐쇄몰·렌탈) — channelId는 코드체계(erp). split 'customer' = 레코드의 거래처코드(점포코드) → 거래처매핑 → 채널
+  ERP_SALES_PROFIT:   { channelId: 'erp', kind: 'period', split: 'customer' },
   ETLAND_STOCK:       { channelId: 'etland', kind: 'snapshot' },
   HIMART_SALES_STOCK: { channelId: 'himart', kind: 'himart' }
 };
@@ -629,7 +631,7 @@ function _offUpload(data, auth) {
 
   return _offWithLock(function () {
     var ctx = {
-      ss: _offSS(), today: _offToday(), warnings: [], applied: {},
+      ss: _offSS(), today: _offToday(), warnings: [], applied: {}, email: (auth && auth.email) || '',
       uploadId: 'U' + Utilities.formatDate(new Date(), 'Asia/Seoul', 'yyyyMMdd-HHmmss') + '-' + Utilities.getUuid().slice(0, 4),
       // split 파일 — 반영한 채널 목록(업로드로그 channel_id = 'emart,traders')과 점포코드 → 채널(점포마스터 기록용)
       channels: null, storeChannel: null
@@ -638,7 +640,8 @@ function _offUpload(data, auth) {
     if (ft.kind === 'snapshot') _offStockBasis(ctx, meta, ft);
     try {
       var range = {};
-      if (ft.kind === 'period') range = _offApplyPeriodSales(ctx, meta, rec, ft);
+      if (ft.split === 'customer') range = _offApplyErpSales(ctx, meta, rec);
+      else if (ft.kind === 'period') range = _offApplyPeriodSales(ctx, meta, rec, ft);
       else {
         range = _offApplyStock(ctx, meta, rec, ft);
         if (ft.kind === 'himart') range.himart = _offApplyHimart(ctx, meta, rec);
@@ -724,6 +727,76 @@ function _offApplyPeriodSales(ctx, meta, rec, ft) {
     (rec.stores || []).forEach(function (st) { var c = chOfBiz(st.biz); if (st.code && c) ctx.storeChannel[String(st.code).trim()] = c; });
   }
   return { start: s, end: e };
+}
+
+/* A-2. ERP 매출이익리스트(백화점·폐쇄몰·렌탈) — 기간 교체형 + 거래처 → 채널.
+   레코드의 점포코드 = ERP 거래처코드 → 거래처매핑 → 채널(코드체계 erp 채널만). 미리보기에서 채널을 고른 새 거래처(meta.customers)는
+   먼저 거래처매핑에 저장한다. 교체: 교체 기간 동안 코드체계 erp 채널 전부의 판매원장 행을 지우고 넣는다 — 그 기간에 판매가 없던 채널의
+   예전 행도 정리되고, 포털 채널은 건드리지 않는다. 거래처매핑에 없는(또는 ERP 채널이 아닌 채널로 매핑된) 거래처의 행은 보류하고 경고.
+   금액·수수료는 파일 값 그대로(반품·취소 음수). 점포마스터 점포명 = 거래처매핑의 거래처명 */
+function _offApplyErpSales(ctx, meta, rec) {
+  var s = meta.replaceStart, e = meta.replaceEnd, cm = ctx.chMeta;
+  var erp = {}, rank = {};
+  cm.rows.forEach(function (r, i) { if (cm.codeSys(r[0]) === OFF_ERP_CODE_SYSTEM) { erp[r[0]] = true; rank[r[0]] = (Number(r[4]) || 99) * 1000 + i; } });
+  if (!Object.keys(erp).length) throw new Error('코드체계채널이 erp인 채널이 채널마스터에 없습니다 — 편집기에서 offline_setupSheets를 먼저 실행하세요.');
+  var cust = _offErpCustomers(ctx, erp, meta.customers || []);
+  var rows = [], outside = 0, held = {}, byCh = {};
+  Object.keys(erp).forEach(function (c) { byCh[c] = { rows: 0, qty: 0, amount: 0, fee: 0 }; });
+  (rec.sales || []).forEach(function (r) {
+    if (r.s < s || r.e > e) { outside++; return; }
+    var code = String(r.store || '').trim(), cu = cust[code], ch = cu && erp[cu.channelId] ? cu.channelId : '';
+    if (!ch) { held[code] = (held[code] || 0) + 1; return; }
+    var qty = Number(r.qty) || 0, amt = _offOpt(r.amt), fee = _offOpt(r.fee);
+    if (!qty && !amt && !fee) return;
+    var o = byCh[ch];
+    o.rows++; o.qty += qty; o.amount += Number(amt) || 0; o.fee += Number(fee) || 0;
+    rows.push([r.s, r.e, r.s === r.e ? 'day' : 'period', ch, code, r.code, qty, '', 'upload', ctx.uploadId, amt, fee]);
+  });
+  if (outside) ctx.warnings.push('교체 기간(' + s + '~' + e + ') 밖의 레코드 ' + outside + '건은 반영하지 않았습니다');
+  var hk = Object.keys(held);
+  if (hk.length) ctx.warnings.push('거래처매핑에 없는(또는 ERP 채널이 아닌 채널로 매핑된) 거래처 ' + hk.map(function (k) { return k + ' ' + held[k] + '건'; }).join(', ') + '은 반영을 보류했습니다 — 업로드 미리보기에서 채널을 고르거나 거래처매핑 탭을 확인하세요');
+  var def = OFF_TABS.sales, sheet = _offSheet(ctx.ss, 'sales');
+  var res = _offReplaceRows(sheet, def, _offReadRows(sheet, def), function (r) {
+    return !(erp[r[3]] && r[0] >= s && r[1] <= e);
+  }, rows);
+  ctx.applied.sales = rows.length;
+  ctx.applied.salesRemoved = res.removed;
+  ctx.applied.byChannel = byCh;
+  // 업로드로그 channel_id = 교체한 채널 전부(판매가 없던 채널도 그 기간이 덮였다 — 데이터 현황이 빈 날로 세지 않게)
+  ctx.channels = Object.keys(erp).sort(function (a, b) { return rank[a] - rank[b]; });
+  ctx.storeChannel = {};
+  (rec.stores || []).forEach(function (st) {
+    var code = String(st.code || '').trim(), cu = cust[code];
+    if (!code || !cu || !erp[cu.channelId]) return;
+    ctx.storeChannel[code] = cu.channelId;
+    if (cu.name) st.name = cu.name;
+  });
+  return { start: s, end: e };
+}
+
+/* 거래처매핑 → { 거래처코드: { name, channelId } }. picks(미리보기에서 채널을 고른 새 거래처 {code, name, channelId})를 먼저 저장한다 —
+   채널은 코드체계 erp 채널만 받는다(포털 채널로 잘못 고르면 그 채널의 판매원장을 지우게 되므로 저장 전에 거절). */
+function _offErpCustomers(ctx, erp, picks) {
+  var def = OFF_TABS.customerMap, sheet = _offSheet(ctx.ss, 'customerMap');
+  var rows = _offReadRows(sheet, def), prev = rows.length, idx = {};
+  rows.forEach(function (r) { if (r[0]) idx[r[0]] = r; });
+  var clean = picks.map(function (p) {
+    var code = String(p.code == null ? '' : p.code).trim(), ch = String(p.channelId || '').trim();
+    if (!code) throw new Error('채널을 고른 거래처의 거래처코드가 비었습니다.');
+    if (!erp[ch]) throw new Error('거래처 ' + code + '의 채널은 ERP 채널(코드체계 erp)이어야 합니다: ' + (ch || '(빈칸)'));
+    return { code: code, name: String(p.name || '').trim() || code, channelId: ch };
+  });
+  clean.forEach(function (p) {
+    var row = idx[p.code];
+    if (!row) { row = [p.code, p.name, '', '']; rows.push(row); idx[p.code] = row; }
+    row[2] = p.channelId;
+    row[3] = ('업로드 미리보기에서 지정 ' + ctx.today + ' ' + ctx.email).trim();
+  });
+  if (clean.length) _offWriteAll(sheet, def, rows, prev);
+  ctx.applied.customersAdded = clean.length;
+  var out = {};
+  rows.forEach(function (r) { if (r[0]) out[r[0]] = { name: r[1], channelId: r[2] }; });
+  return out;
 }
 
 // B. 스냅샷형 — 재고_채널일별은 (기준일, 채널) 교체, 재고_점포최신은 더 최신일 때만 채널 통째 교체

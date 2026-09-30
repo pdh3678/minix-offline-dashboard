@@ -51,6 +51,15 @@
       sig: ['업태명', '점포코드', '상품코드', '상품명'], needDateCols: true,
       cols: { biz: '업태명', store: '점포코드', storeName: '점포명', code: '상품코드', name: '상품명' }
     },
+    /* ERP '백화점, 폐쇄몰, 렌탈 매출이익리스트' — 2줄 헤더(1행 그룹명, 2행 열 이름). 우리 창고에서 고객에게 직접 출고한 기록.
+       channelId는 채널이 아니라 코드체계(erp) — split 'customer': 레코드의 거래처코드(점포코드 자리)로 GAS가 거래처매핑에서 채널을 정한다.
+       onlyUsedCols — 주문자·수취인·연락처·주소·송장번호 열이 있는 파일이라 읽자마자 cols 열만 남긴다(dropUnusedColumns) */
+    ERP_SALES_PROFIT: {
+      label: 'ERP 매출이익리스트(백화점·폐쇄몰·렌탈)', channelId: 'erp', kind: 'period', split: 'customer', onlyUsedCols: true,
+      sig: ['날짜', '거래처코드', '거래처명', '상품코드', '카테고리', '수불구분', '수량', '금액', '수수료'],
+      cols: { date: '날짜', cust: '거래처코드', custName: '거래처명', brand: '브랜드', code: '상품코드', name: '기본상품명',
+        cat: '카테고리', gubun: '수불구분', qty: '수량', amt: '금액', fee: '수수료' }
+    },
     // 트레이더스가 합쳐진 SKU별 합계 파일 — 판별은 하되 반영하지 않는다(blocked). 점포별 일별 매출을 쓴다
     EMART_DAILY_SALES: {
       label: '이마트 일별 매출(합계)', channelId: 'emart', kind: 'period',
@@ -60,7 +69,7 @@
     }
   };
   // 점포별 일별 매출(업태명·점포코드 포함)도 일별 매출(합계)의 시그니처를 만족하므로 반드시 그보다 앞에 둔다
-  const TYPE_ORDER = ['HIMART_SALES_STOCK', 'ETLAND_SALES', 'ETLAND_STOCK', 'EMART_STOCK', 'EMART_DAILY_SALES_STORE', 'EMART_DAILY_SALES'];
+  const TYPE_ORDER = ['HIMART_SALES_STOCK', 'ETLAND_SALES', 'ETLAND_STOCK', 'EMART_STOCK', 'EMART_DAILY_SALES_STORE', 'ERP_SALES_PROFIT', 'EMART_DAILY_SALES'];
   const OPTIONAL_COLS = { gubun: true, ym: true, region: true, branch: true, reserved: true, week: true };
 
   // ── 값 정규화 ──
@@ -117,6 +126,22 @@
       re.lastIndex = m.index + 1;
     }
     return '';
+  }
+
+  /* 파일명의 기간 — 날짜가 둘 이상이면 처음 두 개를 시작~끝으로(ERP 'YYYY-MM-DD~YYYY-MM-DD', '_YYYYMMDD_YYYYMMDD_').
+     둘 다 올바른 날짜이고 시작 ≤ 끝일 때만 → { start, end } | null */
+  function periodFromFileName(name) {
+    const re = /(?:^|\D)(20\d{2})([-_.]?)(0[1-9]|1[0-2])\2(0[1-9]|[12]\d|3[01])(?!\d)/g, found = [];
+    let m;
+    while ((m = re.exec(String(name || ''))) !== null && found.length < 2) {
+      if (validYmd(+m[1], +m[3], +m[4])) found.push(ymd(+m[1], +m[3], +m[4]));
+      re.lastIndex = m.index + 1;
+    }
+    return found.length === 2 && found[0] <= found[1] ? { start: found[0], end: found[1] } : null;
+  }
+  // ERP 거래처명 → 점포명 기본값: 법인 표기((주)·㈜·주식회사·(유)·유한회사)와 옛 이름('(구 : …)')을 뺀다. 거래처매핑에 있는 거래처는 그 이름을 쓴다
+  function cleanCustomerName(s) {
+    return String(s == null ? '' : s).replace(/\(주\)|㈜|주식회사|\(유\)|유한회사/g, '').replace(/\(\s*구\s*[:：][^)]*\)/g, '').replace(/\s+/g, ' ').trim();
   }
 
   // 이마트 일별 매출의 날짜 열 헤더('9월 1일') → {m, d} | null
@@ -202,6 +227,7 @@
     if (found.type === 'EMART_DAILY_SALES_STORE') parseEmartDailyStore(res, hdr, data, col, opts, num, bad);
     else if (found.type === 'EMART_DAILY_SALES') parseEmartDaily(res, hdr, data, col, opts, num, bad);
     else if (found.type === 'ETLAND_SALES') parseEtlandSales(res, data, cell, num, bad);
+    else if (found.type === 'ERP_SALES_PROFIT') parseErpSales(res, data, cell, num, bad, opts.fileName);
     else parseSnapshot(res, found.type, data, cell, num, bad);
 
     if (bad.num) res.warnings.push('숫자가 아닌 값 ' + bad.num + '개를 0으로 읽었습니다.');
@@ -315,6 +341,57 @@
     if (other.length) res.warnings.push('구분에 "판매(계약)" 외의 값이 있습니다: ' + other.map(g => g + ' ' + gubun[g] + '건').join(', ') + ' — 수량은 그대로 합산했습니다.');
   }
 
+  /* ERP 매출이익리스트 — 날짜('날짜' 열 = 매출일, 주문일 아님) × 거래처 × 상품코드로 수량·금액·수수료를 합산한 day 레코드.
+     거래처코드를 점포코드(store) 자리에 싣고, 채널은 GAS가 거래처매핑으로 정한다. 수불구분 매출출고(+)·매출반품·매출취소(파일의 음수 그대로).
+     무상 동봉(카테고리 '구성품'이면서 금액 0 — 반품·취소 포함)은 판매로 저장하지 않고 수량만 센다. 합산 결과가 수량·금액·수수료 모두 0이면 저장하지 않는다.
+     교체 기간 기본값 = 파일명의 기간, 없으면 파일 안의 최소~최대 날짜.
+     summary.byCust[] = 거래처별 { code, name, rows(원본 행), qty·amount·fee(무상 동봉 제외 뒤), excludedQty }(원본 순서)
+     summary.brands[] = 브랜드별 { brand, rows, qty, amount, minix }(무상 동봉 제외 뒤) · summary.excluded = { rows, qty }
+     summary.products = { 상품코드: { brand, category } }(코드 매핑 제안용) · summary.fileAmount = 파일 전체 금액 합 · summary.dataPeriod */
+  function parseErpSales(res, data, cell, num, bad, fileName) {
+    const agg = {}, order = [], custs = {}, custOrder = [], brands = {}, brandOrder = [], gubun = {};
+    const ex = { rows: 0, qty: 0 };
+    const txt = (r, k) => String(cell(r, k) == null ? '' : cell(r, k)).trim();
+    let min = '', max = '', fileAmount = 0;
+    res.summary.products = {};
+    data.forEach(r => {
+      const date = toDate(cell(r, 'date')), code = toCode(cell(r, 'code')), cust = toCode(cell(r, 'cust'));
+      const g = txt(r, 'gubun') || '(빈칸)';
+      gubun[g] = (gubun[g] || 0) + 1;
+      if (!date || !code || !cust) { bad.skipped++; return; }
+      const qty = num(cell(r, 'qty')), amt = num(cell(r, 'amt')), fee = num(cell(r, 'fee'));
+      const cat = txt(r, 'cat'), brand = txt(r, 'brand');
+      fileAmount += amt;
+      if (!min || date < min) min = date;
+      if (!max || date > max) max = date;
+      let c = custs[cust];
+      if (!c) { c = custs[cust] = { code: cust, name: cleanCustomerName(cell(r, 'custName')), rows: 0, qty: 0, amount: 0, fee: 0, excludedQty: 0 }; custOrder.push(cust); }
+      c.rows++;
+      if (cat === '구성품' && amt === 0) { ex.rows++; ex.qty += qty; c.excludedQty += qty; return; }
+      addName(res, code, cell(r, 'name'));
+      if (!res.summary.products[code]) res.summary.products[code] = { brand, category: cat };
+      c.qty += qty; c.amount += amt; c.fee += fee;
+      let b = brands[brand];
+      if (!b) { b = brands[brand] = { brand: brand || '(빈칸)', rows: 0, qty: 0, amount: 0, minix: /미닉스|minix/i.test(brand) }; brandOrder.push(brand); }
+      b.rows++; b.qty += qty; b.amount += amt;
+      const k = date + '|' + cust + '|' + code;
+      let a = agg[k];
+      if (!a) { a = agg[k] = { qty: 0, amt: 0, fee: 0 }; order.push(k); }
+      a.qty += qty; a.amt += amt; a.fee += fee;
+    });
+    order.sort().forEach(k => {
+      const a = agg[k], p = k.split('|');
+      if (a.qty || a.amt || a.fee) res.records.sales.push({ s: p[0], e: p[0], store: p[1], code: p[2], qty: a.qty, inst: '', amt: a.amt, fee: a.fee });
+    });
+    custOrder.forEach(k => res.records.stores.push({ code: k, name: custs[k].name, region: '' }));
+    const fp = periodFromFileName(fileName);
+    res.period = fp || (min ? { start: min, end: max } : null);
+    res.periodFrom = fp ? 'file' : 'data';
+    Object.assign(res.summary, { gubun, excluded: ex, fileAmount, dataPeriod: min ? { start: min, end: max } : null,
+      byCust: custOrder.map(k => custs[k]), brands: brandOrder.map(k => brands[k]) });
+    if (fp && min && (min < fp.start || max > fp.end)) res.warnings.push('파일 안 날짜(' + min + '~' + max + ')가 파일명의 기간(' + fp.start + '~' + fp.end + ')을 벗어납니다 — 교체 기간 밖의 행은 반영되지 않습니다.');
+  }
+
   // 스냅샷형(이마트 재고 / 전자랜드 현재고 / 하이마트) — 점포 재고 + 채널 합계, 하이마트는 누적 스냅샷도
   function parseSnapshot(res, type, data, cell, num, bad) {
     const byKey = {}, order = [], seenStore = {}, himart = {};
@@ -393,6 +470,8 @@
       meta.baseDate = edits.baseDate || res.baseDate || '';
       if (res.kind === 'snapshot' && (res.stockOffset != null || res.baseDateChosen)) meta.fileDate = res.fileDate || '';
     }
+    // ERP 매출이익리스트 — 미리보기에서 채널을 고른 새 거래처({code, name, channelId}) → GAS가 거래처매핑에 저장하고 그 채널로 반영
+    if (res.split === 'customer') meta.customers = edits.customers || [];
     const r = res.records;
     return {
       meta,
@@ -401,6 +480,17 @@
         himart: r.himart, stores: r.stores, names: r.names
       }
     };
+  }
+
+  /* 개인정보 차단 — 유형에 onlyUsedCols가 있으면(ERP 매출이익리스트: 주문자·수취인·연락처·주소·송장번호 열) 그 유형의 cols 열만 남긴
+     새 2차원 배열 [헤더, ...데이터 행]을 돌려준다(헤더 위 그룹명 행도 버린다). 파일을 읽자마자 부르면 원본 행은 남지 않고
+     판별·파싱·미리보기·전송은 이 배열만 본다. 판별되지 않거나 다른 유형이면 rows 그대로 */
+  function dropUnusedColumns(rows) {
+    const found = detect(rows);
+    if (!found || !TYPES[found.type].onlyUsedCols) return rows;
+    const t = TYPES[found.type], idx = headerIndex(rows[found.headerIndex]);
+    const keep = Object.keys(t.cols).map(k => t.cols[k]).filter(h => h in idx), at = keep.map(h => idx[h]);
+    return [keep].concat(rows.slice(found.headerIndex + 1).map(r => at.map(c => (r && r[c] !== undefined ? r[c] : ''))));
   }
 
   /* SheetJS 워크북 → 2차원 배열(유형이 판별되는 첫 시트, 없으면 첫 시트).
@@ -435,7 +525,7 @@
 
   return {
     TYPES, TYPE_ORDER, HEADER_SCAN_ROWS,
-    detect, parseRows, toUploadPayload, readWorkbookRows,
-    dateFromFileName, addDays, toNum, toCode, toDate, normHeader
+    detect, parseRows, toUploadPayload, readWorkbookRows, dropUnusedColumns,
+    dateFromFileName, periodFromFileName, cleanCustomerName, addDays, toNum, toCode, toDate, normHeader
   };
 });

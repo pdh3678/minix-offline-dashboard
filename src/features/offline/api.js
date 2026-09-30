@@ -55,7 +55,9 @@ async function _offlineLoadMasters(force){
   return OFFLINE_MASTERS;
 }
 function _offlineResolver(){return OfflineResolver.createResolver(OFFLINE_MASTERS||{});}
+// 채널 이름 — 채널이 아닌 코드체계(erp: 코드매핑·미매칭코드·ERP 업로드 파일이 이 이름으로 쌓인다)면 그 표시 이름(마스터 codeSystems)
 function _offlineChannelName(id){
-  const c=((OFFLINE_MASTERS&&OFFLINE_MASTERS.channels)||[]).find(x=>x.channelId===id);
+  const m=OFFLINE_MASTERS||{};
+  const c=(m.channels||[]).find(x=>x.channelId===id)||(m.codeSystems||[]).find(x=>x.id===id);
   return c?c.name:id;
 }

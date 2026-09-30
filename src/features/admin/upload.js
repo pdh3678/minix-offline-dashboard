@@ -57,7 +57,8 @@ function _upAddFiles(list){
 async function _upReadFile(f,file){
   try{
     const [XLSX,buf]=await Promise.all([_loadSheetJS(),file.arrayBuffer()]);
-    f.rows=OfflineParsers.readWorkbookRows(XLSX,new Uint8Array(buf)).rows;
+    // 개인정보 열이 있는 양식(ERP 매출이익리스트)은 쓰는 열만 남기고 원본 행은 버린다 — 이후 미리보기·전송은 이 배열만 본다
+    f.rows=OfflineParsers.dropUnusedColumns(OfflineParsers.readWorkbookRows(XLSX,new Uint8Array(buf)).rows);
     _upParse(f);
   }catch(e){
     f.status='error';f.error='파일을 읽지 못했습니다: '+e.message;
@@ -105,6 +106,11 @@ function _upPlan(f){
     const s=f.edits.replaceStart||(p.period&&p.period.start)||'',e=f.edits.replaceEnd||(p.period&&p.period.end)||'';
     if(!s||!e)return{error:'교체 기간을 정하세요.'};
     if(s>e)return{error:'교체 기간의 시작이 끝보다 늦습니다.'};
+    if(p.split==='customer'){
+      if(!OFFLINE_MASTERS)return{error:'거래처매핑을 불러오는 중입니다 — 잠시 후 다시 누르세요.'};
+      const miss=_upErpCusts(f).filter(c=>!c.channelId);
+      if(miss.length)return{error:`채널을 정하지 않은 거래처 ${miss.length}곳이 있습니다(${miss.map(c=>c.name||c.code).join(', ')}) — 아래 거래처 표에서 채널을 고르세요.`};
+    }
     return{replaceStart:s,replaceEnd:e};
   }
   const b=f.edits.baseDate||p.baseDate;
@@ -114,7 +120,50 @@ function _upPlan(f){
 function _upUnmatched(f){
   const p=f.parse;
   if(!p||!p.ok||!OFFLINE_MASTERS)return null;
-  return _offlineResolver().unmatched(p.channelId,p.codes).map(code=>({channelId:p.channelId,code,name:p.records.names[code]||''}));
+  // ERP 매출이익리스트는 브랜드·카테고리(본품/구성품)를 같이 넘긴다 — 코드 매핑 제안(필터·기타)이 쓴다
+  const info=(p.summary&&p.summary.products)||{};
+  return _offlineResolver().unmatched(p.channelId,p.codes).map(code=>Object.assign({channelId:p.channelId,code,name:p.records.names[code]||''},
+    info[code]?{brand:info[code].brand,cat:info[code].category}:{}));
+}
+
+/* ERP 매출이익리스트(split 'customer') — 거래처 → 채널. 거래처매핑(마스터 customers)에 ERP 채널로 있으면 그 채널, 없으면 미리보기에서 고른다
+   (f.edits.cust{거래처코드: channel_id | '-'(이번엔 반영 안 함)}). 고른 채널은 반영 때 GAS가 거래처매핑에 저장한다. 반영 때는 서버가 같은 규칙으로 정한다 */
+function _upErpChannels(p){return ((OFFLINE_MASTERS&&OFFLINE_MASTERS.channels)||[]).filter(c=>c.codeSystem===p.channelId).sort((a,b)=>(Number(a.order)||99)-(Number(b.order)||99));}
+function _upErpCusts(f){
+  const p=f.parse,erp=_upErpChannels(p).map(c=>c.channelId),picks=f.edits.cust||{};
+  const known={};((OFFLINE_MASTERS&&OFFLINE_MASTERS.customers)||[]).forEach(c=>{known[c.code]=c;});
+  return (p.summary.byCust||[]).map(c=>{
+    const k=known[c.code],mapped=k&&erp.indexOf(k.channelId)>=0;
+    return Object.assign({},c,{name:mapped&&k.name?k.name:c.name,mapped:!!mapped,channelId:mapped?k.channelId:(picks[c.code]||'')});
+  });
+}
+function _upSetCust(id,code,v){const f=_upFile(id);(f.edits.cust=f.edits.cust||{})[code]=v;f.result=null;f.error='';if(f.status==='done')f.status='ready';_upRender();}
+// 반영 요청에 실을 새 거래처 — 미리보기에서 채널을 고른 것만('-' = 반영 안 함은 싣지 않는다 → 서버가 보류)
+function _upErpPicks(f){return f.parse.split!=='customer'?[]:_upErpCusts(f).filter(c=>!c.mapped&&c.channelId&&c.channelId!=='-').map(c=>({code:c.code,name:c.name,channelId:c.channelId}));}
+function _upErpHtml(f,p){
+  if(p.split!=='customer'||!p.summary.byCust)return '';
+  if(!OFFLINE_MASTERS)return '<div class="up-stats"><span class="off-muted">거래처매핑을 불러오는 중…</span></div>';
+  const won=v=>'₩'+Math.round(v||0).toLocaleString('ko-KR'),n=v=>Math.round(v||0).toLocaleString('ko-KR');
+  const chs=_upErpChannels(p),custs=_upErpCusts(f),busy=f.status==='applying'||_UP.busyAll;
+  const s=p.summary,ex=s.excluded||{rows:0,qty:0};
+  const gub=Object.keys(s.gubun||{}).map(g=>_escHtml(g)+' <b>'+n(s.gubun[g])+'</b>').join(' · ');
+  const custRows=custs.map(c=>{
+    const sel=c.mapped?`<span class="up-chip ready">${_escHtml(_offlineChannelName(c.channelId))}</span>`
+      :`<select class="f-sel${c.channelId?'':' up-need'}" ${busy?'disabled':''} onchange="_upSetCust(${f.id},'${_escAttr(c.code)}',this.value)"><option value="">— 채널 선택 —</option>${chs.map(ch=>`<option value="${_escAttr(ch.channelId)}"${c.channelId===ch.channelId?' selected':''}>${_escHtml(ch.name)}</option>`).join('')}<option value="-"${c.channelId==='-'?' selected':''}>이번엔 반영 안 함</option></select> <span class="off-miss">거래처매핑에 없음</span>`;
+    return `<tr><td class="mp-code">${_escHtml(c.code)}</td><td>${_escHtml(c.name)}</td><td>${sel}</td><td class="num-col">${n(c.rows)}</td><td class="num-col">${n(c.qty)}</td><td class="num-col">${won(c.amount)}</td><td class="num-col">${c.excludedQty?n(c.excludedQty):'—'}</td></tr>`;
+  }).join('');
+  const byCh={};custs.forEach(c=>{if(!c.channelId||c.channelId==='-')return;const o=byCh[c.channelId]||(byCh[c.channelId]={custs:0,qty:0,amount:0,ex:0});o.custs++;o.qty+=c.qty;o.amount+=c.amount;o.ex+=c.excludedQty;});
+  const chRows=chs.map(ch=>{const o=byCh[ch.channelId]||{custs:0,qty:0,amount:0,ex:0};
+    return `<tr><td>${_escHtml(ch.name)} <span class="off-muted">${_escHtml(ch.type||'')}</span></td><td class="num-col">${o.custs}</td><td class="num-col">${n(o.qty)}</td><td class="num-col">${won(o.amount)}</td><td class="num-col">${o.ex?n(o.ex):'—'}</td></tr>`;}).join('');
+  const brRows=(s.brands||[]).map(b=>`<tr${b.minix?'':' class="up-other"'}><td>${_escHtml(b.brand)}${b.minix?'':' <span class="up-chip applying">미닉스 외</span>'}</td><td class="num-col">${n(b.qty)}</td><td class="num-col">${won(b.amount)}</td></tr>`).join('');
+  return `<div class="up-stats">파일 금액 합계 <b>${won(s.fileAmount)}</b> · 수불구분 ${gub}${s.dataPeriod?` · 파일 안 날짜 ${_escHtml(s.dataPeriod.start)} ~ ${_escHtml(s.dataPeriod.end)}`:''}<br>
+      무상 동봉 제외(카테고리 구성품 · 금액 0 — 판매로 저장하지 않음) <b>${n(ex.rows)}</b>행 · 수량 <b>${n(ex.qty)}</b></div>
+    <div class="up-erp"><div><div class="f-lbl">거래처 → 채널 <span class="off-muted">거래처매핑 · 없는 거래처는 채널을 고르면 반영 때 저장</span></div>
+      <div class="tbl-wrap"><table class="cm-tbl"><thead><tr><th>거래처코드</th><th>거래처(점포)</th><th>채널</th><th class="num-col">원본 행</th><th class="num-col">판매 수량</th><th class="num-col">금액</th><th class="num-col">무상 동봉 제외</th></tr></thead><tbody>${custRows}</tbody></table></div></div>
+    <div class="up-erp-2"><div><div class="f-lbl">채널별 <span class="off-muted">교체 기간 동안 이 채널들의 판매원장을 바꾼다</span></div>
+      <div class="tbl-wrap"><table class="cm-tbl"><thead><tr><th>채널</th><th class="num-col">거래처</th><th class="num-col">수량</th><th class="num-col">금액</th><th class="num-col">무상 동봉 제외</th></tr></thead><tbody>${chRows}</tbody></table></div></div>
+      <div><div class="f-lbl">브랜드별 <span class="off-muted">무상 동봉 제외 뒤</span></div>
+      <div class="tbl-wrap"><table class="cm-tbl"><thead><tr><th>브랜드</th><th class="num-col">수량</th><th class="num-col">금액</th></tr></thead><tbody>${brRows}</tbody></table></div></div></div></div>`;
 }
 
 async function _upApply(id,quiet){
@@ -124,7 +173,7 @@ async function _upApply(id,quiet){
   if(plan.error){f.error=plan.error;_upRender();return false;}
   f.status='applying';f.error='';f.result=null;_upRender();
   try{
-    const payload=OfflineParsers.toUploadPayload(f.parse,Object.assign({fileName:f.name},plan));
+    const payload=OfflineParsers.toUploadPayload(f.parse,Object.assign({fileName:f.name},plan,{customers:_upErpPicks(f)}));
     f.result=await _offlineCall('offline_upload',payload);
     f.status='done';
   }catch(e){
@@ -210,7 +259,7 @@ function _upRender(){
   const nReady=_upApplyOrder().length;
   host.innerHTML=`
   <div class="card"><div class="card-hd">데이터 현황<span class="card-hd-r">채널별 마지막 기준일 · 이번 달 빈 날짜(1일~어제, 업로드로그 기준)</span></div>${_upStatusHtml()}</div>
-  <div class="card"><div class="card-hd">파일 업로드<span class="card-hd-r">하이마트·전자랜드·이마트 협력사 포털 엑셀을 받은 그대로</span></div>
+  <div class="card"><div class="card-hd">파일 업로드<span class="card-hd-r">하이마트·전자랜드·이마트 협력사 포털 엑셀 · ERP 매출이익리스트(백화점·폐쇄몰·렌탈)를 받은 그대로</span></div>
     <label class="up-drop" id="upDrop" ondragover="_upDragOver(event)" ondragleave="_upDragLeave()" ondrop="_upDrop(event)">
       <input type="file" id="upInput" multiple accept=".xlsx,.xls,.csv" onchange="_upPick(this)">
       <span class="up-drop-main">여기로 파일을 끌어다 놓거나 눌러서 선택</span>
@@ -266,7 +315,7 @@ function _upCardHtml(f){
     dateCtl=`<span class="f-lbl">교체 기간</span>
       <input type="date" class="f-inp" value="${s}" ${busy?'disabled':''} onchange="_upSetRange(${f.id},'replaceStart',this.value)">~
       <input type="date" class="f-inp" value="${e}" ${busy?'disabled':''} onchange="_upSetRange(${f.id},'replaceEnd',this.value)">
-      <span class="off-muted">기본값 = 파일 안의 최소~최대 날짜</span>`;
+      <span class="off-muted">${p.periodFrom==='file'?'기본값 = 파일명의 기간':'기본값 = 파일 안의 최소~최대 날짜'}</span>`;
     if(p.type==='EMART_DAILY_SALES')dateCtl+=`<span class="f-lbl">연도</span><input type="number" class="f-inp up-year" value="${p.year}" ${busy?'disabled':''} onchange="_upSetYear(${f.id},this.value)">`;
   }else{
     const b=f.edits.baseDate||p.baseDate;
@@ -285,7 +334,7 @@ function _upCardHtml(f){
     <div class="up-card-hd"><span class="up-fname">${_escHtml(f.name)}</span>${chip}<span class="off-muted">${_escHtml(_offlineChannelName(p.channelId))}</span>${acts}</div>
     <div class="up-row">${typeSel}${dateCtl}</div>
     <div class="up-stats">헤더 <b>${p.headerRow}</b>행 · 원본 <b>${p.rawRowCount}</b>행 · 반영 예정 ${planned} · 점포 <b>${p.summary.storeCount}</b> · 원본코드 <b>${p.summary.codeCount}</b>종${gubun}</div>
-    ${_upSplitHtml(p)}
+    ${_upSplitHtml(p)}${_upErpHtml(f,p)}
     <div class="up-row">${umHtml}</div>
     ${p.warnings.length?`<ul class="up-warn">${p.warnings.map(w=>'<li>'+_escHtml(w)+'</li>').join('')}</ul>`:''}
     ${f.error?`<div class="up-err">${_escHtml(f.error)}</div>`:(plan.error&&(p.kind==='period'||plan.blocked)?`<div class="up-err">${plan.blocked?'⛔ ':''}${_escHtml(plan.error)}</div>`:'')}
@@ -302,8 +351,9 @@ function _upResultHtml(r){
   if(a.himartSnap!=null)parts.push('누적스냅샷 '+a.himartSnap);
   if(a.storesAdded)parts.push('새 점포 '+a.storesAdded);
   if(a.storesMoved)parts.push('채널 옮긴 점포 '+a.storesMoved);
-  // 채널별(한 파일에 여러 채널 — 이마트·트레이더스)
-  if(a.byChannel)parts.push(Object.keys(a.byChannel).map(c=>{const b=a.byChannel[c];return _offlineChannelName(c)+(b.rows!=null?' '+b.rows+'행·판매 '+b.qty:' 점포 '+b.stores+'·재고 '+b.stock);}).join(' / '));
+  if(a.customersAdded)parts.push('거래처매핑에 추가 '+a.customersAdded);
+  // 채널별(한 파일에 여러 채널 — 이마트·트레이더스, ERP 매출이익리스트는 금액도)
+  if(a.byChannel)parts.push(Object.keys(a.byChannel).map(c=>{const b=a.byChannel[c];return _offlineChannelName(c)+(b.rows!=null?' '+b.rows+'행·판매 '+b.qty+(b.amount!=null?'·금액 ₩'+Math.round(b.amount).toLocaleString('ko-KR'):''):' 점포 '+b.stores+'·재고 '+b.stock);}).join(' / '));
   let range=rr.start?rr.start+' ~ '+rr.end:(rr.baseDate||'');
   if(rr.himart)range+=' · 판매 재계산: '+rr.himart.recomputed.map(x=>x.date+'('+(x.unit==='day'?'day':x.start+'~ period')+')').join(', ');
   return `<div class="up-result">✓ 반영 완료 — ${_escHtml(parts.join(' · '))}<br>교체 범위: ${_escHtml(range)} · 미매칭 ${r.unmatched?r.unmatched.length:0}개</div>`+

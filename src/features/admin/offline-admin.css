@@ -45,6 +45,12 @@
 .up-err{margin-top:8px;font-size:12px;color:#B91C1C;font-weight:600;white-space:pre-wrap}
 .up-result{margin-top:8px;font-size:12px;color:var(--ok);font-weight:600;line-height:1.7}
 .up-panel{margin-top:10px;border-top:1px dashed var(--border);padding-top:10px}
+/* ERP 매출이익리스트 미리보기 — 거래처 표 + (채널별 | 브랜드별) */
+.up-erp{margin-top:10px;display:flex;flex-direction:column;gap:10px}
+.up-erp-2{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:10px}
+.up-erp .cm-tbl td,.up-erp .cm-tbl th{font-size:12px}
+.up-erp .f-sel{width:auto;padding:4px 28px 4px 8px;font-size:12px}
+.up-erp tr.up-other td{background:var(--warn-bg)}
 .up-log td{font-size:12px}
 .up-log td.up-log-warn{white-space:normal;max-width:360px;color:var(--warn)}
 
