@@ -44,13 +44,17 @@ function _cmRender(){
 
 function _cmSetTab(t){_CM.tab=t;_cmRender();}
 
-// 매핑의 주인 채널만(코드체계채널 = 자기 자신) — 트레이더스처럼 다른 채널 매핑을 빌려 쓰는 채널은 따로 보이지 않는다
-function _cmOwnChannels(){return ((OFFLINE_MASTERS&&OFFLINE_MASTERS.channels)||[]).filter(c=>!c.codeSystem||c.codeSystem===c.channelId);}
+// 매핑의 주인 채널만(코드체계채널 = 자기 자신) — 트레이더스처럼 다른 채널 매핑을 빌려 쓰는 채널은 따로 보이지 않는다.
+// 채널이 아닌 코드체계(ERP (백화점·폐쇄몰·렌탈 공통))는 그 이름의 그룹 하나로
+function _cmOwnChannels(){
+  const m=OFFLINE_MASTERS||{};
+  return (m.channels||[]).filter(c=>!c.codeSystem||c.codeSystem===c.channelId).concat((m.codeSystems||[]).map(c=>({channelId:c.id,name:c.name})));
+}
 function _cmSharedNoteHtml(){
-  const chs=(OFFLINE_MASTERS&&OFFLINE_MASTERS.channels)||[];
-  const shared=chs.filter(c=>c.codeSystem&&c.codeSystem!==c.channelId);
-  if(!shared.length)return '';
-  return `<div class="off-muted tg-help" style="margin:0 0 8px">${shared.map(c=>`<b>${_escHtml(c.name)}</b>는 <b>${_escHtml(_offlineChannelName(c.codeSystem))}</b>`).join(', ')} 코드 매핑을 그대로 씁니다 — ${_escHtml(_offlineChannelName(shared[0].codeSystem))} 매핑 하나가 두 채널에 같이 적용되고, 미매칭 코드도 ${_escHtml(_offlineChannelName(shared[0].codeSystem))} 이름으로 한 번만 뜹니다.</div>`;
+  const chs=(OFFLINE_MASTERS&&OFFLINE_MASTERS.channels)||[],by={},order=[];
+  chs.forEach(c=>{if(!c.codeSystem||c.codeSystem===c.channelId)return;if(!by[c.codeSystem]){by[c.codeSystem]=[];order.push(c.codeSystem);}by[c.codeSystem].push(c.name);});
+  if(!order.length)return '';
+  return `<div class="off-muted tg-help" style="margin:0 0 8px">${order.map(k=>`<b>${_escHtml(by[k].join('·'))}</b>는 <b>${_escHtml(_offlineChannelName(k))}</b> 코드 매핑을 그대로 씁니다`).join(' · ')} — 매핑 하나가 그 채널들에 같이 적용되고, 미매칭 코드도 그 이름으로 한 번만 뜹니다.</div>`;
 }
 
 function _cmFiltersHtml(){

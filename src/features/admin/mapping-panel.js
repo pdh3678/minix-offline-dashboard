@@ -29,6 +29,30 @@ function _mpSkuName(id){
   return s?s.name:id;
 }
 
+/* 대분류 제안(필터·기타) — SKU 제안이 없는 코드 중 브랜드를 아는 것(ERP 업로드 카드)이나 채널이 아닌 코드체계(ERP 공통) 코드에만.
+   포털 코드는 상품명에 브랜드가 빠지는 일이 많아 '미닉스 외'로 잘못 볼 수 있어서 건너뛴다.
+   → { category, line, model(카탈로그에 있을 때만), option(기타 = 품명), reason, skuId(바로 쓸 수 있는 기존 SKU) } | null */
+function _mpCatSugg(it){
+  const m=OFFLINE_MASTERS||{};
+  if(it.brand==null&&!(m.codeSystems||[]).some(c=>c.id===it.channelId))return null;
+  const c=OfflineResolver.suggestCategory(it);
+  const line=c&&PRODUCT_CATALOG.find(l=>l.key===c.line);
+  if(!line)return null;
+  const model=line.models.some(x=>x.label===c.model)?c.model:'';
+  const option=line.skuOptionHint?String(it.name||'').replace(/^\s*(\[[^\]]*\]\s*)+/,'').trim():'';
+  const skus=(m.skus||[]).filter(s=>s.active!=='N'&&s.line===line.key);
+  // 기존 SKU — 필터는 같은 모델의 SKU가 하나뿐일 때, 기타는 품명(옵션)이 같은 SKU
+  const same=line.skuOptionHint?skus.filter(s=>OfflineResolver.normName(s.option)===OfflineResolver.normName(option)):(model?skus.filter(s=>s.model===model):[]);
+  return {category:c.category,line:line.key,model,option,reason:c.reason,skuId:same.length===1?same[0].skuId:''};
+}
+function _mpCatSuggHtml(hostId,i,cs){
+  const act=cs.skuId?`<button type="button" class="mp-chip" onclick="_mpApplyCatSku('${hostId}',${i})">${_escHtml(_mpSkuName(cs.skuId))}</button>`
+    :`<button type="button" class="mp-chip" onclick="_mpOpenSuggSku('${hostId}',${i})">＋ ${_escHtml(cs.category)} SKU 만들기${cs.model&&!cs.option?' ('+_escHtml(cs.model)+')':''}</button>`;
+  return `<div class="mp-sugg">제안: 대분류 <b>${_escHtml(cs.category)}</b> — ${_escHtml(cs.reason)} ${act}</div>`;
+}
+function _mpApplyCatSku(hostId,i){const st=_MP[hostId],cs=_mpCatSugg(st.items[i]);if(!cs||!cs.skuId)return;const s=_mpItemSel(hostId,i);s.skuId=cs.skuId;s.checked=true;_mpRerender(hostId);}
+function _mpOpenSuggSku(hostId,i){const st=_MP[hostId],cs=_mpCatSugg(st.items[i]);if(cs)_mpOpenNewSku(hostId,i,{line:cs.line,model:cs.model,option:cs.option});}
+
 // 새 SKU 표준명 자동 생성 — "품목군 표시명 + 모델"(모델이 이미 품목군 이름으로 시작하면 모델만) + 옵션
 function _mpAutoName(lineKey,model,option){
   const line=PRODUCT_CATALOG.find(l=>l.key===lineKey);
@@ -49,8 +73,10 @@ function renderMappingPanel(hostId,items,opts){
     const k=_mpKey(it);
     const sel=st.sel[k]||(st.sel[k]={skuId:'',stockType:OfflineResolver.guessStockType(it.code,it.name),checked:false});
     const sugg=OfflineResolver.suggestSkus(masters,it.code,it.name)[0];
+    const cs=!sugg&&!sel.skuId?_mpCatSugg(it):null;
     const suggHtml=sugg&&sugg.skuId!==sel.skuId
-      ?`<div class="mp-sugg">제안(모델 ${_escHtml(sugg.model)}): <button type="button" class="mp-chip" onclick="_mpApplySugg('${hostId}',${i})">${_escHtml(_mpSkuName(sugg.skuId))}</button></div>`:'';
+      ?`<div class="mp-sugg">제안(${sugg.via==='name'?'같은 상품명':'모델 '+_escHtml(sugg.model)}): <button type="button" class="mp-chip" onclick="_mpApplySugg('${hostId}',${i})">${_escHtml(_mpSkuName(sugg.skuId))}</button></div>`
+      :cs?_mpCatSuggHtml(hostId,i,cs):'';
     return `<tr>
       ${O.showChannel?`<td>${_escHtml(_offlineChannelName(it.channelId))}</td>`:''}
       <td class="mp-code">${_escHtml(it.code)}</td>
@@ -113,11 +139,12 @@ async function _mpSave(hostId){
 }
 
 // ── 새 SKU 만들기 (품목군은 공유 상수 PRODUCT_CATALOG에서만) ──
-function _mpOpenNewSku(hostId,i){
+// preset = { line, model, option } — 대분류 제안(필터·기타)에서 열 때 미리 채운다
+function _mpOpenNewSku(hostId,i,preset){
   const st=_MP[hostId];
-  const it=i>=0?st.items[i]:null;
-  st.ns={forKey:it?_mpKey(it):null,forCode:it?it.code:'',line:PRODUCT_CATALOG[0].key,model:'',option:'',name:'',nameEdited:false};
-  st.ns.name=_mpAutoName(st.ns.line,'','');
+  const it=i>=0?st.items[i]:null,p=preset||{};
+  st.ns={forKey:it?_mpKey(it):null,forCode:it?it.code:'',line:p.line||PRODUCT_CATALOG[0].key,model:p.model||'',option:p.option||'',name:'',nameEdited:false};
+  st.ns.name=_mpAutoName(st.ns.line,st.ns.model,st.ns.option);
   _mpRerender(hostId);
 }
 // 옵션 필수 품목군(기타 — 품명을 옵션에 적는다): 카탈로그의 skuOptionHint가 곧 안내 문구

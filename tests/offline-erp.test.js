@@ -11,6 +11,8 @@
      [4] 반영 — 거래처매핑으로 채널, 없는 거래처 보류, 미리보기에서 고른 거래처 저장(포털 채널은 거절), ERP 채널 전부 기간 교체(판매 없던 채널 정리),
          포털 채널·교체 기간 밖 불변, 멱등, 로그 채널 5개·데이터 현황, 시트 어디에도 개인정보 없음
      [5] 화면 — 거래처 → 채널 표(없는 거래처는 ERP 채널만 선택), 채널별·브랜드별(미닉스 외 강조)·무상 동봉 제외, 안 고르면 반영 막음, 요청에 고른 거래처만
+     [6] 코드 매핑 — 상품명의 모델명 · '[이마트]' 접두어를 뺀 상품명으로 기존 SKU 제안, 필터 구성품 → 필터(모델 없는 필터는 새 모델 필요 안내),
+         미닉스 외 브랜드 → 기타(새 SKU 옵션 = 상품명), 포털 코드는 대분류 제안 없음, 코드 매핑 화면의 ERP 공통 그룹·안내
 
    실행: node tests/offline-erp.test.js  (또는 node tests/run-all.js) */
 const path = require('path');
@@ -261,6 +263,7 @@ async function main() {
   }
 
   await uploadUi();
+  mappingUi();
 
   console.log('\n' + '─'.repeat(50));
   console.log('통과 ' + pass + ' / 실패 ' + fail);
@@ -335,3 +338,65 @@ async function uploadUi() {
 }
 
 main();
+
+/* ── 코드 매핑 — ERP 공통 그룹 · 자동 제안(모델명·접두어 무시·필터·기타) ── */
+function mappingUi() {
+  console.log('\n[6] 코드 매핑 — 제안(모델명 · [이마트] 접두어 무시 · 필터 · 기타) · ERP 공통 그룹');
+  const R = require(path.join(PROJ, 'src', 'features', 'offline', 'resolver.js'));
+  const masters = {
+    skus: [{ skuId: 'SKU-0001', name: '더 플렌더 MAX 그레이지', line: '더플렌더', model: '더 플렌더 MAX', option: '그레이지', active: 'Y' },
+      { skuId: 'SKU-0005', name: '실링 컨테이너 3L', line: '기타', model: '기타', option: '실링 컨테이너 3L', active: 'Y' },
+      { skuId: 'SKU-0009', name: '필터 하드락필터', line: '필터', model: '하드락필터', option: '', active: 'Y' }],
+    mappings: [{ channelId: 'etland', code: 'MNFD-200G', skuId: 'SKU-0001', stockType: '정상', name: '미닉스 더플렌더 MAX' },
+      { channelId: 'emart', code: '8800000000099', skuId: 'SKU-0005', stockType: '정상', name: '미닉스 실링 컨테이너 3L' }]
+  };
+  const s1 = R.suggestSkus(masters, CODE.MAX, NAME[CODE.MAX])[0];
+  check('ERP 상품명의 모델명(MNFD-200G) → 다른 채널에 매핑된 SKU', s1 && s1.skuId === 'SKU-0001' && s1.via === 'model' && s1.model === 'MNFD-200G', s1);
+  const s2 = R.suggestSkus(masters, '9812365001557', '[이마트] 미닉스 실링 컨테이너 3L')[0];
+  check("모델명이 없으면 '[이마트]' 접두어·공백을 뺀 상품명이 같은 매핑의 SKU", s2 && s2.skuId === 'SKU-0005' && s2.via === 'name', s2);
+  check('짧은 이름·바코드만은 제안 없음', R.suggestSkus(masters, '9812365001000', '톰').length === 0);
+  const C = it => { const c = R.suggestCategory(it); return c ? [c.category, c.model].join('/') : null; };
+  check('브랜드가 미닉스 외(톰·톰 디바이스) → 기타', C({ name: NAME[CODE.TOM], brand: '톰 디바이스', cat: '본품' }) === '기타/기타' && C({ name: '[국내] 톰 도자기 괄사', brand: '톰' }) === '기타/기타');
+  check('  ↳ 브랜드를 모르면 상품명으로(미닉스·제품 이름·MN 모델명이 없으면 미닉스 외)', C({ name: '톰 스마트필 글레이즈드 액션 키트 3종' }) === '기타/기타' && C({ name: '락앤락 김치통 2.6L 2개입 (미닉스 더 시프트)' }) === null);
+  check("'필터'가 든 구성품 → 필터 · 하드 락 필터 = 하드락필터, 하드필터 = 하드필터", C({ name: NAME[CODE.LOCK], brand: '미닉스 더 플렌더', cat: '구성품' }) === '필터/하드락필터' &&
+    C({ name: '미닉스 더 플렌더 3중 활성탄 하드필터', brand: '미닉스 더 플렌더', cat: '구성품' }) === '필터/하드필터');
+  const mini = R.suggestCategory({ name: '미닉스 더 플렌더 활성탄 하드 락 필터 (MINI)', brand: '미닉스 더 플렌더', cat: '구성품' });
+  const shift = R.suggestCategory({ name: '미닉스 더 시프트 저온 금속 촉매 탈취 필터 (MNKR-RF1)', brand: '미닉스 더 시프트', cat: '구성품' });
+  check('  ↳ MINI 전용 하드락필터·더 시프트 탈취 필터 = 필터(모델 빈칸 — 새 모델 추가 필요)', mini.category === '필터' && mini.model === '' && /새 모델 추가 필요/.test(mini.reason) && shift.model === '' && shift.category === '필터');
+  check('  ↳ 본품·미닉스 본품은 대분류 제안 없음', C({ name: '필터 교체형 미닉스 청소기', brand: '미닉스 더 슬림', cat: '본품' }) === null && C({ name: NAME[CODE.MINI], brand: '미닉스 더 플렌더', cat: '본품' }) === null);
+
+  const { ctx } = loadFrontend(PROJ, UI_SHIM);
+  const box = {};
+  ctx.document.getElementById = id => (box[id] = box[id] || { id, innerHTML: '', value: '', style: {}, classList: { add() {}, remove() {}, contains() { return false; }, toggle() {} } });
+  const m = UI_MASTERS();
+  m.skus = masters.skus; m.mappings = masters.mappings.concat([{ channelId: 'erp', code: CODE.MINI, skuId: 'SKU-0001', stockType: '정상', name: NAME[CODE.MINI], registeredAt: '', registeredBy: '', note: '' }]);
+  require('vm').runInContext('OFFLINE_MASTERS = ' + J(m) + ';', ctx);
+  const items = [CODE.MAX, CODE.TOM, CODE.LOCK].map(c => ({ channelId: 'erp', code: c, name: NAME[c], brand: BRAND[c], cat: CAT[c] }))
+    .concat([{ channelId: 'erp', code: '9812365001497', name: '미닉스 더 플렌더 활성탄 하드 락 필터 (MINI)', brand: '미닉스 더 플렌더', cat: '구성품' },
+      { channelId: 'himart', code: 'COFFEE', name: '커피머신(타 브랜드)' }]);
+  ctx.renderMappingPanel('mp', items, { showChannel: true });
+  const h = box.mp.innerHTML;
+  const row = code => h.split('<tr>').find(x => x.indexOf('>' + code + '<') >= 0) || '';
+  check('패널 — MAX는 모델명 제안 칩', /제안\(모델 MNFD-200G\)/.test(row(CODE.MAX)));
+  check('  ↳ 톰 → 대분류 기타 + 기타 SKU 만들기', /대분류 <b>기타<\/b> — 브랜드 톰 디바이스 — 미닉스 외/.test(row(CODE.TOM)) && row(CODE.TOM).indexOf('＋ 기타 SKU 만들기') >= 0);
+  check('  ↳ 하드 락 필터 → 대분류 필터 + 기존 하드락필터 SKU 칩(누르면 그 SKU)', /대분류 <b>필터<\/b>/.test(row(CODE.LOCK)) && row(CODE.LOCK).indexOf('_mpApplyCatSku') >= 0 && row(CODE.LOCK).indexOf('필터 하드락필터') >= 0);
+  check('  ↳ MINI 필터 → 새 모델 추가 필요 안내 + 필터 SKU 만들기', /새 모델 추가 필요/.test(row('9812365001497')) && row('9812365001497').indexOf('＋ 필터 SKU 만들기') >= 0);
+  check('  ↳ 포털 코드(브랜드 모름)는 대분류 제안 없음', row('COFFEE').indexOf('대분류') < 0);
+  check('  ↳ 채널 칸 = ERP (백화점·폐쇄몰·렌탈 공통)', row(CODE.MAX).indexOf('ERP (백화점·폐쇄몰·렌탈 공통)') >= 0);
+  ctx._mpApplyCatSku('mp', 2);
+  ctx._mpOpenSuggSku('mp', 1);
+  const st = require('vm').runInContext('_MP.mp', ctx);
+  check('필터 칩 → 그 줄에 하드락필터 SKU 선택·체크 / 기타 만들기 → 품목군 기타·옵션 = 상품명(표준명 자동)', st.sel['erp\u0001' + CODE.LOCK].skuId === 'SKU-0009' && st.sel['erp\u0001' + CODE.LOCK].checked &&
+    st.ns.line === '기타' && st.ns.model === '기타' && st.ns.option === '톰 더 글로우 (TLDM-12)' && st.ns.name === '기타 톰 더 글로우 (TLDM-12)', st.ns);
+
+  ctx._offlineCall = async () => ({ success: true, items: [] });
+  ctx._cmRender();
+  const cm = box['page-admin-code-mapping'].innerHTML;
+  const opts = [...cm.matchAll(/onchange="_cmSetFilter\('ch',this.value\)">([\s\S]*?)<\/select>/g)][0][1];
+  check('코드 매핑 채널 필터 — ERP 공통 그룹 하나(ERP 채널 5개는 따로 없음)', opts.indexOf('<option value="erp">ERP (백화점·폐쇄몰·렌탈 공통)</option>') >= 0 && opts.indexOf('신세계') < 0 && opts.indexOf('하이마트') >= 0, opts);
+  check('안내 — ERP 채널 5개가 ERP 공통 매핑을 같이 쓴다', cm.indexOf('<b>신세계·디에이블앤·롯데백화점·워크숍에이트·다파라솔루션</b>는 <b>ERP (백화점·폐쇄몰·렌탈 공통)</b> 코드 매핑을 그대로 씁니다') >= 0, cm.slice(0, 400));
+  require('vm').runInContext("_CM.filter.ch = 'erp';", ctx);
+  ctx._cmRenderTable();
+  const tbl = box.cmTable.innerHTML;
+  check('  ↳ ERP 그룹으로 거르면 erp 매핑만, 채널 칸 = ERP 공통 이름', tbl.indexOf(CODE.MINI) >= 0 && tbl.indexOf('MNFD-200G') < 0 && tbl.indexOf('<td>ERP (백화점·폐쇄몰·렌탈 공통)</td>') >= 0);
+}

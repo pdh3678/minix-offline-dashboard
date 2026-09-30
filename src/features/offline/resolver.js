@@ -59,20 +59,44 @@
     return '정상';
   }
 
-  /* 미매칭 코드에 붙일 SKU 제안 — 같은 모델명이 이미 매핑된 SKU(다른 채널 포함)와, 제품마스터 '모델'이
-     그 모델명인 SKU. 많이 겹칠수록 앞에 온다. → [{ skuId, model, hits }] */
+  // 상품명 비교용 — 앞의 '[이마트]'·'[국내]' 같은 대괄호 접두어, 공백, 대소문자를 무시한다
+  function normName(s) { return String(s || '').replace(/^\s*(\[[^\]]*\]\s*)+/, '').replace(/\s+/g, '').toLowerCase(); }
+
+  /* 미매칭 코드에 붙일 SKU 제안 — 같은 모델명이 이미 매핑된 SKU(다른 채널 포함), 제품마스터 '모델'이 그 모델명인 SKU,
+     모델명이 안 맞으면 접두어를 뺀 상품명이 같은 매핑의 SKU. 많이 겹칠수록 앞에 온다. → [{ skuId, model, hits, via('model'|'name') }] */
   function suggestSkus(masters, code, name) {
-    const model = extractModel(code) || extractModel(name);
-    if (!model) return [];
-    const hits = {};
+    const model = extractModel(code) || extractModel(name), nn = normName(name);
+    if (!model && nn.length < 4) return [];
+    const hits = {}, via = {};
+    const hit = (id, how) => { hits[id] = (hits[id] || 0) + 1; if (!via[id] || how === 'model') via[id] = how; };
     ((masters && masters.mappings) || []).forEach(m => {
-      if (m.skuId && (extractModel(m.code) || extractModel(m.name)) === model) hits[m.skuId] = (hits[m.skuId] || 0) + 1;
+      if (!m.skuId) return;
+      if (model && (extractModel(m.code) || extractModel(m.name)) === model) hit(m.skuId, 'model');
+      else if (nn.length >= 4 && normName(m.name) === nn) hit(m.skuId, 'name');
     });
-    ((masters && masters.skus) || []).forEach(s => {
-      if (extractModel(s.model) === model) hits[s.skuId] = (hits[s.skuId] || 0) + 1;
-    });
-    return Object.keys(hits).sort((a, b) => hits[b] - hits[a] || (a < b ? -1 : 1)).map(id => ({ skuId: id, model, hits: hits[id] }));
+    if (model) ((masters && masters.skus) || []).forEach(s => { if (extractModel(s.model) === model) hit(s.skuId, 'model'); });
+    return Object.keys(hits).sort((a, b) => hits[b] - hits[a] || (a < b ? -1 : 1)).map(id => ({ skuId: id, model, hits: hits[id], via: via[id] }));
   }
 
-  return { createResolver, codeSystemOf, extractModel, guessStockType, suggestSkus, STOCK_TYPES };
+  /* 대분류 제안 — SKU 제안이 없는 코드에. item = { name, brand?, cat?(본품/구성품) } → { category, line, model, reason } | null
+     · 미닉스 외 브랜드(톰 등) → 기타. 브랜드를 모르면(코드 매핑 화면) 상품명에 미닉스·제품 이름·MN 모델명이 없으면 미닉스 외로 본다
+     · 상품명에 '필터'가 든 구성품(카테고리를 모르면 본품만 아니면) → 필터. 모델은 하드락필터·하드필터 — MINI 전용이나
+       그 밖의 필터(더 시프트 탈취 필터 등)는 카탈로그에 맞는 모델이 없어 빈칸(새 모델 추가가 필요)
+     제안일 뿐이고 확정은 사용자가 한다(SKU 선택·새 SKU 만들기) */
+  const MINIX_NAME = /미닉스|minix|플렌더|시프트|슬림|에어드라이|건조기|식기세척기|MN[A-Z]{2,3}-/i;
+  function suggestCategory(item) {
+    const it = item || {}, name = String(it.name || ''), brand = String(it.brand || '').trim();
+    if (!name && !brand) return null;
+    if (!(brand ? /미닉스|minix/i.test(brand) : MINIX_NAME.test(name))) {
+      return { category: '기타', line: '기타', model: '기타', reason: brand ? '브랜드 ' + brand + ' — 미닉스 외' : '상품명이 미닉스 제품이 아님' };
+    }
+    if (/필터/.test(name) && it.cat !== '본품') {
+      const n = name.replace(/\s+/g, '');
+      const model = /mini|미니/i.test(n) ? '' : /하드락필터/.test(n) ? '하드락필터' : /하드필터/.test(n) ? '하드필터' : '';
+      return { category: '필터', line: '필터', model, reason: (it.cat ? it.cat + ' · ' : '') + "상품명에 '필터'" + (model ? '' : ' — 카탈로그에 맞는 필터 모델 없음(새 모델 추가 필요)') };
+    }
+    return null;
+  }
+
+  return { createResolver, codeSystemOf, extractModel, guessStockType, suggestSkus, suggestCategory, normName, STOCK_TYPES };
 });
