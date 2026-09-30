@@ -106,7 +106,7 @@ function env() {
       '2026-08-31|emart||' + MAX + '|7', '2026-09-01|emart|1003|' + MAX + '|2', '2026-09-01|himart|S1|MNFD-200G|4', '2026-09-01|traders|2001|' + MAX + '|3', '2026-09-02|emart|1003|' + MAX + '|-1', '2026-09-02|traders|2002|' + NEW + '|1']), L());
     check('  ↳ 채널별 반영 수·응답 채널', J(r1.applied.byChannel) === J({ emart: { rows: 2, qty: 1 }, traders: { rows: 2, qty: 4 } }) && J(r1.channels) === J(['emart', 'traders']), r1.applied);
     check('  ↳ 모르는 업태명(SSG)은 보류 + 경고', !g.rows('판매원장').some(r => r[4] === '9001') && r1.warnings.some(w => /"SSG" 1건/.test(w) && /보류/.test(w)), r1.warnings);
-    const st = g.rows('점포마스터').map(r => r[0] + ':' + r[1]).sort();
+    const st = g.rows('점포마스터').filter(r => r[0] === 'emart' || r[0] === 'traders').map(r => r[0] + ':' + r[1]).sort(); // setup이 등록한 ERP 거래처 점포는 빼고
     check('점포마스터: 1003 이마트, 2001은 이마트 → 트레이더스로 옮김(한 행), 2002 트레이더스, SSG 점포 없음', J(st) === J(['emart:1003', 'traders:2001', 'traders:2002']) && r1.applied.storesMoved === 1, st);
     check('  ↳ 옮긴 점포의 최초등록일 유지', g.rows('점포마스터').find(r => r[1] === '2001')[4] === '2026-09-25');
     const log = g.rows('업로드로그').pop();
@@ -164,7 +164,7 @@ function env() {
     check('이마트 7 + 트레이더스 8 = 파일 재고 합계 15', J(r1.applied.byChannel) === J({ emart: { stores: 3, stock: 7 }, traders: { stores: 2, stock: 8 } }) && total === 15, r1.applied.byChannel);
     check('판별 경로: 점포마스터 2 · 접두어 2(TR송림·EM창동) · 기본 1(SFM군산) + 경고', J(r1.applied.channelVia) === J({ master: 2, prefix: 2, fallback: 1 }) &&
       r1.warnings.some(w => /1곳은 이마트로/.test(w) && /1025 SFM군산점/.test(w)), [r1.applied.channelVia, r1.warnings]);
-    const sm = g.rows('점포마스터').map(r => r[0] + ':' + r[1]).sort();
+    const sm = g.rows('점포마스터').filter(r => r[0] === 'emart' || r[0] === 'traders').map(r => r[0] + ':' + r[1]).sort();
     check('점포마스터: 2002 트레이더스(접두어), 1025·1001 이마트', J(sm) === J(['emart:1001', 'emart:1003', 'emart:1025', 'traders:2001', 'traders:2002']), sm);
     check('업로드로그 channel_id = emart,traders · 응답 채널', g.rows('업로드로그').pop()[5] === 'emart,traders' && J(r1.channels) === J(['emart', 'traders']));
     const snap = { d: daily(), s: store(), m: g.rows('점포마스터').length };

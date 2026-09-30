@@ -142,7 +142,7 @@ function deals(ctx) {
 
   console.log('\n[3] 연간 추이 — 누적 막대 + 목표 선, 막대를 누르면 그 달');
   const tc = F.charts.filter(c => c.data && c.data.datasets.some(d => d.label === '파트 월 목표')).pop();
-  check('채널군 3개 누적 막대(고정 색) + 파트 월 목표 선, 축 하나', tc && J(tc.data.datasets.map(d => d.type + ':' + d.label)) === J(['bar:오프라인', 'bar:폐쇄몰·특판', 'bar:공동구매', 'line:파트 월 목표']) &&
+  check('채널군 3개 누적 막대(고정 색) + 파트 월 목표 선, 축 하나', tc && J(tc.data.datasets.map(d => d.type + ':' + d.label)) === J(['bar:오프라인', 'bar:특수(폐쇄몰·특판·렌탈)', 'bar:공동구매', 'line:파트 월 목표']) &&
     tc.data.datasets[0].stack === 'part' && !tc.options.scales.y2, tc && tc.data.datasets.map(d => d.label));
   check('막대 데이터 = 월별 채널군 실적', tc.data.datasets[2].data[8] === 48790000 && tc.data.datasets[0].data[7] === 16000000);
   check('월별 표(표 보기) 제공', /<summary>월별 표<\/summary>/.test(page('home')));
@@ -197,7 +197,7 @@ function deals(ctx) {
     R('음식물처리기').total === outQ('음식물처리기') + 100 + d9Sep, R('음식물처리기'));
   check('김치냉장고 공구 10 · 카탈로그 밖 3', R('김치냉장고').gongu === 10 && R('카탈로그 밖 제품').gongu === 3);
   const cc = F.charts.filter(c => c.options && c.options.indexAxis === 'y').pop();
-  check('대분류 차트 — 가로 누적 막대, 채널군 색 같음', cc && J(cc.data.datasets.map(d => d.label + d.backgroundColor)) === J(['오프라인#2a78d6', '폐쇄몰·특판#eb6834', '공동구매#1baf7a']));
+  check('대분류 차트 — 가로 누적 막대, 채널군 색 같음', cc && J(cc.data.datasets.map(d => d.label + d.backgroundColor)) === J(['오프라인#2a78d6', '특수(폐쇄몰·특판·렌탈)#eb6834', '공동구매#1baf7a']));
   ctx._homeSet('category', '음식물처리기'); await settle();
   M = ctx._homeModel();
   check('대분류 필터 — 공구는 그 대분류만(44,900,000), 판매 표도 그 대분류만', M.groups[2].actual === 44900000 && J(ctx._homeCatRows().map(r => r.category)) === J(['음식물처리기']), M.groups[2]);

@@ -36,9 +36,9 @@ const { buildLegacy } = require(path.join(__dirname, 'lib', 'gongu-legacy-fixtur
     check('다시 실행해도 새로 만들지 않고 확인만(멱등)', rep.created.length === 0 && rep.verified.indexOf('공구목표_월') >= 0, rep);
     const G = g.ctx._offChannelGroup;
     check('채널군 — 전문점·할인점·창고형·백화점 = 오프라인', ['전문점', '할인점', '창고형', '백화점'].every(t => G(t) === 'offline'));
-    check('채널군 — 폐쇄몰·특판 = 폐쇄몰·특판', G('폐쇄몰') === 'closed' && G('특판') === 'closed' && G(' 특판 ') === 'closed');
+    check('채널군 — 폐쇄몰·특판·렌탈 = 특수', G('폐쇄몰') === 'closed' && G('특판') === 'closed' && G(' 특판 ') === 'closed' && G('렌탈') === 'closed');
     check('모르는 유형은 빈칸', G('온라인') === '' && G('') === '');
-    check('채널군 목록 순서 = 오프라인 → 폐쇄몰·특판 → 공동구매', J(g.ctx.OFF_CHANNEL_GROUPS.map(x => x.label)) === J(['오프라인', '폐쇄몰·특판', '공동구매']));
+    check('채널군 목록 순서 = 오프라인 → 특수(폐쇄몰·특판·렌탈) → 공동구매', J(g.ctx.OFF_CHANNEL_GROUPS.map(x => x.label)) === J(['오프라인', '특수(폐쇄몰·특판·렌탈)', '공동구매']));
   }
 
   console.log('\n[2] 공구 목표 저장·조회');

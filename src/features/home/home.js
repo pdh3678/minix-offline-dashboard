@@ -256,7 +256,7 @@ function _homeGoCalendar(ymd){
   requestAnimationFrame(()=>{const el=document.querySelector(`[data-ym="${ym}"]`);if(el&&el.scrollIntoView)el.scrollIntoView({block:'start'});});
 }
 
-// ⑤ 대분류별 이번 달 판매 — 오프라인·폐쇄몰·특판 Sell-out(서버) + 공구 판매(브라우저), 선택 연월 기준
+// ⑤ 대분류별 이번 달 판매 — 오프라인·특수(폐쇄몰·특판·렌탈) Sell-out(서버) + 공구 판매(브라우저), 선택 연월 기준
 function _homeCatRows(){
   const s=HOME.sum,g=partGonguByCategory(HOME.ym);
   const cats=s?s.categorySales:(HOME.category?[HOME.category]:PRODUCT_MAIN_CATEGORIES).map(c=>({category:c}));
@@ -278,7 +278,7 @@ function _homeCatHtml(){
     ${HOME.err?`<div class="up-err">오프라인 판매를 불러오지 못했습니다 — 공구 판매만 표시합니다: ${_escHtml(HOME.err)}</div>`:''}
     <div class="home-chart home-chart-cat"><canvas id="homeCatCanvas" aria-label="대분류별 채널군 판매 수량"></canvas></div>
     <div class="tbl-wrap"><table class="of-tbl"><thead><tr><th>대분류</th>${PART_GROUPS.map(g=>`<th class="num-col"><span class="home-dot" style="background:${g.color}"></span>${_escHtml(g.label)}</th>`).join('')}<th class="num-col">합계</th><th class="num-col">금액</th></tr></thead><tbody>${body}</tbody></table></div>
-    <div class="of-note">오프라인·폐쇄몰·특판 = 판매원장·목표 관리의 OUT(Sell-out) 실적 · 공구 = 시작일이 이 달인 완료·진행중 공구의 판매수량 · 금액 = 오프라인 OUT × 공급가 + 공구가 × 판매수량(총매출)</div></div>`;
+    <div class="of-note">오프라인·특수(폐쇄몰·특판·렌탈) = 판매원장·목표 관리의 OUT(Sell-out) 실적 · 공구 = 시작일이 이 달인 완료·진행중 공구의 판매수량 · 금액 = 오프라인 OUT × 공급가(ERP 매출이익리스트 채널은 파일의 금액) + 공구가 × 판매수량(총매출)</div></div>`;
 }
 function _homeDrawCat(){
   const el=document.getElementById('homeCatCanvas');

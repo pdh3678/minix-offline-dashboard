@@ -57,11 +57,11 @@ function env(today) {
   {
     const g = env();
     const m1 = g.call('offline_getMasters');
-    check('채널 7개·빈 제품/매핑/점포·품목군·재고구분', m1.channels.length === 7 && !m1.skus.length && !m1.mappings.length && !m1.stores.length &&
+    check('채널 10개·빈 제품/매핑·점포는 ERP 거래처 9곳뿐·품목군·재고구분', m1.channels.length === 10 && !m1.skus.length && !m1.mappings.length && m1.stores.length === 9 && m1.stores.every(x => ['shinsegae', 'lotte_dept', 'theablen', 'workshop8', 'dapara'].indexOf(x.channelId) >= 0) &&
       m1.productLines.length === 8 && m1.stockTypes.join() === '정상,전시,리퍼', m1);
-    check('채널 객체 모양(업로드시작월·원천업태명·점포명접두어·코드체계채널·재고기준일오프셋)', JSON.stringify(m1.channels[0]) === JSON.stringify({ channelId: 'himart', name: '하이마트', type: '전문점', active: 'Y', order: 1, uploadStartMonth: '2026-09', bizNames: '', storePrefix: '', codeSystem: 'himart', stockOffset: 0 }), m1.channels[0]);
-    check('트레이더스 = 이마트 코드체계, 업태명 트레이더스', JSON.stringify(m1.channels.find(c => c.channelId === 'traders')) === JSON.stringify({ channelId: 'traders', name: '트레이더스', type: '창고형', active: 'Y', order: 4, uploadStartMonth: '2026-09', bizNames: '트레이더스', storePrefix: 'TR', codeSystem: 'emart', stockOffset: -1 }));
-    check('업로드 없는 채널은 업로드시작월 빈칸', m1.channels.find(c => c.channelId === 'shinsegae').uploadStartMonth === '');
+    check('채널 객체 모양(업로드시작월·원천업태명·점포명접두어·코드체계채널·재고기준일오프셋)', JSON.stringify(m1.channels[0]) === JSON.stringify({ channelId: 'himart', name: '하이마트', type: '전문점', active: 'Y', order: 1, uploadStartMonth: '2026-09', bizNames: '', storePrefix: '', codeSystem: 'himart', stockOffset: 0, inSource: 'input' }), m1.channels[0]);
+    check('트레이더스 = 이마트 코드체계, 업태명 트레이더스', JSON.stringify(m1.channels.find(c => c.channelId === 'traders')) === JSON.stringify({ channelId: 'traders', name: '트레이더스', type: '창고형', active: 'Y', order: 4, uploadStartMonth: '2026-09', bizNames: '트레이더스', storePrefix: 'TR', codeSystem: 'emart', stockOffset: -1, inSource: 'input' }));
+    check('업로드 없는 채널은 업로드시작월 빈칸', m1.channels.find(c => c.channelId === 'special').uploadStartMonth === '');
     check('두 번째는 캐시', g.call('offline_getMasters').cached === true);
     g.call('offline_saveSku', { sku: { name: '더 플렌더 MAX 그레이지', line: '더플렌더', model: '더 플렌더 MAX', option: '그레이지' } });
     const m3 = g.call('offline_getMasters');
@@ -174,7 +174,7 @@ function env(today) {
     const st = g.call('offline_getStatus');
     const by = {}; st.channels.forEach(c => { by[c.channelId] = c; });
     check('이번 달 = 2026-09', st.month === '2026-09' && st.today === TODAY);
-    check('활성 채널 4개만(데이터 없는 비활성 채널 생략), 정렬순서대로', st.channels.map(c => c.channelId).join() === 'himart,etland,emart,traders', st.channels.map(c => c.channelId));
+    check('활성 채널만(데이터 없는 비활성 채널 생략), 정렬순서대로', st.channels.map(c => c.channelId).join() === 'himart,etland,emart,traders,shinsegae,theablen,lotte_dept,workshop8,dapara', st.channels.map(c => c.channelId));
     check('전자랜드: 판매 9/24, 재고 9/25, 빈 날 9/25·9/26', by.etland.salesLast === '2026-09-24' && by.etland.stockLast === '2026-09-25' && by.etland.missingDays.join() === '2026-09-25,2026-09-26', by.etland);
     check('하이마트: 실패한 9/26은 없는 셈 — 판매·재고 9/24', by.himart.salesLast === '2026-09-24' && by.himart.stockLast === '2026-09-24', by.himart);
     check('  ↳ 빈 날 = 9/1~9/22, 9/25, 9/26 (24일)', by.himart.missingDays.length === 24 && by.himart.missingDays[0] === '2026-09-01' && by.himart.missingDays.indexOf('2026-09-23') < 0 && by.himart.missingDays.slice(-2).join() === '2026-09-25,2026-09-26', by.himart.missingDays);

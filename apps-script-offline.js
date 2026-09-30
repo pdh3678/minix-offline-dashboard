@@ -51,7 +51,8 @@ var OFF_TABS = {
   sku:        { name: '제품마스터', headers: ['sku_id', '표준명', '품목군', '모델', '옵션', '활성', '정렬순서', '비고'], text: [0, 1, 2, 3, 4, 5, 7] },
   // 원천업태명·점포명접두어·코드체계채널(6~8)은 트레이더스 분리(2026-09-28)에서 덧붙인 열 — 설명은 README·OFF_CHANNEL_SEED 주석
   // 재고기준일오프셋(9, 숫자)은 재고 기준일 보정(2026-09-29)에서 덧붙인 열 — OFF_STOCK_OFFSET_SEED 주석
-  channel:    { name: '채널마스터', headers: ['channel_id', '채널명', '유형', '활성', '정렬순서', '업로드시작월', '원천업태명', '점포명접두어', '코드체계채널', '재고기준일오프셋'], text: [0, 1, 2, 3, 5, 6, 7, 8] },
+  // IN실적원천(10)은 ERP 매출이익리스트(2026-09-30)에서 덧붙인 열 — upload / input. OFF_ERP_CHANNELS 주석
+  channel:    { name: '채널마스터', headers: ['channel_id', '채널명', '유형', '활성', '정렬순서', '업로드시작월', '원천업태명', '점포명접두어', '코드체계채널', '재고기준일오프셋', 'IN실적원천'], text: [0, 1, 2, 3, 5, 6, 7, 8, 10] },
   mapping:    { name: '코드매핑', headers: ['channel_id', '원본코드', 'sku_id', '재고구분', '원본상품명', '등록일', '등록자', '비고'], text: [0, 1, 2, 3, 4, 5, 6, 7] },
   // 점포유형(6)은 판매 분석(2026-09-29)에서 덧붙인 열 — 온라인/오프라인. OFF_ONLINE_STORE_RE 주석
   store:      { name: '점포마스터', headers: ['channel_id', '점포코드', '점포명', '지역', '최초등록일', '최근확인일', '점포유형'], text: [0, 1, 2, 3, 4, 5, 6] },
@@ -69,10 +70,12 @@ var OFF_TABS = {
   // 2-B단계(2026-09-27) — 재고일수·경보 기준값(키-값). 값은 숫자 열
   settings:   { name: '설정', headers: ['키', '값', '설명'], text: [0, 2] },
   // 파트 홈(2026-09-29) — 공동구매 월 목표. 키 (연월, 벤더, 품목군, 모델). 로직은 apps-script-home.js
-  gonguTargets: { name: '공구목표_월', headers: ['연월', '벤더', '대분류', '품목군', '모델', '목표수량', '목표금액', '출처', '수정일', '수정자'], text: [0, 1, 2, 3, 4, 7, 8, 9] }
+  gonguTargets: { name: '공구목표_월', headers: ['연월', '벤더', '대분류', '품목군', '모델', '목표수량', '목표금액', '출처', '수정일', '수정자'], text: [0, 1, 2, 3, 4, 7, 8, 9] },
+  // ERP 매출이익리스트(2026-09-30) — ERP 거래처 → 채널. 거래처가 곧 그 채널의 점포(점포코드 = 거래처코드)
+  customerMap: { name: '거래처매핑', headers: ['거래처코드', '거래처명', 'channel_id', '비고'], text: [0, 1, 2, 3] }
 };
 var OFF_TAB_ORDER = ['readme', 'sku', 'channel', 'mapping', 'store', 'sales', 'stockDaily', 'stockStore', 'himartSnap', 'uploadLog', 'unmatched',
-  'targets', 'prices', 'migrationLog', 'settings', 'gonguTargets'];
+  'targets', 'prices', 'migrationLog', 'settings', 'gonguTargets', 'customerMap'];
 
 /* 설정 기본값 — 설정 탭에 없는 키는 setup이 이 값으로 채우고(있는 값은 덮어쓰지 않음), 읽을 때도 없거나 잘못된 값은 이 값을 쓴다.
    재고 지표(apps-script-offline-inventory.js)가 이 네 값을 읽는다. */
@@ -89,14 +92,35 @@ var OFF_UPLOAD_START_SEED = { himart: '2026-09', etland: '2026-09', emart: '2026
    점포명접두어 업태명이 없는 파일(이마트 재고)에서 점포마스터에도 없는 점포를 점포명 앞부분으로 가를 때. 쉼표로 여러 개
    코드체계채널 코드매핑을 빌려 쓸 채널 — 트레이더스는 이마트와 같은 상품코드라 이마트 매핑을 그대로 쓴다(빈칸 = 자기 자신) */
 var OFF_CHANNEL_SEED = [
-  ['himart', '하이마트', '전문점', 'Y', 1, '2026-09', '', '', 'himart', 0],
-  ['etland', '전자랜드', '전문점', 'Y', 2, '2026-09', '', '', 'etland', -1],
-  ['emart', '이마트', '할인점', 'Y', 3, '2026-09', '이마트', 'EM', 'emart', -1],
-  ['traders', '트레이더스', '창고형', 'Y', 4, '2026-09', '트레이더스', 'TR', 'emart', -1],
-  ['shinsegae', '신세계', '백화점', 'N', 5, '', '', '', 'shinsegae', 0],
-  ['theablen', '디에이블앤', '폐쇄몰', 'N', 6, '', '', '', 'theablen', 0],
-  ['special', '기타 특판', '특판', 'N', 7, '', '', '', 'special', 0]
+  ['himart', '하이마트', '전문점', 'Y', 1, '2026-09', '', '', 'himart', 0, 'input'],
+  ['etland', '전자랜드', '전문점', 'Y', 2, '2026-09', '', '', 'etland', -1, 'input'],
+  ['emart', '이마트', '할인점', 'Y', 3, '2026-09', '이마트', 'EM', 'emart', -1, 'input'],
+  ['traders', '트레이더스', '창고형', 'Y', 4, '2026-09', '트레이더스', 'TR', 'emart', -1, 'input'],
+  ['shinsegae', '신세계', '백화점', 'Y', 5, '2026-09', '', '', 'erp', 0, 'upload'],
+  ['theablen', '디에이블앤', '폐쇄몰', 'Y', 6, '2026-09', '', '', 'erp', 0, 'upload'],
+  ['special', '기타 특판', '특판', 'N', 7, '', '', '', 'special', 0, 'input'],
+  ['lotte_dept', '롯데백화점', '백화점', 'Y', 8, '2026-09', '', '', 'erp', 0, 'upload'],
+  ['workshop8', '워크숍에이트', '폐쇄몰', 'Y', 9, '2026-09', '', '', 'erp', 0, 'upload'],
+  ['dapara', '다파라솔루션', '렌탈', 'Y', 10, '2026-09', '', '', 'erp', 0, 'upload']
 ];
+/* ERP 매출이익리스트 채널(2026-09-30) — 백화점·폐쇄몰·렌탈. 우리 창고에서 고객에게 직접 출고한 기록이라 그 파일의 판매가 곧
+   우리 매출(IN)이자 판매(OUT)다. 코드체계채널 erp = ERP 상품코드 매핑 한 벌을 다섯 채널이 같이 쓴다(erp는 채널이 아니라 코드체계 이름).
+   IN실적원천 upload = 업로드시작월부터 IN 실적도 판매원장에서 집계(목표 관리의 IN 실적 칸은 읽기 전용), input = 목표 관리 입력·이관 값.
+   IN실적원천 열을 붙이는 이번 한 번만 있던 신세계·디에이블앤을 위 값(활성 Y·업로드시작월 2026-09·erp·upload)으로 켠다 — 이후 사람이 고친 값은 그대로.
+   채널마스터에 없는 ERP 채널(롯데백화점·워크숍에이트·다파라솔루션)은 setup이 돌 때마다 없으면 덧붙인다. */
+var OFF_ERP_CODE_SYSTEM = 'erp';
+var OFF_ERP_CHANNELS = ['shinsegae', 'theablen', 'lotte_dept', 'workshop8', 'dapara'];
+// 채널이 아닌 코드체계의 표시 이름 — 코드 매핑 화면·미매칭 목록의 채널 칸(offline_getMasters codeSystems)
+var OFF_CODE_SYSTEM_NAMES = { erp: 'ERP (백화점·폐쇄몰·렌탈 공통)' };
+/* 거래처매핑 초기값 — ERP 거래처코드 → 채널. 거래처명은 법인 표기((주)·주식회사·옛 이름)를 뺀 이름이고 점포마스터 점포명이 된다.
+   거래처매핑 탭에 데이터 행이 하나도 없을 때만 채운다. 업로드 미리보기에서 채널을 고른 새 거래처는 반영 때 덧붙는다. */
+var OFF_CUSTOMER_SEED = [
+  ['00476', '신세계(센텀시티점)', 'shinsegae', '초기값'], ['00440', '신세계(강남점)', 'shinsegae', '초기값'], ['00580', '대전신세계', 'shinsegae', '초기값'],
+  ['00608', '신세계 동대구복합환승센터', 'shinsegae', '초기값'], ['00619', '신세계(청담점)', 'shinsegae', '초기값'],
+  ['00604', '롯데백화점 본점', 'lotte_dept', '초기값'], ['00474', '디에이블앤', 'theablen', '초기값'],
+  ['00260', '워크숍에이트', 'workshop8', '초기값'], ['00261', '다파라솔루션', 'dapara', '초기값']
+];
+function _offInSourceOf(r) { return String((r && r[10]) == null ? '' : r[10]).trim() === 'upload' ? 'upload' : 'input'; }
 // 원천업태명·점포명접두어·코드체계채널 초기값(열을 덧붙일 때만 — 이미 있는 값은 덮어쓰지 않음)
 var OFF_CHANNEL_SPLIT_SEED = { emart: ['이마트', 'EM', 'emart'], traders: ['트레이더스', 'TR', 'emart'] };
 /* 재고기준일오프셋(일) — 재고 기준일 = 파일명 날짜 + 이 값. 전자랜드 현재고·이마트 재고현황_상세(트레이더스 포함)는
@@ -132,7 +156,8 @@ var OFF_KEY_SEP = '\u0001';
    헤더를 덧붙이고 초기값을 채운다(extended). README 본문은 대시보드가 관리하는 설명이라 매번 새로 쓴다. */
 function offline_setupSheets() {
   var ss = _offSS();
-  var report = { created: [], verified: [], extended: [], mismatched: [], settingsAdded: [] };
+  var report = { created: [], verified: [], extended: [], mismatched: [], settingsAdded: [], channelsAdded: [], storesAdded: [] };
+  var ok = function (key) { return report.mismatched.every(function (m) { return m.tab !== OFF_TABS[key].name; }); };
   OFF_TAB_ORDER.forEach(function (key) {
     var def = OFF_TABS[key];
     var sheet = ss.getSheetByName(def.name);
@@ -159,8 +184,18 @@ function offline_setupSheets() {
     }
     // 채널마스터 초기 데이터 — 데이터 행이 하나도 없을 때만(사람이 고친 값을 덮어쓰지 않는다)
     if (key === 'channel' && sheet.getLastRow() < 2) _offWriteBlock(sheet, def, 2, OFF_CHANNEL_SEED);
+    // ERP 채널 중 채널마스터에 없는 것만 덧붙인다(있는 채널은 건드리지 않음)
+    if (key === 'channel' && ok(key)) {
+      var have0 = {};
+      _offReadRows(sheet, def).forEach(function (r) { if (r[0]) have0[r[0]] = true; });
+      var addCh = OFF_CHANNEL_SEED.filter(function (r) { return OFF_ERP_CHANNELS.indexOf(r[0]) >= 0 && !have0[r[0]]; });
+      if (addCh.length) _offWriteBlock(sheet, def, sheet.getLastRow() + 1, addCh);
+      report.channelsAdded = addCh.map(function (r) { return r[0]; });
+    }
+    // 거래처매핑 초기 데이터 — 데이터 행이 하나도 없을 때만
+    if (key === 'customerMap' && ok(key) && sheet.getLastRow() < 2) _offWriteBlock(sheet, def, 2, OFF_CUSTOMER_SEED);
     // 설정 — 없는 키만 기본값으로 덧붙인다(사람이 고친 값·순서는 그대로)
-    if (key === 'settings' && report.mismatched.every(function (m) { return m.tab !== def.name; })) {
+    if (key === 'settings' && ok(key)) {
       var srows = _offReadRows(sheet, def), have = {};
       srows.forEach(function (r) { if (r[0]) have[r[0]] = true; });
       var add = OFF_SETTINGS_DEFAULT.filter(function (d) { return !have[d[0]]; });
@@ -168,6 +203,8 @@ function offline_setupSheets() {
       report.settingsAdded = add.map(function (d) { return d[0]; });
     }
   });
+  // 거래처 = 그 채널의 점포 — 거래처매핑의 거래처 중 점포마스터에 없는 것만 등록한다
+  if (ok('channel') && ok('store') && ok('customerMap')) report.storesAdded = _offSeedCustomerStores(ss);
   _offInvalidateCache();
   Logger.log('[offline_setupSheets] ' + JSON.stringify(report));
   return report;
@@ -285,6 +322,14 @@ function _offExtendTab(sheet, def, from) {
     });
     // 재고기준일오프셋 — 그 열을 이번에 붙일 때만(사람이 고친 값은 덮어쓰지 않음)
     if (from <= 9) rows.forEach(function (r) { if (r[9] === '' || r[9] == null) r[9] = OFF_STOCK_OFFSET_SEED[r[0]] || 0; });
+    // IN실적원천 — 그 열을 붙이는 이번 한 번만 ERP 채널(신세계·디에이블앤)을 켜고 코드체계 erp·upload로, 나머지는 input
+    if (from <= 10) rows.forEach(function (r) {
+      if (!r[0]) return;
+      var seed = null;
+      OFF_CHANNEL_SEED.forEach(function (x) { if (x[0] === r[0] && OFF_ERP_CHANNELS.indexOf(x[0]) >= 0) seed = x; });
+      if (!seed) { if (!r[10]) r[10] = 'input'; return; }
+      r[3] = seed[3]; if (!r[5]) r[5] = seed[5]; r[8] = seed[8]; r[10] = seed[10];
+    });
     _offWriteAll(sheet, def, rows, rows.length);
   }
   // 목표실적_월 대분류 — 기존(모델 단위) 행은 품목군에서 채운다(OFFLINE_LINE_CATEGORY: apps-script-offline-targets.js)
@@ -301,6 +346,24 @@ function _offExtendTab(sheet, def, from) {
   }
 }
 
+/* 거래처매핑의 거래처를 그 채널의 점포로 등록 — 점포마스터에 (코드체계, 거래처코드)가 없는 것만. 점포명 = 거래처매핑 거래처명.
+   있는 점포는 건드리지 않는다(최근확인일은 업로드가 갱신). 반환 = 추가한 'channel_id:거래처코드' 목록 */
+function _offSeedCustomerStores(ss) {
+  var chRows = _offReadRows(_offSheet(ss, 'channel'), OFF_TABS.channel), cs = _offCodeSystem(chRows), chIds = {};
+  chRows.forEach(function (r) { if (r[0]) chIds[r[0]] = true; });
+  var def = OFF_TABS.store, sheet = _offSheet(ss, 'store'), have = {};
+  _offReadRows(sheet, def).forEach(function (r) { if (r[0] && r[1]) have[cs(r[0]) + OFF_KEY_SEP + r[1]] = true; });
+  var today = _offToday(), add = [];
+  _offReadRows(_offSheet(ss, 'customerMap'), OFF_TABS.customerMap).forEach(function (c) {
+    var code = c[0], ch = c[2], k = cs(ch) + OFF_KEY_SEP + code;
+    if (!code || !chIds[ch] || have[k]) return;
+    have[k] = true;
+    add.push([ch, code, c[1] || code, '', today, today, _offStoreTypeOf(c[1], '')]);
+  });
+  if (add.length) _offWriteBlock(sheet, def, sheet.getLastRow() + 1, add);
+  return add.map(function (r) { return r[0] + ':' + r[1]; });
+}
+
 function _offFormatNewTab(sheet, def) {
   var W = def.headers.length;
   sheet.getRange(1, 1, 1, W).setValues([def.headers]).setFontWeight('bold');
@@ -314,7 +377,7 @@ function _offReadmeRows() {
   return [
     ['⚠ 원장 탭은 직접 수정 금지', '판매원장·재고_채널일별·재고_점포최신·하이마트_누적스냅샷·업로드로그는 대시보드(데이터 업로드)에서만 반영한다. 손으로 고치면 다음 업로드가 그 범위를 다시 덮어쓴다.'],
     ['제품마스터', '표준 SKU. sku_id(SKU-0001)는 자동 부여. 품목군은 대시보드 품목 분류 상수의 값만 허용. 대시보드 코드 매핑 화면에서 만든다.'],
-    ['채널마스터', '채널 목록. 업로드시작월(YYYY-MM) = 포털 업로드로 판매(OUT)를 집계하기 시작한 달 — 비어 있으면 업로드 없는 채널이라 OUT 실적은 목표 관리에서 입력·이관한 값을 쓴다. 활성=N 채널은 목표 관리 화면에 데이터가 있을 때만 보인다. 원천업태명 = 한 파일에 여러 채널이 섞인 포털 파일(이마트 점포별 일별 매출)의 업태명 값(쉼표로 여러 개). 점포명접두어 = 업태명이 없는 파일(이마트 재고)에서 점포마스터에 없는 점포를 가를 점포명 앞부분(쉼표로 여러 개). 코드체계채널 = 코드매핑을 빌려 쓸 채널(트레이더스 = emart, 빈칸 = 자기 자신). 재고기준일오프셋(일) = 재고 파일의 기준일 = 파일명 날짜 + 이 값(전자랜드·이마트·트레이더스 −1 = 받은 날의 전일 마감 재고, 하이마트 0). 스냅샷형 재고 파일에만 쓰인다.'],
+    ['채널마스터', '채널 목록. 업로드시작월(YYYY-MM) = 포털 업로드로 판매(OUT)를 집계하기 시작한 달 — 비어 있으면 업로드 없는 채널이라 OUT 실적은 목표 관리에서 입력·이관한 값을 쓴다. 활성=N 채널은 목표 관리 화면에 데이터가 있을 때만 보인다. 원천업태명 = 한 파일에 여러 채널이 섞인 포털 파일(이마트 점포별 일별 매출)의 업태명 값(쉼표로 여러 개). 점포명접두어 = 업태명이 없는 파일(이마트 재고)에서 점포마스터에 없는 점포를 가를 점포명 앞부분(쉼표로 여러 개). 코드체계채널 = 코드매핑을 빌려 쓸 채널(트레이더스 = emart, 빈칸 = 자기 자신 — ERP 매출이익리스트 채널 신세계·롯데백화점·디에이블앤·워크숍에이트·다파라솔루션 = erp, ERP 상품코드 매핑 한 벌을 같이 씀). 재고기준일오프셋(일) = 재고 파일의 기준일 = 파일명 날짜 + 이 값(전자랜드·이마트·트레이더스 −1 = 받은 날의 전일 마감 재고, 하이마트 0). 스냅샷형 재고 파일에만 쓰인다. IN실적원천 = upload면 업로드시작월부터 IN 실적도 판매원장에서 집계(우리 창고에서 직접 출고하는 ERP 채널 — 판매가 곧 매출, 목표 관리의 IN 실적 칸은 읽기 전용), input이면 목표 관리 입력·이관 값.'],
     ['코드매핑', '(channel_id, 원본코드) → sku_id·재고구분(정상/전시/리퍼). 한 SKU에 여러 코드 가능. sku_id가 빈 행은 비활성화된 매핑.'],
     ['점포마스터', '업로드 때 자동 추가·갱신. 지역 = 지부·지사. 점포유형 = 온라인/오프라인 — 새 점포는 점포명·지역 규칙(온라인·인터넷·e몰·쇼핑몰·(ON))으로 채우고, 사람이 고친 값은 그대로 둔다. 채널 상세 판매 분석의 온라인/오프라인 판매량이 이 값을 쓴다.'],
     ['판매원장', '판매 수량. 단위 day = 하루치(기간시작=기간종료), period = 여러 날 합. 원본코드만 저장하고 SKU는 읽을 때 코드매핑으로 해석. 설치완료수량은 하이마트만.'],
@@ -327,7 +390,8 @@ function _offReadmeRows() {
     ['단가마스터', '채널×품목군×모델 공급가 이력. 금액 = 수량 × 그 달 1일 기준 가장 최근 적용시작일의 공급가.'],
     ['이관로그', '기존 스프레드시트(진행현황·납품가 수수료) 이관 1회 = 1행. 대시보드에서 단가 행을 삭제한 기록(대상 "단가 삭제")도 여기에 남는다.'],
     ['설정', '재고 지표 기준값(키-값). 재고일수_판매기준일수·재고경보_과다일수·재고경보_결품위험일수·데이터지연_경고일수. 대시보드 재고 현황의 설정(관리자)에서 고친다 — 키 이름은 바꾸지 말 것.'],
-    ['공구목표_월', '공동구매 월 목표(벤더×품목군×모델, 목표수량·목표금액 — 원, VAT 포함). 출처 input = 대시보드 목표 관리 [공구 목표]에서 입력(이관이 덮어쓰지 않음), migration = 기존 \'공동구매 26년 목표\' 탭에서 이관. 파트 홈의 파트 목표 = 오프라인 IN 목표 금액 + 이 탭의 목표금액.']
+    ['공구목표_월', '공동구매 월 목표(벤더×품목군×모델, 목표수량·목표금액 — 원, VAT 포함). 출처 input = 대시보드 목표 관리 [공구 목표]에서 입력(이관이 덮어쓰지 않음), migration = 기존 \'공동구매 26년 목표\' 탭에서 이관. 파트 홈의 파트 목표 = 오프라인 IN 목표 금액 + 이 탭의 목표금액.'],
+    ['거래처매핑', 'ERP 매출이익리스트의 거래처코드 → channel_id(코드체계 erp 채널만). 거래처 = 그 채널의 점포(점포마스터 점포코드 = 거래처코드, 점포명 = 이 탭의 거래처명). 업로드 미리보기에서 채널을 고른 새 거래처는 반영 때 여기에 덧붙는다. 채널을 바꾸면 다음 업로드부터 그 채널로 들어간다.']
   ];
 }
 
@@ -498,6 +562,19 @@ function _offCodeSystem(channelRows) {
   return function (ch) { return m[ch] || ch; };
 }
 function _offCodeSystemOf(ss) { return _offCodeSystem(_offReadRows(_offSheet(ss, 'channel'), OFF_TABS.channel)); }
+/* 채널이 아닌 코드체계(erp) — 여러 채널이 코드체계채널로 가리키지만 그 이름의 채널은 없다. 코드매핑·미매칭코드는 이 이름으로 쌓인다.
+   → [{ id, name, channels[] }] (코드 매핑 화면의 그룹·채널 칸 표시용) */
+function _offVirtualCodeSystems(channelRows) {
+  var ids = {}, out = [], byId = {};
+  (channelRows || []).forEach(function (r) { if (r[0]) ids[r[0]] = true; });
+  (channelRows || []).forEach(function (r) {
+    var c = String(r[8] == null ? '' : r[8]).trim();
+    if (!r[0] || !c || ids[c]) return;
+    if (!byId[c]) { byId[c] = { id: c, name: OFF_CODE_SYSTEM_NAMES[c] || c, channels: [] }; out.push(byId[c]); }
+    byId[c].channels.push(r[0]);
+  });
+  return out;
+}
 /* 채널마스터 행의 재고기준일오프셋(일) — 열이 없거나(setup 전) 빈칸·정수가 아니면 0. ±7일까지만 받는다(잘못 적은 큰 값이 기준일을 멀리 보내지 않게) */
 function _offStockOffsetOf(r) {
   var v = r ? r[9] : '';
@@ -1004,12 +1081,18 @@ function _offGetMasters() {
   var hit = _cacheGetJSON(cache, 'offline:masters');
   if (hit) { hit.cached = true; return hit; }
   var ss = _offSS();
+  var chRows = _offReadRows(_offSheet(ss, 'channel'), OFF_TABS.channel).filter(function (r) { return r[0]; });
+  var custSheet = ss.getSheetByName(OFF_TABS.customerMap.name); // setup 재실행 전이면 없다
   var out = {
     success: true,
     skus: _offReadRows(_offSheet(ss, 'sku'), OFF_TABS.sku).filter(function (r) { return r[0]; }).map(_offSkuObj),
-    channels: _offReadRows(_offSheet(ss, 'channel'), OFF_TABS.channel).filter(function (r) { return r[0]; }).map(function (r) {
+    channels: chRows.map(function (r) {
       return { channelId: r[0], name: r[1], type: r[2], active: r[3], order: r[4], uploadStartMonth: r[5] || '',
-        bizNames: r[6] || '', storePrefix: r[7] || '', codeSystem: r[8] || r[0], stockOffset: _offStockOffsetOf(r) };
+        bizNames: r[6] || '', storePrefix: r[7] || '', codeSystem: r[8] || r[0], stockOffset: _offStockOffsetOf(r), inSource: _offInSourceOf(r) };
+    }),
+    codeSystems: _offVirtualCodeSystems(chRows),
+    customers: (custSheet ? _offReadRows(custSheet, OFF_TABS.customerMap) : []).filter(function (r) { return r[0]; }).map(function (r) {
+      return { code: r[0], name: r[1], channelId: r[2], note: r[3] };
     }),
     mappings: _offReadRows(_offSheet(ss, 'mapping'), OFF_TABS.mapping).filter(function (r) { return r[0] && r[1]; }).map(_offMappingObj),
     stores: _offReadRows(_offSheet(ss, 'store'), OFF_TABS.store).filter(function (r) { return r[0] && r[1]; }).map(function (r) {
@@ -1186,6 +1269,8 @@ function _offSaveMapping(data, auth) {
     _offReadRows(_offSheet(ss, 'sku'), OFF_TABS.sku).forEach(function (r) { if (r[0]) skuIds[r[0]] = true; });
     var chRows = _offReadRows(_offSheet(ss, 'channel'), OFF_TABS.channel);
     chRows.forEach(function (r) { if (r[0]) channelIds[r[0]] = true; });
+    // 채널이 아닌 코드체계(erp)로 온 매핑도 받는다 — 미매칭 목록이 그 이름으로 뜬다
+    _offVirtualCodeSystems(chRows).forEach(function (c) { channelIds[c.id] = true; });
     var cs = _offCodeSystem(chRows);
 
     var mDef = OFF_TABS.mapping, mSheet = _offSheet(ss, 'mapping');

@@ -1,7 +1,7 @@
 /* 오프라인 스프레드시트 구조 — offline_setupSheets와 시트 입출력 헬퍼.
 
    지키려는 성질:
-     · 16개 탭이 정해진 순서·헤더로 만들어지고, 1행 헤더 고정·굵게, 날짜·코드 열은 텍스트 서식
+     · 17개 탭이 정해진 순서·헤더로 만들어지고, 1행 헤더 고정·굵게, 날짜·코드 열은 텍스트 서식
      · 두 번 실행해도 안전 — 새로 만들지 않고, 데이터(채널 초기값 포함)를 중복시키지 않는다
      · 헤더가 다르면 고치지 않고 보고만 한다
      · OFFLINE_SHEET_ID는 Script Properties에서만 — 없으면 무엇을 넣어야 하는지 알려주며 실패
@@ -21,7 +21,7 @@ function check(l, c, extra) {
 const EXPECT = [
   ['README', ['탭', '설명']],
   ['제품마스터', ['sku_id', '표준명', '품목군', '모델', '옵션', '활성', '정렬순서', '비고']],
-  ['채널마스터', ['channel_id', '채널명', '유형', '활성', '정렬순서', '업로드시작월', '원천업태명', '점포명접두어', '코드체계채널', '재고기준일오프셋']],
+  ['채널마스터', ['channel_id', '채널명', '유형', '활성', '정렬순서', '업로드시작월', '원천업태명', '점포명접두어', '코드체계채널', '재고기준일오프셋', 'IN실적원천']],
   ['코드매핑', ['channel_id', '원본코드', 'sku_id', '재고구분', '원본상품명', '등록일', '등록자', '비고']],
   ['점포마스터', ['channel_id', '점포코드', '점포명', '지역', '최초등록일', '최근확인일', '점포유형']],
   ['판매원장', ['기간시작', '기간종료', '단위', 'channel_id', '점포코드', '원본코드', '수량', '설치완료수량', '출처', 'upload_id']],
@@ -34,7 +34,8 @@ const EXPECT = [
   ['단가마스터', ['channel_id', '품목군', '모델', '공급가', '적용시작일', '비고', '수정일', '수정자']],
   ['이관로그', ['실행시각', '실행자', '대상', '월 범위', '반영 행수', '미매핑 항목', '상태']],
   ['설정', ['키', '값', '설명']],
-  ['공구목표_월', ['연월', '벤더', '대분류', '품목군', '모델', '목표수량', '목표금액', '출처', '수정일', '수정자']]
+  ['공구목표_월', ['연월', '벤더', '대분류', '품목군', '모델', '목표수량', '목표금액', '출처', '수정일', '수정자']],
+  ['거래처매핑', ['거래처코드', '거래처명', 'channel_id', '비고']]
 ];
 // 텍스트 서식이어야 하는 열(날짜·코드·id) — 숫자 열은 절대 텍스트가 되면 안 된다(합계가 깨짐)
 const NUMERIC = {
@@ -52,12 +53,12 @@ function textColsFromFormats(sheet) {
 }
 
 (function main() {
-  console.log('\n[1] 빈 스프레드시트에서 실행 — 16개 탭 생성');
+  console.log('\n[1] 빈 스프레드시트에서 실행 — 17개 탭 생성');
   {
     const { ctx, off, tab } = loadOfflineGas();
     const rep = ctx.offline_setupSheets();
-    check('16개 탭을 만들었다고 보고', rep.created.length === 16 && rep.verified.length === 0 && rep.extended.length === 0 && rep.mismatched.length === 0, rep);
-    check('탭 순서 = README → 공구목표_월', JSON.stringify(off._order) === JSON.stringify(EXPECT.map(e => e[0])), off._order);
+    check('17개 탭을 만들었다고 보고', rep.created.length === 17 && rep.verified.length === 0 && rep.extended.length === 0 && rep.mismatched.length === 0, rep);
+    check('탭 순서 = README → 거래처매핑', JSON.stringify(off._order) === JSON.stringify(EXPECT.map(e => e[0])), off._order);
     EXPECT.forEach(([name, headers]) => {
       const sh = tab(name);
       check(name + ' 헤더', JSON.stringify(sh._grid[0].slice(0, headers.length)) === JSON.stringify(headers), sh._grid[0]);
@@ -69,22 +70,26 @@ function textColsFromFormats(sheet) {
         { text: [...text], numeric });
     });
     const ch = dataRows(tab('채널마스터'));
-    check('채널마스터 초기 데이터 7행', ch.length === 7, ch);
-    check('  ↳ 하이마트·전자랜드·이마트·트레이더스 활성', ch.filter(r => r[3] === 'Y').map(r => r[0]).join(',') === 'himart,etland,emart,traders', ch.map(r => r[0] + r[3]));
-    check('  ↳ 값이 명세 그대로(업로드시작월 2026-09 = 업로드 채널, 원천업태명·점포명접두어·코드체계채널)', JSON.stringify(ch.map(r => r.slice(0, 4).concat(r.slice(5, 9)))) === JSON.stringify([
-      ['himart', '하이마트', '전문점', 'Y', '2026-09', '', '', 'himart'], ['etland', '전자랜드', '전문점', 'Y', '2026-09', '', '', 'etland'],
-      ['emart', '이마트', '할인점', 'Y', '2026-09', '이마트', 'EM', 'emart'], ['traders', '트레이더스', '창고형', 'Y', '2026-09', '트레이더스', 'TR', 'emart'],
-      ['shinsegae', '신세계', '백화점', 'N', '', '', '', 'shinsegae'], ['theablen', '디에이블앤', '폐쇄몰', 'N', '', '', '', 'theablen'],
-      ['special', '기타 특판', '특판', 'N', '', '', '', 'special']]), ch);
+    check('채널마스터 초기 데이터 10행', ch.length === 10, ch);
+    check('  ↳ 기타 특판만 비활성', ch.filter(r => r[3] === 'Y').map(r => r[0]).join(',') === 'himart,etland,emart,traders,shinsegae,theablen,lotte_dept,workshop8,dapara', ch.map(r => r[0] + r[3]));
+    check('  ↳ 값이 명세 그대로(업로드시작월 2026-09 = 업로드 채널, 원천업태명·점포명접두어·코드체계채널·IN실적원천)', JSON.stringify(ch.map(r => r.slice(0, 4).concat(r.slice(5, 9), [r[10]]))) === JSON.stringify([
+      ['himart', '하이마트', '전문점', 'Y', '2026-09', '', '', 'himart', 'input'], ['etland', '전자랜드', '전문점', 'Y', '2026-09', '', '', 'etland', 'input'],
+      ['emart', '이마트', '할인점', 'Y', '2026-09', '이마트', 'EM', 'emart', 'input'], ['traders', '트레이더스', '창고형', 'Y', '2026-09', '트레이더스', 'TR', 'emart', 'input'],
+      ['shinsegae', '신세계', '백화점', 'Y', '2026-09', '', '', 'erp', 'upload'], ['theablen', '디에이블앤', '폐쇄몰', 'Y', '2026-09', '', '', 'erp', 'upload'],
+      ['special', '기타 특판', '특판', 'N', '', '', '', 'special', 'input'],
+      ['lotte_dept', '롯데백화점', '백화점', 'Y', '2026-09', '', '', 'erp', 'upload'], ['workshop8', '워크숍에이트', '폐쇄몰', 'Y', '2026-09', '', '', 'erp', 'upload'],
+      ['dapara', '다파라솔루션', '렌탈', 'Y', '2026-09', '', '', 'erp', 'upload']]), ch);
     const readme = dataRows(tab('README'));
     check('README에 "직접 수정 금지" 안내', readme.some(r => /직접 수정 금지/.test(r[0]) && /대시보드/.test(r[1])), readme[0]);
     check('README가 원장 탭을 전부 설명', EXPECT.slice(1).every(([n]) => readme.some(r => r[0] === n)));
     check('원장·마스터 탭은 비어 있음(초기 데이터 없음)', ['제품마스터', '코드매핑', '판매원장', '재고_채널일별', '미매칭코드', '목표실적_월', '단가마스터', '이관로그'].every(n => tab(n).getLastRow() === 1));
+    check('거래처매핑 초기값 9행 · 점포마스터 = 그 거래처 9곳(점포명 = 거래처명)', dataRows(tab('거래처매핑')).length === 9 &&
+      JSON.stringify(dataRows(tab('점포마스터')).map(r => r[0] + ':' + r[1] + ':' + r[2])) === JSON.stringify(dataRows(tab('거래처매핑')).map(r => r[2] + ':' + r[0] + ':' + r[1])), dataRows(tab('점포마스터')));
 
     console.log('\n[2] 두 번째 실행 — 만들지 않고 헤더만 확인, 데이터 불변');
     const before = JSON.stringify(off.getSheets().map(s => s._grid));
     const rep2 = ctx.offline_setupSheets();
-    check('새로 만든 탭 없음, 16개 모두 확인', rep2.created.length === 0 && rep2.verified.length === 16, rep2);
+    check('새로 만든 탭 없음, 17개 모두 확인(채널·점포 추가 없음)', rep2.created.length === 0 && rep2.verified.length === 17 && !rep2.channelsAdded.length && !rep2.storesAdded.length, rep2);
     check('시트 내용이 그대로(채널 초기값 중복 없음)', JSON.stringify(off.getSheets().map(s => s._grid)) === before);
 
     console.log('\n[3] 헤더가 바뀐 탭 — 고치지 않고 보고만');
@@ -100,8 +105,8 @@ function textColsFromFormats(sheet) {
     const sh = off.insertSheet('채널마스터');
     sh.getRange(1, 1, 1, 5).setValues([['channel_id', '채널명', '유형', '활성', '정렬순서']]);
     const rep = ctx.offline_setupSheets();
-    check('채널마스터는 열 확장, 나머지 15개 생성', rep.extended.length === 1 && rep.extended[0].tab === '채널마스터' && rep.created.length === 15, rep);
-    check('초기 데이터 7행(업로드시작월 포함)', dataRows(tab('채널마스터')).length === 7 && dataRows(tab('채널마스터'))[0][5] === '2026-09');
+    check('채널마스터는 열 확장, 나머지 16개 생성', rep.extended.length === 1 && rep.extended[0].tab === '채널마스터' && rep.created.length === 16, rep);
+    check('초기 데이터 10행(업로드시작월 포함)', dataRows(tab('채널마스터')).length === 10 && dataRows(tab('채널마스터'))[0][5] === '2026-09');
   }
 
   console.log('\n[5] OFFLINE_SHEET_ID가 없으면 무엇을 넣을지 알려주며 실패');
@@ -165,17 +170,17 @@ function textColsFromFormats(sheet) {
     ['목표실적_월', '단가마스터', '이관로그'].forEach(n => { delete off._sheets[n]; off._order.splice(off._order.indexOf(n), 1); });
     tab('README')._grid.length = 12;
     const rep = ctx.offline_setupSheets();
-    check('채널마스터 확장 보고(업로드시작월 + 트레이더스 분리 3열 + 재고기준일오프셋)', rep.extended.length === 1 && JSON.stringify(rep.extended[0].added) === '["업로드시작월","원천업태명","점포명접두어","코드체계채널","재고기준일오프셋"]', rep.extended);
+    check('채널마스터 확장 보고(업로드시작월 + 트레이더스 분리 3열 + 재고기준일오프셋 + IN실적원천)', rep.extended.length === 1 && JSON.stringify(rep.extended[0].added) === '["업로드시작월","원천업태명","점포명접두어","코드체계채널","재고기준일오프셋","IN실적원천"]', rep.extended);
     check('2-A 탭 3개 생성', JSON.stringify(rep.created) === JSON.stringify(['목표실적_월', '단가마스터', '이관로그']), rep.created);
     check('헤더가 다른 탭 없음', rep.mismatched.length === 0, rep.mismatched);
     const rows = dataRows(ch);
-    check('업로드시작월 초기값: himart·etland·emart·traders = 2026-09, 나머지 빈칸', rows.map(r => r[0] + '=' + r[5]).join() === 'himart=2026-09,etland=2026-09,emart=2026-09,traders=2026-09,shinsegae=,theablen=,special=', rows.map(r => r[5]));
+    check('업로드시작월 초기값: himart·etland·emart·traders·ERP 채널 = 2026-09, 기타 특판 빈칸', rows.map(r => r[0] + '=' + r[5]).join() === 'himart=2026-09,etland=2026-09,emart=2026-09,traders=2026-09,shinsegae=2026-09,theablen=2026-09,special=,lotte_dept=2026-09,workshop8=2026-09,dapara=2026-09', rows.map(r => r[5]));
     check('기존 값(사람이 바꾼 활성)은 그대로', rows[3][3] === 'Y' && rows[3][0] === 'traders');
     check('새 열은 텍스트 서식', ch._formats.some(f => f.r === 1 && f.c === 6 && f.f === '@'));
     check('README에 새 탭 설명이 추가됨', ['목표실적_월', '단가마스터', '이관로그'].every(n => dataRows(tab('README')).some(r => r[0] === n)));
     ch._grid[1][5] = ''; // 사람이 하이마트 업로드시작월을 비움
     const rep2 = ctx.offline_setupSheets();
-    check('다시 실행하면 확장 없이 확인만', rep2.extended.length === 0 && rep2.verified.length === 16, rep2);
+    check('다시 실행하면 확장 없이 확인만', rep2.extended.length === 0 && rep2.verified.length === 17, rep2);
     check('  ↳ 사람이 비운 업로드시작월을 다시 채우지 않음', dataRows(ch)[0][5] === '');
   }
 
@@ -228,7 +233,7 @@ function textColsFromFormats(sheet) {
     ch._grid[3][5] = '2026-08';                              // 사람이 이마트 업로드시작월을 바꿔 둠
     ch._grid[1][5] = '';                                     // 사람이 하이마트 업로드시작월을 비워 둠
     const rep = ctx.offline_setupSheets();
-    check('채널마스터 확장 보고(3열 + 재고기준일오프셋)', rep.extended.length === 1 && J(rep.extended[0].added) === J(['원천업태명', '점포명접두어', '코드체계채널', '재고기준일오프셋']), rep.extended);
+    check('채널마스터 확장 보고(3열 + 재고기준일오프셋 + IN실적원천)', rep.extended.length === 1 && J(rep.extended[0].added) === J(['원천업태명', '점포명접두어', '코드체계채널', '재고기준일오프셋', 'IN실적원천']), rep.extended);
     const rows = dataRows(ch), by = id => rows.find(r => r[0] === id);
     check('이마트 = 이마트 / EM / emart, 트레이더스 = 트레이더스 / TR / emart, 나머지 코드체계 = 자기 자신',
       J(by('emart').slice(6, 9)) === J(['이마트', 'EM', 'emart']) && J(by('traders').slice(6, 9)) === J(['트레이더스', 'TR', 'emart']) &&

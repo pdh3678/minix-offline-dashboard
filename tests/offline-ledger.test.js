@@ -230,11 +230,12 @@ const himartLedger = t => ledger(t).filter(r => r[3] === 'himart');
   {
     const { ctx, tab } = loadOfflineGas({ setup: true, today: TODAY });
     upload(ctx, etlandStock([['302001', 'A', 1, 0, 0, '가상A점'], ['302002', 'A', 1]]), '현재고_2026-09-25_1.xls');
-    let st = dataRows(tab('점포마스터'));
+    const etl = () => dataRows(tab('점포마스터')).filter(r => r[0] === 'etland'); // setup이 등록한 ERP 거래처 점포는 빼고
+    let st = etl();
     check('새 점포 2개(지역 = 지부, 최초·최근 = 오늘)', st.length === 2 && st[0][3] === '중부' && st[0][4] === TODAY && st[0][5] === TODAY, st);
     ctx._offToday = () => '2026-09-28';
     upload(ctx, etlandStock([['302001', 'A', 1, 0, 0, '가상A점(이전)']]), '현재고_2026-09-26_1.xls');
-    st = dataRows(tab('점포마스터'));
+    st = etl();
     const a = st.find(r => r[1] === '302001');
     check('점포명 갱신, 최초등록일 유지, 최근확인일 갱신', st.length === 2 && a[2] === '가상A점(이전)' && a[4] === TODAY && a[5] === '2026-09-28', a);
     check('이번 파일에 없는 점포는 그대로', st.find(r => r[1] === '302002')[5] === TODAY);

@@ -10,7 +10,7 @@
 
 const PART_GROUPS=[
   {key:'offline',label:'오프라인',color:'#2a78d6'},
-  {key:'closed',label:'폐쇄몰·특판',color:'#eb6834'},
+  {key:'closed',label:'특수(폐쇄몰·특판·렌탈)',color:'#eb6834'}, // 라벨은 GAS OFF_CHANNEL_GROUPS와 같게
   {key:'gongu',label:'공동구매',color:'#1baf7a'}
 ];
 const _partYm=(y,m)=>y+'-'+String(m).padStart(2,'0');

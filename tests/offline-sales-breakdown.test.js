@@ -50,11 +50,12 @@ const B = (g, data) => g.call('offline_getSalesBreakdown', data);
     check('새 시트 헤더에 점포유형', J(sh._grid[0].slice(0, 7)) === J(['channel_id', '점포코드', '점포명', '지역', '최초등록일', '최근확인일', '점포유형']));
     // 6열(판매 분석 전) 모양 + 기존 점포
     sh._grid.forEach(r => { r.length = 6; });
+    sh._grid.length = 1; // setup이 등록한 ERP 거래처 점포는 지우고 시작(다시 실행하면 뒤에 다시 붙는다)
     g.ctx._offWriteBlock(sh, { name: '점포마스터', headers: T.store.headers.slice(0, 6), text: [0, 1, 2, 3, 4, 5] }, 2,
       [['etland', '400040', '온라인쇼핑몰', '온라인', '', ''], ['etland', '302420', '용산5호점', 'B2B', '', ''], ['himart', 'C6450E', '수지롯데몰HM', '수원지사', '', ''], ['himart', 'Z1', '인터넷사업부', '본사', '', '']]);
     const rep = g.ctx.offline_setupSheets();
     check('6열 탭 → 점포유형 열 덧붙임(보고)', rep.extended.some(e => e.tab === '점포마스터' && J(e.added) === J(['점포유형'])), rep.extended);
-    const rows = dataRows(sh);
+    const rows = dataRows(sh).filter(r => r[0] === 'etland' || r[0] === 'himart');
     check('규칙으로 채움 — 온라인쇼핑몰·인터넷사업부 = 온라인, 용산5호점(B2B)·수지롯데몰HM = 오프라인', rows.map(r => r[2] + '=' + r[6]).join() === '온라인쇼핑몰=온라인,용산5호점=오프라인,수지롯데몰HM=오프라인,인터넷사업부=온라인', rows.map(r => r[6]));
     sh._grid[2][6] = '온라인'; // 사람이 용산5호점을 온라인으로
     const rep2 = g.ctx.offline_setupSheets();
