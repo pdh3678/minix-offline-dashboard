@@ -72,10 +72,11 @@ function _offDaysBetween(a, b) { // b − a (일), 'YYYY-MM-DD'
   var t = function (s) { return Date.UTC(+s.slice(0, 4), +s.slice(5, 7) - 1, +s.slice(8, 10)); };
   return Math.round((t(b) - t(a)) / 86400000);
 }
+// 채널 목록 — 채널대분류 순서(OFF_CHANNEL_CATEGORIES) → 정렬순서. 재고 지표의 채널·그룹·경보 순서가 이 순서다
 function _offChannelInfo(channelRows) {
   return channelRows.filter(function (r) { return r[0]; }).map(function (r) {
-    return { channelId: r[0], name: r[1], type: r[2], active: r[3], order: r[4], uploadStartMonth: _offIsYm(r[5]) ? r[5] : '', bizNames: r[6] || '' };
-  }).sort(function (a, b) { return (Number(a.order) || 99) - (Number(b.order) || 99); });
+    return { channelId: r[0], name: r[1], channelCategory: r[2], active: r[3], order: r[4], uploadStartMonth: _offIsYm(r[5]) ? r[5] : '', bizNames: r[6] || '' };
+  }).sort(function (a, b) { return (_offChannelCatRank(a.channelCategory) - _offChannelCatRank(b.channelCategory)) || ((Number(a.order) || 99) - (Number(b.order) || 99)); });
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -270,7 +271,7 @@ function _offInventoryCompute(input) {
   var channelsOut = chans.map(function (c) {
     var sd = stockDate[c.channelId] || '', sl = win[c.channelId] ? win[c.channelId].to : '';
     var um0 = unmatched.filter(function (u) { return u.channelId === c.channelId; });
-    return { channelId: c.channelId, name: c.name, type: c.type, active: c.active, order: c.order, uploadStartMonth: c.uploadStartMonth,
+    return { channelId: c.channelId, name: c.name, channelCategory: c.channelCategory, active: c.active, order: c.order, uploadStartMonth: c.uploadStartMonth,
       stockDate: sd, salesDate: sl, salesFrom: win[c.channelId] ? win[c.channelId].from : '',
       stockAge: sd ? _offDaysBetween(sd, today) : null, salesAge: sl ? _offDaysBetween(sl, today) : null,
       staleStock: !!sd && _offDaysBetween(sd, today) > STALE, staleSales: !!sl && _offDaysBetween(sl, today) > STALE,

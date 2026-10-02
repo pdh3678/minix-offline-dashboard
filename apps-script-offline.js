@@ -54,7 +54,8 @@ var OFF_TABS = {
   // 원천업태명·점포명접두어·코드체계채널(6~8)은 트레이더스 분리(2026-09-28)에서 덧붙인 열 — 설명은 README·OFF_CHANNEL_SEED 주석
   // 재고기준일오프셋(9, 숫자)은 재고 기준일 보정(2026-09-29)에서 덧붙인 열 — OFF_STOCK_OFFSET_SEED 주석
   // IN실적원천(10)은 ERP 매출이익리스트(2026-09-30)에서 덧붙인 열 — upload / input. OFF_ERP_CHANNELS 주석
-  channel:    { name: '채널마스터', headers: ['channel_id', '채널명', '유형', '활성', '정렬순서', '업로드시작월', '원천업태명', '점포명접두어', '코드체계채널', '재고기준일오프셋', 'IN실적원천'], text: [0, 1, 2, 3, 5, 6, 7, 8, 10] },
+  // 채널대분류(2)는 옛 '유형' 열을 바꾼 것, 채널별칭(11)은 덧붙인 열(2026-10-02) — OFF_CHANNEL_CATEGORIES 주석
+  channel:    { name: '채널마스터', headers: ['channel_id', '채널명', '채널대분류', '활성', '정렬순서', '업로드시작월', '원천업태명', '점포명접두어', '코드체계채널', '재고기준일오프셋', 'IN실적원천', '채널별칭'], text: [0, 1, 2, 3, 5, 6, 7, 8, 10, 11] },
   mapping:    { name: '코드매핑', headers: ['channel_id', '원본코드', 'sku_id', '재고구분', '원본상품명', '등록일', '등록자', '비고'], text: [0, 1, 2, 3, 4, 5, 6, 7] },
   // 점포유형(6)은 판매 분석(2026-09-29)에서 덧붙인 열 — 온라인/오프라인. OFF_ONLINE_STORE_RE 주석
   store:      { name: '점포마스터', headers: ['channel_id', '점포코드', '점포명', '지역', '최초등록일', '최근확인일', '점포유형'], text: [0, 1, 2, 3, 4, 5, 6] },
@@ -95,17 +96,28 @@ var OFF_UPLOAD_START_SEED = { himart: '2026-09', etland: '2026-09', emart: '2026
    점포명접두어 업태명이 없는 파일(이마트 재고)에서 점포마스터에도 없는 점포를 점포명 앞부분으로 가를 때. 쉼표로 여러 개
    코드체계채널 코드매핑을 빌려 쓸 채널 — 트레이더스는 이마트와 같은 상품코드라 이마트 매핑을 그대로 쓴다(빈칸 = 자기 자신) */
 var OFF_CHANNEL_SEED = [
-  ['himart', '하이마트', '전문점', 'Y', 1, '2026-09', '', '', 'himart', 0, 'input'],
-  ['etland', '전자랜드', '전문점', 'Y', 2, '2026-09', '', '', 'etland', -1, 'input'],
-  ['emart', '이마트', '할인점', 'Y', 3, '2026-09', '이마트', 'EM', 'emart', -1, 'input'],
-  ['traders', '트레이더스', '창고형', 'Y', 4, '2026-09', '트레이더스', 'TR', 'emart', -1, 'input'],
-  ['shinsegae', '신세계', '백화점', 'Y', 5, '2026-09', '', '', 'erp', 0, 'upload'],
-  ['theablen', '디에이블앤', '폐쇄몰', 'Y', 6, '2026-09', '', '', 'erp', 0, 'upload'],
-  ['special', '기타 특판', '특판', 'N', 7, '', '', '', 'special', 0, 'input'],
-  ['lotte_dept', '롯데백화점', '백화점', 'Y', 8, '2026-09', '', '', 'erp', 0, 'upload'],
-  ['workshop8', '워크숍에이트', '폐쇄몰', 'Y', 9, '2026-09', '', '', 'erp', 0, 'upload'],
-  ['dapara', '다파라솔루션', '렌탈', 'Y', 10, '2026-09', '', '', 'erp', 0, 'upload']
+  ['himart', '하이마트', '양판점', 'Y', 1, '2026-09', '', '', 'himart', 0, 'input', ''],
+  ['etland', '전자랜드', '양판점', 'Y', 2, '2026-09', '', '', 'etland', -1, 'input', ''],
+  ['emart', '이마트', '할인점', 'Y', 3, '2026-09', '이마트', 'EM', 'emart', -1, 'input', ''],
+  ['traders', '트레이더스', '할인점', 'Y', 4, '2026-09', '트레이더스', 'TR', 'emart', -1, 'input', ''],
+  ['shinsegae', '신세계백화점', '백화점', 'Y', 5, '2026-09', '', '', 'erp', 0, 'upload', '신세계'],
+  ['theablen', '디에이블앤', '폐쇄몰', 'Y', 6, '2026-09', '', '', 'erp', 0, 'upload', ''],
+  ['special', '기타 특판', '특판', 'N', 7, '', '', '', 'special', 0, 'input', ''],
+  ['lotte_dept', '롯데백화점', '백화점', 'Y', 8, '2026-09', '', '', 'erp', 0, 'upload', ''],
+  ['workshop8', '워크숍에이트', '폐쇄몰', 'Y', 9, '2026-09', '', '', 'erp', 0, 'upload', ''],
+  ['dapara', '다파라솔루션', '렌탈', 'Y', 10, '2026-09', '', '', 'erp', 0, 'upload', '']
 ];
+/* 채널대분류(2026-10-02) — 채널을 묶는 단계. 화면의 채널 목록·필터·소계와 파트 홈 채널군(apps-script-home.js OFF_CHANNEL_GROUPS)이 이 값을 쓴다.
+   이 순서가 곧 화면 순서다(양판점 → 할인점 → 백화점 → 폐쇄몰 → 렌탈 → 특판). 목록 밖 값은 맨 뒤(파트 홈은 오프라인으로 더하고 경고).
+   옛 '유형' 열은 setup이 한 번 채널대분류로 바꾼다 — 아는 채널은 위 초기값, 모르는 채널은 옛 이름을 바꿔서(OFF_CHANNEL_TYPE_RENAME).
+   채널별칭 = 다른 이름(쉼표로 여러 개) — 진행현황·납품가 이관이 원본 채널명을 채널에 연결할 때 채널명과 함께 본다.
+   채널별칭 열을 붙이는 이번 한 번만 신세계 채널명을 '신세계백화점'으로 바꾸고 별칭 '신세계'를 넣는다(OFF_CHANNEL_RENAME) — 이후 사람이 고친 값은 그대로.
+   channel_id는 바꾸지 않는다(판매원장·재고·목표·매핑이 channel_id로 이어진다). */
+var OFF_CHANNEL_CATEGORIES = ['양판점', '할인점', '백화점', '폐쇄몰', '렌탈', '특판'];
+var OFF_CHANNEL_TYPE_RENAME = { '전문점': '양판점', '창고형': '할인점' };
+var OFF_CHANNEL_RENAME = { shinsegae: { from: '신세계', to: '신세계백화점', alias: '신세계' } };
+function _offChannelCatRank(cat) { var i = OFF_CHANNEL_CATEGORIES.indexOf(String(cat == null ? '' : cat).trim()); return i < 0 ? 99 : i; }
+function _offChannelAliases(r) { return _offSplitList(r ? r[11] : ''); }
 /* ERP 매출이익리스트 채널(2026-09-30) — 백화점·폐쇄몰·렌탈. 우리 창고에서 고객에게 직접 출고한 기록이라 그 파일의 판매가 곧
    우리 매출(IN)이자 판매(OUT)다. 코드체계채널 erp = ERP 상품코드 매핑 한 벌을 다섯 채널이 같이 쓴다(erp는 채널이 아니라 코드체계 이름).
    IN실적원천 upload = 업로드시작월부터 IN 실적도 판매원장에서 집계(목표 관리의 IN 실적 칸은 읽기 전용), input = 목표 관리 입력·이관 값.
@@ -159,7 +171,7 @@ var OFF_KEY_SEP = '\u0001';
    헤더를 덧붙이고 초기값을 채운다(extended). README 본문은 대시보드가 관리하는 설명이라 매번 새로 쓴다. */
 function offline_setupSheets() {
   var ss = _offSS();
-  var report = { created: [], verified: [], extended: [], mismatched: [], settingsAdded: [], channelsAdded: [], storesAdded: [] };
+  var report = { created: [], verified: [], extended: [], mismatched: [], settingsAdded: [], channelsAdded: [], storesAdded: [], channelCategory: null, channelRenamed: [] };
   var ok = function (key) { return report.mismatched.every(function (m) { return m.tab !== OFF_TABS[key].name; }); };
   OFF_TAB_ORDER.forEach(function (key) {
     var def = OFF_TABS[key];
@@ -170,6 +182,8 @@ function offline_setupSheets() {
       report.created.push(def.name);
       if (key === 'readme') _offWriteBlock(sheet, def, 2, _offReadmeRows());
     } else {
+      // 채널마스터 옛 '유형' 열 → 채널대분류(머리글이 '유형'일 때 한 번) — 아래 머리글 검증보다 먼저
+      if (key === 'channel') report.channelCategory = _offMigrateChannelType(sheet, def);
       var W = def.headers.length;
       var actual = sheet.getRange(1, 1, 1, W).getValues()[0].map(function (v) { return String(v || '').trim(); });
       var n = 0;
@@ -177,8 +191,9 @@ function offline_setupSheets() {
       var restBlank = actual.slice(n).every(function (v) { return v === ''; });
       if (n === W) report.verified.push(def.name);
       else if (n > 0 && restBlank) {
-        _offExtendTab(sheet, def, n);
+        var ext = _offExtendTab(sheet, def, n);
         report.extended.push({ tab: def.name, added: def.headers.slice(n) });
+        if (ext && ext.renamed) report.channelRenamed = ext.renamed;
       } else report.mismatched.push({ tab: def.name, expected: def.headers, actual: actual });
       if (key === 'readme') {
         var prevRows = Math.max(0, sheet.getLastRow() - 1);
@@ -307,9 +322,30 @@ function offline_fixStockDates() {
   });
 }
 
-// 기존 탭 뒤에 새 열(from부터)을 붙인다 — 헤더·텍스트 서식, 채널마스터면 새 열의 초기값
+/* 채널마스터 '유형' → '채널대분류' — C열 머리글이 '유형'일 때만(한 번) 머리글을 바꾸고 값을 옮긴다(채널마스터 탭이 이미 있을 때).
+   새 값 = 채널 초기값(OFF_CHANNEL_SEED)의 채널대분류, 초기값에 없는 채널은 옛 유형 이름을 바꿔서(전문점 → 양판점, 창고형 → 할인점, 그 외 그대로).
+   반환 = 옮긴 결과 [{ channelId, from, to }] (setup 보고) | 이미 옮겼으면 null */
+function _offMigrateChannelType(sheet, def) {
+  var head = sheet.getRange(1, 3, 1, 1);
+  if (String(head.getValues()[0][0] || '').trim() !== '유형') return null;
+  head.setValues([[def.headers[2]]]);
+  var seed = {};
+  OFF_CHANNEL_SEED.forEach(function (r) { seed[r[0]] = r[2]; });
+  var rows = _offReadRows(sheet, def), out = [];
+  rows.forEach(function (r) {
+    if (!r[0]) return;
+    var from = r[2], to = seed[r[0]] || OFF_CHANNEL_TYPE_RENAME[from] || from;
+    r[2] = to;
+    out.push({ channelId: r[0], from: from, to: to });
+  });
+  _offWriteAll(sheet, def, rows, rows.length);
+  return out;
+}
+
+// 기존 탭 뒤에 새 열(from부터)을 붙인다 — 헤더·텍스트 서식, 채널마스터면 새 열의 초기값.
+// 반환 = 채널마스터에서 채널명을 바꿨으면 { renamed: [{ channelId, from, to }] } (setup 보고)
 function _offExtendTab(sheet, def, from) {
-  var W = def.headers.length;
+  var W = def.headers.length, out = {};
   sheet.getRange(1, from + 1, 1, W - from).setValues([def.headers.slice(from)]).setFontWeight('bold');
   def.text.forEach(function (c) { if (c >= from) sheet.getRange(1, c + 1, sheet.getMaxRows(), 1).setNumberFormat('@'); });
   if (def === OFF_TABS.channel) {
@@ -333,6 +369,16 @@ function _offExtendTab(sheet, def, from) {
       if (!seed) { if (!r[10]) r[10] = 'input'; return; }
       r[3] = seed[3]; if (!r[5]) r[5] = seed[5]; r[8] = seed[8]; r[10] = seed[10];
     });
+    // 채널별칭 — 그 열을 붙이는 이번 한 번만 채널명 변경(신세계 → 신세계백화점) + 옛 이름을 별칭으로(진행현황 재이관이 그대로 연결되게)
+    if (from <= 11) {
+      out.renamed = [];
+      rows.forEach(function (r) {
+        var rn = OFF_CHANNEL_RENAME[r[0]];
+        if (!rn) return;
+        if (r[1] === rn.from) { r[1] = rn.to; out.renamed.push({ channelId: r[0], from: rn.from, to: rn.to }); }
+        if (_offChannelAliases(r).indexOf(rn.alias) < 0) r[11] = _offChannelAliases(r).concat([rn.alias]).join(', ');
+      });
+    }
     _offWriteAll(sheet, def, rows, rows.length);
   }
   // 목표실적_월 대분류 — 기존(모델 단위) 행은 품목군에서 채운다(OFFLINE_LINE_CATEGORY: apps-script-offline-targets.js)
@@ -347,6 +393,7 @@ function _offExtendTab(sheet, def, from) {
     trows.forEach(function (r) { if (!r[11] && r[2]) r[11] = OFFLINE_LINE_CATEGORY[r[2]] || ''; });
     _offWriteAll(sheet, def, trows, trows.length);
   }
+  return out;
 }
 
 /* 거래처매핑의 거래처를 그 채널의 점포로 등록 — 점포마스터에 (코드체계, 거래처코드)가 없는 것만. 점포명 = 거래처매핑 거래처명.
@@ -380,7 +427,7 @@ function _offReadmeRows() {
   return [
     ['⚠ 원장 탭은 직접 수정 금지', '판매원장·재고_채널일별·재고_점포최신·하이마트_누적스냅샷·업로드로그는 대시보드(데이터 업로드)에서만 반영한다. 손으로 고치면 다음 업로드가 그 범위를 다시 덮어쓴다.'],
     ['제품마스터', '표준 SKU. sku_id(SKU-0001)는 자동 부여. 품목군은 대시보드 품목 분류 상수의 값만 허용. 대시보드 코드 매핑 화면에서 만든다.'],
-    ['채널마스터', '채널 목록. 업로드시작월(YYYY-MM) = 포털 업로드로 판매(OUT)를 집계하기 시작한 달 — 비어 있으면 업로드 없는 채널이라 OUT 실적은 목표 관리에서 입력·이관한 값을 쓴다. 활성=N 채널은 목표 관리 화면에 데이터가 있을 때만 보인다. 원천업태명 = 한 파일에 여러 채널이 섞인 포털 파일(이마트 점포별 일별 매출)의 업태명 값(쉼표로 여러 개). 점포명접두어 = 업태명이 없는 파일(이마트 재고)에서 점포마스터에 없는 점포를 가를 점포명 앞부분(쉼표로 여러 개). 코드체계채널 = 코드매핑을 빌려 쓸 채널(트레이더스 = emart, 빈칸 = 자기 자신 — ERP 매출이익리스트 채널 신세계·롯데백화점·디에이블앤·워크숍에이트·다파라솔루션 = erp, ERP 상품코드 매핑 한 벌을 같이 씀). 재고기준일오프셋(일) = 재고 파일의 기준일 = 파일명 날짜 + 이 값(전자랜드·이마트·트레이더스 −1 = 받은 날의 전일 마감 재고, 하이마트 0). 스냅샷형 재고 파일에만 쓰인다. IN실적원천 = upload면 업로드시작월부터 IN 실적도 판매원장에서 집계(우리 창고에서 직접 출고하는 ERP 채널 — 판매가 곧 매출, 목표 관리의 IN 실적 칸은 읽기 전용), input이면 목표 관리 입력·이관 값.'],
+    ['채널마스터', '채널 목록. channel_id는 바꾸지 말 것(판매원장·재고·목표·매핑이 이 값으로 이어진다). 채널대분류 = 양판점·할인점·백화점·폐쇄몰·렌탈·특판 중 하나 — 화면의 채널 묶음·필터·소계 순서이고, 파트 홈 채널군은 양판점·할인점·백화점 = 오프라인, 폐쇄몰·렌탈·특판 = 특수. 채널별칭 = 채널의 다른 이름(쉼표로 여러 개, 예: 신세계백화점의 "신세계") — 진행현황·납품가 이관이 원본 채널명을 연결할 때 채널명과 함께 본다. 업로드시작월(YYYY-MM) = 포털 업로드로 판매(OUT)를 집계하기 시작한 달 — 비어 있으면 업로드 없는 채널이라 OUT 실적은 목표 관리에서 입력·이관한 값을 쓴다. 활성=N 채널은 목표 관리 화면에 데이터가 있을 때만 보인다. 원천업태명 = 한 파일에 여러 채널이 섞인 포털 파일(이마트 점포별 일별 매출)의 업태명 값(쉼표로 여러 개). 점포명접두어 = 업태명이 없는 파일(이마트 재고)에서 점포마스터에 없는 점포를 가를 점포명 앞부분(쉼표로 여러 개). 코드체계채널 = 코드매핑을 빌려 쓸 채널(트레이더스 = emart, 빈칸 = 자기 자신 — ERP 매출이익리스트 채널 신세계백화점·롯데백화점·디에이블앤·워크숍에이트·다파라솔루션 = erp, ERP 상품코드 매핑 한 벌을 같이 씀). 재고기준일오프셋(일) = 재고 파일의 기준일 = 파일명 날짜 + 이 값(전자랜드·이마트·트레이더스 −1 = 받은 날의 전일 마감 재고, 하이마트 0). 스냅샷형 재고 파일에만 쓰인다. IN실적원천 = upload면 업로드시작월부터 IN 실적도 판매원장에서 집계(우리 창고에서 직접 출고하는 ERP 채널 — 판매가 곧 매출, 목표 관리의 IN 실적 칸은 읽기 전용), input이면 목표 관리 입력·이관 값.'],
     ['코드매핑', '(channel_id, 원본코드) → sku_id·재고구분(정상/전시/리퍼). 한 SKU에 여러 코드 가능. sku_id가 빈 행은 비활성화된 매핑.'],
     ['점포마스터', '업로드 때 자동 추가·갱신. 지역 = 지부·지사. 점포유형 = 온라인/오프라인 — 새 점포는 점포명·지역 규칙(온라인·인터넷·e몰·쇼핑몰·(ON))으로 채우고, 사람이 고친 값은 그대로 둔다. 채널 상세 판매 분석의 온라인/오프라인 판매량이 이 값을 쓴다.'],
     ['판매원장', '판매 수량. 단위 day = 하루치(기간시작=기간종료), period = 여러 날 합. 원본코드만 저장하고 SKU는 읽을 때 코드매핑으로 해석. 설치완료수량은 하이마트만. 금액·수수료는 파일에 금액이 있는 채널만(ERP 매출이익리스트 — 원, 반품·취소는 음수) — 금액이 있는 행은 그 값, 빈 행은 수량 × 단가마스터 공급가로 금액을 계산한다.'],
@@ -1161,9 +1208,11 @@ function _offGetMasters() {
     success: true,
     skus: _offReadRows(_offSheet(ss, 'sku'), OFF_TABS.sku).filter(function (r) { return r[0]; }).map(_offSkuObj),
     channels: chRows.map(function (r) {
-      return { channelId: r[0], name: r[1], type: r[2], active: r[3], order: r[4], uploadStartMonth: r[5] || '',
-        bizNames: r[6] || '', storePrefix: r[7] || '', codeSystem: r[8] || r[0], stockOffset: _offStockOffsetOf(r), inSource: _offInSourceOf(r) };
+      return { channelId: r[0], name: r[1], channelCategory: r[2], active: r[3], order: r[4], uploadStartMonth: r[5] || '',
+        bizNames: r[6] || '', storePrefix: r[7] || '', codeSystem: r[8] || r[0], stockOffset: _offStockOffsetOf(r), inSource: _offInSourceOf(r),
+        aliases: _offChannelAliases(r) };
     }),
+    channelCategories: OFF_CHANNEL_CATEGORIES,
     codeSystems: _offVirtualCodeSystems(chRows),
     customers: (custSheet ? _offReadRows(custSheet, OFF_TABS.customerMap) : []).filter(function (r) { return r[0]; }).map(function (r) {
       return { code: r[0], name: r[1], channelId: r[2], note: r[3] };
@@ -1227,7 +1276,7 @@ function _offGetStatus() {
   var monthStart = today.slice(0, 8) + '01';
   var yesterday = _offAddDays(today, -1);
   var byCh = {};
-  channels.forEach(function (r) { byCh[r[0]] = { channelId: r[0], name: r[1], active: r[3], order: r[4], salesLast: '', stockLast: '', covered: {} }; });
+  channels.forEach(function (r) { byCh[r[0]] = { channelId: r[0], name: r[1], channelCategory: r[2], active: r[3], order: r[4], salesLast: '', stockLast: '', covered: {} }; });
   _offLogCoverage(logRows, byCh);
   var out = { success: true, today: today, month: today.slice(0, 7), channels: [] };
   Object.keys(byCh).forEach(function (id) {
@@ -1235,9 +1284,10 @@ function _offGetStatus() {
     if (st.active !== 'Y' && !st.salesLast && !st.stockLast) return; // 안 쓰는 채널은 생략
     var missing = [];
     for (var d = monthStart; d <= yesterday; d = _offAddDays(d, 1)) if (!st.covered[d]) missing.push(d);
-    out.channels.push({ channelId: id, name: st.name, salesLast: st.salesLast, stockLast: st.stockLast, missingDays: missing, order: st.order });
+    out.channels.push({ channelId: id, name: st.name, channelCategory: st.channelCategory, salesLast: st.salesLast, stockLast: st.stockLast, missingDays: missing, order: st.order });
   });
-  out.channels.sort(function (x, y) { return (Number(x.order) || 99) - (Number(y.order) || 99); });
+  // 채널대분류 순서 → 정렬순서 (화면이 대분류로 묶어 보여 준다)
+  out.channels.sort(function (x, y) { return (_offChannelCatRank(x.channelCategory) - _offChannelCatRank(y.channelCategory)) || ((Number(x.order) || 99) - (Number(y.order) || 99)); });
   _cachePutJSON(cache, 'offline:status', out, OFF_CACHE_TTL_SEC);
   return out;
 }

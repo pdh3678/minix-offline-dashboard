@@ -64,13 +64,13 @@ const setOffsets = (g, map) => { const T = g.ctx.OFF_TABS, sh = g.tab('채널마
     const g = uniqueIds(loadOfflineGas({ setup: true, today: TODAY }));
     const ch = channels(g);
     check('새 시트: 재고기준일오프셋 = himart 0 · etland/emart/traders −1 · 나머지 0', ch.map(r => r[0] + '=' + r[9]).join() === 'himart=0,etland=-1,emart=-1,traders=-1,shinsegae=0,theablen=0,special=0,lotte_dept=0,workshop8=0,dapara=0', ch.map(r => r[9]));
-    check('헤더 10열', J(g.tab('채널마스터')._grid[0].slice(0, 10)) === J(['channel_id', '채널명', '유형', '활성', '정렬순서', '업로드시작월', '원천업태명', '점포명접두어', '코드체계채널', '재고기준일오프셋']));
+    check('헤더 10열', J(g.tab('채널마스터')._grid[0].slice(0, 10)) === J(['channel_id', '채널명', '채널대분류', '활성', '정렬순서', '업로드시작월', '원천업태명', '점포명접두어', '코드체계채널', '재고기준일오프셋']));
     // 트레이더스 분리 이후 모양(9열)으로 되돌린 뒤 — 사람이 바꾼 값이 있는 상태
     const sh = g.tab('채널마스터');
     sh._grid.forEach(row => { row.length = 9; });
     sh._grid[1][3] = 'N'; // 하이마트 활성을 사람이 바꿔 둠
     const rep = g.ctx.offline_setupSheets();
-    check('9열 탭 → 재고기준일오프셋(+ 그 뒤 IN실적원천) 열만 덧붙임(보고)', rep.extended.length === 1 && J(rep.extended[0].added) === J(['재고기준일오프셋', 'IN실적원천']), rep.extended);
+    check('9열 탭 → 재고기준일오프셋(+ 그 뒤 IN실적원천·채널별칭) 열만 덧붙임(보고)', rep.extended.length === 1 && J(rep.extended[0].added) === J(['재고기준일오프셋', 'IN실적원천', '채널별칭']), rep.extended);
     const ch2 = channels(g);
     check('  ↳ 오프셋 초기값 채움, 다른 열은 그대로(트레이더스를 다시 켜지 않음·하이마트 활성 N 유지)', ch2.map(r => r[9]).join() === '0,-1,-1,-1,0,0,0,0,0,0' && ch2[0][3] === 'N' && ch2[3][8] === 'emart', ch2);
     sh._grid[2][9] = 0; // 사람이 전자랜드 오프셋을 0으로 바꿈

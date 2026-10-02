@@ -21,7 +21,7 @@ function check(l, c, extra) {
 const EXPECT = [
   ['README', ['탭', '설명']],
   ['제품마스터', ['sku_id', '표준명', '품목군', '모델', '옵션', '활성', '정렬순서', '비고']],
-  ['채널마스터', ['channel_id', '채널명', '유형', '활성', '정렬순서', '업로드시작월', '원천업태명', '점포명접두어', '코드체계채널', '재고기준일오프셋', 'IN실적원천']],
+  ['채널마스터', ['channel_id', '채널명', '채널대분류', '활성', '정렬순서', '업로드시작월', '원천업태명', '점포명접두어', '코드체계채널', '재고기준일오프셋', 'IN실적원천', '채널별칭']],
   ['코드매핑', ['channel_id', '원본코드', 'sku_id', '재고구분', '원본상품명', '등록일', '등록자', '비고']],
   ['점포마스터', ['channel_id', '점포코드', '점포명', '지역', '최초등록일', '최근확인일', '점포유형']],
   ['판매원장', ['기간시작', '기간종료', '단위', 'channel_id', '점포코드', '원본코드', '수량', '설치완료수량', '출처', 'upload_id']],
@@ -72,13 +72,14 @@ function textColsFromFormats(sheet) {
     const ch = dataRows(tab('채널마스터'));
     check('채널마스터 초기 데이터 10행', ch.length === 10, ch);
     check('  ↳ 기타 특판만 비활성', ch.filter(r => r[3] === 'Y').map(r => r[0]).join(',') === 'himart,etland,emart,traders,shinsegae,theablen,lotte_dept,workshop8,dapara', ch.map(r => r[0] + r[3]));
-    check('  ↳ 값이 명세 그대로(업로드시작월 2026-09 = 업로드 채널, 원천업태명·점포명접두어·코드체계채널·IN실적원천)', JSON.stringify(ch.map(r => r.slice(0, 4).concat(r.slice(5, 9), [r[10]]))) === JSON.stringify([
-      ['himart', '하이마트', '전문점', 'Y', '2026-09', '', '', 'himart', 'input'], ['etland', '전자랜드', '전문점', 'Y', '2026-09', '', '', 'etland', 'input'],
-      ['emart', '이마트', '할인점', 'Y', '2026-09', '이마트', 'EM', 'emart', 'input'], ['traders', '트레이더스', '창고형', 'Y', '2026-09', '트레이더스', 'TR', 'emart', 'input'],
-      ['shinsegae', '신세계', '백화점', 'Y', '2026-09', '', '', 'erp', 'upload'], ['theablen', '디에이블앤', '폐쇄몰', 'Y', '2026-09', '', '', 'erp', 'upload'],
-      ['special', '기타 특판', '특판', 'N', '', '', '', 'special', 'input'],
-      ['lotte_dept', '롯데백화점', '백화점', 'Y', '2026-09', '', '', 'erp', 'upload'], ['workshop8', '워크숍에이트', '폐쇄몰', 'Y', '2026-09', '', '', 'erp', 'upload'],
-      ['dapara', '다파라솔루션', '렌탈', 'Y', '2026-09', '', '', 'erp', 'upload']]), ch);
+    check('  ↳ 값이 명세 그대로(채널대분류, 업로드시작월 2026-09 = 업로드 채널, 원천업태명·점포명접두어·코드체계채널·IN실적원천·채널별칭)', JSON.stringify(ch.map(r => r.slice(0, 4).concat(r.slice(5, 9), [r[10], r[11]]))) === JSON.stringify([
+      ['himart', '하이마트', '양판점', 'Y', '2026-09', '', '', 'himart', 'input', ''], ['etland', '전자랜드', '양판점', 'Y', '2026-09', '', '', 'etland', 'input', ''],
+      ['emart', '이마트', '할인점', 'Y', '2026-09', '이마트', 'EM', 'emart', 'input', ''], ['traders', '트레이더스', '할인점', 'Y', '2026-09', '트레이더스', 'TR', 'emart', 'input', ''],
+      ['shinsegae', '신세계백화점', '백화점', 'Y', '2026-09', '', '', 'erp', 'upload', '신세계'], ['theablen', '디에이블앤', '폐쇄몰', 'Y', '2026-09', '', '', 'erp', 'upload', ''],
+      ['special', '기타 특판', '특판', 'N', '', '', '', 'special', 'input', ''],
+      ['lotte_dept', '롯데백화점', '백화점', 'Y', '2026-09', '', '', 'erp', 'upload', ''], ['workshop8', '워크숍에이트', '폐쇄몰', 'Y', '2026-09', '', '', 'erp', 'upload', ''],
+      ['dapara', '다파라솔루션', '렌탈', 'Y', '2026-09', '', '', 'erp', 'upload', '']]), ch);
+    check('  ↳ 채널대분류는 정해진 6개 중 하나', ch.every(r => ctx.OFF_CHANNEL_CATEGORIES.indexOf(r[2]) >= 0) && JSON.stringify(ctx.OFF_CHANNEL_CATEGORIES) === JSON.stringify(['양판점', '할인점', '백화점', '폐쇄몰', '렌탈', '특판']));
     const readme = dataRows(tab('README'));
     check('README에 "직접 수정 금지" 안내', readme.some(r => /직접 수정 금지/.test(r[0]) && /대시보드/.test(r[1])), readme[0]);
     check('README가 원장 탭을 전부 설명', EXPECT.slice(1).every(([n]) => readme.some(r => r[0] === n)));
@@ -170,7 +171,7 @@ function textColsFromFormats(sheet) {
     ['목표실적_월', '단가마스터', '이관로그'].forEach(n => { delete off._sheets[n]; off._order.splice(off._order.indexOf(n), 1); });
     tab('README')._grid.length = 12;
     const rep = ctx.offline_setupSheets();
-    check('채널마스터 확장 보고(업로드시작월 + 트레이더스 분리 3열 + 재고기준일오프셋 + IN실적원천)', rep.extended.length === 1 && JSON.stringify(rep.extended[0].added) === '["업로드시작월","원천업태명","점포명접두어","코드체계채널","재고기준일오프셋","IN실적원천"]', rep.extended);
+    check('채널마스터 확장 보고(업로드시작월 + 트레이더스 분리 3열 + 재고기준일오프셋 + IN실적원천 + 채널별칭)', rep.extended.length === 1 && JSON.stringify(rep.extended[0].added) === '["업로드시작월","원천업태명","점포명접두어","코드체계채널","재고기준일오프셋","IN실적원천","채널별칭"]', rep.extended);
     check('2-A 탭 3개 생성', JSON.stringify(rep.created) === JSON.stringify(['목표실적_월', '단가마스터', '이관로그']), rep.created);
     check('헤더가 다른 탭 없음', rep.mismatched.length === 0, rep.mismatched);
     const rows = dataRows(ch);
@@ -233,7 +234,7 @@ function textColsFromFormats(sheet) {
     ch._grid[3][5] = '2026-08';                              // 사람이 이마트 업로드시작월을 바꿔 둠
     ch._grid[1][5] = '';                                     // 사람이 하이마트 업로드시작월을 비워 둠
     const rep = ctx.offline_setupSheets();
-    check('채널마스터 확장 보고(3열 + 재고기준일오프셋 + IN실적원천)', rep.extended.length === 1 && J(rep.extended[0].added) === J(['원천업태명', '점포명접두어', '코드체계채널', '재고기준일오프셋', 'IN실적원천']), rep.extended);
+    check('채널마스터 확장 보고(3열 + 재고기준일오프셋 + IN실적원천 + 채널별칭)', rep.extended.length === 1 && J(rep.extended[0].added) === J(['원천업태명', '점포명접두어', '코드체계채널', '재고기준일오프셋', 'IN실적원천', '채널별칭']), rep.extended);
     const rows = dataRows(ch), by = id => rows.find(r => r[0] === id);
     check('이마트 = 이마트 / EM / emart, 트레이더스 = 트레이더스 / TR / emart, 나머지 코드체계 = 자기 자신',
       J(by('emart').slice(6, 9)) === J(['이마트', 'EM', 'emart']) && J(by('traders').slice(6, 9)) === J(['트레이더스', 'TR', 'emart']) &&
@@ -245,6 +246,52 @@ function textColsFromFormats(sheet) {
     const rep2 = ctx.offline_setupSheets();
     check('다시 실행하면 확장 없이 확인만 — 트레이더스를 다시 켜지 않음', rep2.extended.length === 0 && dataRows(ch).find(r => r[0] === 'traders')[3] === 'N', rep2);
     check('README 채널마스터 설명에 새 열', dataRows(tab('README')).some(r => r[0] === '채널마스터' && /원천업태명/.test(r[1]) && /코드체계채널/.test(r[1])));
+  }
+
+  console.log('\n[13] 채널대분류(2026-10-02) — 운영 모양(11열, C열 "유형") 채널마스터: 유형 → 채널대분류, 채널별칭 열, 신세계 → 신세계백화점');
+  {
+    const { ctx, tab } = loadOfflineGas({ setup: true });
+    const J = JSON.stringify;
+    const ch = tab('채널마스터');
+    // 운영 모양으로 되돌린다: 머리 11열(C열 '유형'), 옛 유형 값, 채널명 '신세계', 사람이 고친 값(트레이더스 비활성), 초기값에 없는 채널(popup, 유형 전문점)
+    const OLD = [
+      ['himart', '하이마트', '전문점', 'Y', 1, '2026-09', '', '', 'himart', 0, 'input'], ['etland', '전자랜드', '전문점', 'Y', 2, '2026-09', '', '', 'etland', -1, 'input'],
+      ['emart', '이마트', '할인점', 'Y', 3, '2026-09', '이마트', 'EM', 'emart', -1, 'input'], ['traders', '트레이더스', '창고형', 'N', 4, '2026-09', '트레이더스', 'TR', 'emart', -1, 'input'],
+      ['shinsegae', '신세계', '백화점', 'Y', 5, '2026-09', '', '', 'erp', 0, 'upload'], ['theablen', '디에이블앤', '폐쇄몰', 'Y', 6, '2026-09', '', '', 'erp', 0, 'upload'],
+      ['special', '기타 특판', '특판', 'N', 7, '', '', '', 'special', 0, 'input'], ['lotte_dept', '롯데백화점', '백화점', 'Y', 8, '2026-09', '', '', 'erp', 0, 'upload'],
+      ['workshop8', '워크숍에이트', '폐쇄몰', 'Y', 9, '2026-09', '', '', 'erp', 0, 'upload'], ['dapara', '다파라솔루션', '렌탈', 'Y', 10, '2026-09', '', '', 'erp', 0, 'upload'],
+      ['popup', '팝업스토어', '전문점', 'N', 11, '', '', '', 'popup', 0, 'input']];
+    ch._grid.length = 1; ch._grid[0].length = 11; ch._grid[0][2] = '유형';
+    ctx._offWriteBlock(ch, { headers: ctx.OFF_TABS.channel.headers.slice(0, 11), text: [0, 1, 2, 3, 5, 6, 7, 8, 10] }, 2, OLD);
+    const rep = ctx.offline_setupSheets();
+    check('머리 — C열 채널대분류 + 채널별칭 열(12열)', J(ch._grid[0].slice(0, 12)) === J(ctx.OFF_TABS.channel.headers), ch._grid[0]);
+    check('보고 — 유형 → 채널대분류 옮긴 결과(전문점 → 양판점, 창고형 → 할인점, 그 외 그대로, 초기값에 없는 채널은 이름 바꿈)', J(rep.channelCategory) === J([
+      { channelId: 'himart', from: '전문점', to: '양판점' }, { channelId: 'etland', from: '전문점', to: '양판점' }, { channelId: 'emart', from: '할인점', to: '할인점' },
+      { channelId: 'traders', from: '창고형', to: '할인점' }, { channelId: 'shinsegae', from: '백화점', to: '백화점' }, { channelId: 'theablen', from: '폐쇄몰', to: '폐쇄몰' },
+      { channelId: 'special', from: '특판', to: '특판' }, { channelId: 'lotte_dept', from: '백화점', to: '백화점' }, { channelId: 'workshop8', from: '폐쇄몰', to: '폐쇄몰' },
+      { channelId: 'dapara', from: '렌탈', to: '렌탈' }, { channelId: 'popup', from: '전문점', to: '양판점' }]), rep.channelCategory);
+    check('  ↳ 확장 보고 = 채널별칭 · 채널명 변경 보고 = 신세계 → 신세계백화점', J(rep.extended) === J([{ tab: '채널마스터', added: ['채널별칭'] }]) &&
+      J(rep.channelRenamed) === J([{ channelId: 'shinsegae', from: '신세계', to: '신세계백화점' }]) && !rep.mismatched.length, rep);
+    const rows = dataRows(ch), by = id => rows.find(r => r[0] === id);
+    check('채널대분류 = 요청 매핑(양판점 하이마트·전자랜드 / 할인점 이마트·트레이더스 / 백화점 신세계백화점·롯데백화점 / 폐쇄몰 디에이블앤·워크숍에이트 / 렌탈 다파라솔루션 / 특판 기타 특판)',
+      J(rows.map(r => r[0] + '=' + r[2])) === J(['himart=양판점', 'etland=양판점', 'emart=할인점', 'traders=할인점', 'shinsegae=백화점', 'theablen=폐쇄몰', 'special=특판', 'lotte_dept=백화점', 'workshop8=폐쇄몰', 'dapara=렌탈', 'popup=양판점']), rows.map(r => r[2]));
+    check('신세계 채널명 = 신세계백화점, 별칭 = 신세계 (channel_id shinsegae 그대로), 다른 채널 별칭 빈칸', by('shinsegae')[1] === '신세계백화점' && by('shinsegae')[11] === '신세계' &&
+      rows.filter(r => r[0] !== 'shinsegae').every(r => r[11] === ''), by('shinsegae'));
+    check('channel_id·채널명(신세계 외)·활성·정렬순서·업로드시작월·원천업태명·점포명접두어·코드체계채널·재고기준일오프셋·IN실적원천 그대로(사람이 끈 트레이더스 N)',
+      J(rows.map(r => [r[0], r[0] === 'shinsegae' ? '' : r[1]].concat(r.slice(3, 11)))) === J(OLD.map(r => [r[0], r[0] === 'shinsegae' ? '' : r[1]].concat(r.slice(3, 11)))), rows);
+    check('채널대분류·채널별칭 열은 텍스트 서식', [3, 12].every(c => ch._formats.some(f => f.c <= c && c < f.c + f.nc && f.f === '@')));
+    const m = ctx._offGetMasters();
+    check('마스터 — channelCategory·aliases, channelCategories 순서(양판점 → 특판)', J(m.channelCategories) === J(['양판점', '할인점', '백화점', '폐쇄몰', '렌탈', '특판']) &&
+      m.channels.find(c => c.channelId === 'shinsegae').channelCategory === '백화점' && J(m.channels.find(c => c.channelId === 'shinsegae').aliases) === J(['신세계']) &&
+      m.channels.every(c => !('type' in c)), m.channels.find(c => c.channelId === 'shinsegae'));
+    const before = J(ch._grid);
+    const rep2 = ctx.offline_setupSheets();
+    check('다시 실행 — 옮김·확장·이름 변경 없음, 시트 그대로(멱등)', rep2.channelCategory === null && !rep2.extended.length && !rep2.channelRenamed.length && J(ch._grid) === before, rep2);
+    ch._grid.find(r => r[0] === 'shinsegae')[1] = '신세계';                // 사람이 이름을 되돌림
+    ch._grid.find(r => r[0] === 'himart')[2] = '할인점';                   // 사람이 대분류를 고침
+    ctx.offline_setupSheets();
+    check('  ↳ 사람이 고친 채널명·채널대분류는 다시 바꾸지 않음', dataRows(ch).find(r => r[0] === 'shinsegae')[1] === '신세계' && dataRows(ch).find(r => r[0] === 'himart')[2] === '할인점');
+    check('README 채널마스터 설명에 채널대분류·채널별칭', dataRows(tab('README')).some(r => r[0] === '채널마스터' && /채널대분류/.test(r[1]) && /채널별칭/.test(r[1])));
   }
 
   console.log('\n[8] 날짜 산술 — 타임존 영향 없음');

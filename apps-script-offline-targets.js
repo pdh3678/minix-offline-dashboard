@@ -652,15 +652,23 @@ function _offParseLegacyPrices(grid) {
   return { baseDate: baseDate, rows: rows, badCells: bad.n };
 }
 
-// 채널명 → channel_id 제안: 같은 이름 > 원문이 채널명을 포함(이마트할인점 ⊃ 이마트) > 채널명이 원문을 포함(기타 특판 ⊃ 특판)
+/* 원본 채널명 → channel_id 제안: 같은 이름 > 원문이 이름을 포함(이마트할인점 ⊃ 이마트) > 이름이 원문을 포함(기타 특판 ⊃ 특판).
+   이름 = 채널명과 채널별칭(채널마스터 12열 — 예: 신세계백화점의 '신세계') 모두 — 채널명을 바꿔도 원본의 옛 이름이 같은 channel_id로 이어진다.
+   같은 점수면 채널마스터 위쪽 채널 */
 function _offSuggestChannel(name, channelRows) {
   var n = _offNorm(name), best = '', bestScore = 0;
+  if (!n) return '';
   channelRows.forEach(function (c) {
-    var cn = _offNorm(c[1]), score = 0;
-    if (!cn) return;
-    if (cn === n || _offNorm(c[0]) === n) score = 1000;
-    else if (n.indexOf(cn) >= 0) score = 500 + cn.length;
-    else if (cn.indexOf(n) >= 0) score = 100 + n.length;
+    var score = 0;
+    if (_offNorm(c[0]) === n) score = 1000;
+    [c[1]].concat(_offChannelAliases(c)).forEach(function (x) {
+      var cn = _offNorm(x), s = 0;
+      if (!cn) return;
+      if (cn === n) s = 1000;
+      else if (n.indexOf(cn) >= 0) s = 500 + cn.length;
+      else if (cn.indexOf(n) >= 0) s = 100 + n.length;
+      if (s > score) score = s;
+    });
     if (score > bestScore) { bestScore = score; best = c[0]; }
   });
   return best;

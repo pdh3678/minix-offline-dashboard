@@ -24,8 +24,8 @@ const J = JSON.stringify;
 
 // ── 픽스처(각 탭 _offReadRows 모양) ──
 const CHANNELS = [
-  ['himart', '하이마트', '전문점', 'Y', 1, '2026-09'],
-  ['traders', '트레이더스', '창고형', 'N', 4, ''],
+  ['himart', '하이마트', '양판점', 'Y', 1, '2026-09'],
+  ['traders', '트레이더스', '할인점', 'N', 4, ''],
   ['emart', '이마트', '할인점', 'Y', 3, '2026-09']
 ];
 const SKUS = [
