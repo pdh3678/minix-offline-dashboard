@@ -81,7 +81,8 @@ function makeLegacySS(tabs) {
 /* opts.today   — _offToday() 고정값('YYYY-MM-DD')
    opts.legacy  — 기존 스프레드시트 탭 목({탭: {grid, merges}}) — 주면 LEGACY_PROGRESS_SHEET_ID로 연결
    opts.noSheetId — OFFLINE_SHEET_ID를 비운 상태
-   opts.setup   — true면 offline_setupSheets까지 실행해 둔다 */
+   opts.setup   — true면 offline_setupSheets까지 실행해 둔다
+   opts.dir     — GAS 파일을 읽을 폴더(기본 저장소 루트). 확인 스크립트가 바꾸기 전 코드(git show)를 띄울 때 */
 function loadOfflineGas(opts) {
   opts = opts || {};
   const main = { '실적통합': makeSheet('실적통합', [[], []]) };
@@ -102,10 +103,11 @@ function loadOfflineGas(opts) {
   });
   global.Utilities.formatDate = formatDate;
   const ctx = vm.createContext(global);
-  vm.runInContext(fs.readFileSync(path.join(PROJ, 'apps-script.js'), 'utf8'), ctx, { filename: 'apps-script.js' });
-  vm.runInContext(fs.readFileSync(path.join(PROJ, 'apps-script-offline.js'), 'utf8'), ctx, { filename: 'apps-script-offline.js' });
+  const dir = opts.dir || PROJ;
+  vm.runInContext(fs.readFileSync(path.join(dir, 'apps-script.js'), 'utf8'), ctx, { filename: 'apps-script.js' });
+  vm.runInContext(fs.readFileSync(path.join(dir, 'apps-script-offline.js'), 'utf8'), ctx, { filename: 'apps-script-offline.js' });
   ['apps-script-offline-targets.js', 'apps-script-offline-inventory.js', 'apps-script-home.js'].forEach(f => {
-    const p = path.join(PROJ, f);
+    const p = path.join(dir, f);
     if (fs.existsSync(p)) vm.runInContext(fs.readFileSync(p, 'utf8'), ctx, { filename: f });
   });
   if (opts.today) ctx._offToday = () => opts.today;
