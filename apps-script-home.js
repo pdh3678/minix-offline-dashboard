@@ -60,7 +60,7 @@ function _gtVendor(v, what) {
 function _gtGet(data) {
   var y = String(data.year || '');
   if (!/^\d{4}$/.test(y)) throw new Error('연도가 올바르지 않습니다: ' + data.year);
-  var rows = _offReadRows(_offSheet(_offSS(), 'gonguTargets'), OFF_TABS.gonguTargets).filter(function (r) { return r[0] && r[1] && r[3]; });
+  var rows = _offRead('gonguTargets').filter(function (r) { return r[0] && r[1] && r[3]; });
   var vendors = [];
   rows.forEach(function (r) { if (vendors.indexOf(r[1]) < 0) vendors.push(r[1]); });
   return { success: true, year: y, vendors: vendors,
@@ -82,8 +82,7 @@ function _gtSave(data, auth) {
       amount: it.amount === undefined ? undefined : _offQty(it.amount, what + ' 목표금액') };
   });
   return _offWithLock(function () {
-    var ss = _offSS(), def = OFF_TABS.gonguTargets, sheet = _offSheet(ss, 'gonguTargets');
-    var rows = _offReadRows(sheet, def), prev = rows.length, idx = {};
+    var rows = _offRead('gonguTargets'), prev = rows.length, idx = {};
     rows.forEach(function (r) { idx[_gtRowKey(r)] = r; });
     var today = _offToday(), email = (auth && auth.email) || '';
     clean.forEach(function (it) {
@@ -93,7 +92,7 @@ function _gtSave(data, auth) {
       if (it.amount !== undefined) row[6] = it.amount;
       row[2] = OFFLINE_LINE_CATEGORY[it.line] || ''; row[7] = 'input'; row[8] = today; row[9] = email;
     });
-    _offWriteAll(sheet, def, rows, prev);
+    _offRewrite('gonguTargets', rows, prev);
     _offInvalidateCache();
     return { success: true, saved: clean.length };
   });
@@ -307,14 +306,13 @@ function _gtCompare(parsed, planRows) {
 function _gtMigrate(data, auth) {
   var apply = data.mode === 'apply';
   var run = function () {
-    var ss = _offSS(), legacy = _offLegacySS();
+    var legacy = _offLegacySS();
     var parsed = _gtParseLegacy(_offLegacyGrid(legacy, LEGACY_GONGU_TAB));
     var plan = _gtPlan(parsed, data.mapping || null);
     var months = parsed.plan.months.map(function (m) { return m.ym; }), monthSet = {};
     months.forEach(function (m) { monthSet[m] = true; });
     var range = months.length ? months[0] + '~' + months[months.length - 1] : '';
-    var def = OFF_TABS.gonguTargets, sheet = _offSheet(ss, 'gonguTargets');
-    var existing = _offReadRows(sheet, def), inputKeys = {};
+    var existing = _offRead('gonguTargets'), inputKeys = {};
     existing.forEach(function (r) { if (r[7] === 'input') inputKeys[_gtRowKey(r)] = true; });
     var today = _offToday(), email = (auth && auth.email) || '';
     var newRows = [], skippedInput = 0;
@@ -327,12 +325,12 @@ function _gtMigrate(data, auth) {
       planRows: newRows.length, skippedInput: skippedInput, unmapped: plan.unmapped, badCells: parsed.badCells,
       compare: _gtCompare(parsed, plan.rows) };
     if (apply) {
-      var rr = _offReplaceRows(sheet, def, existing, function (r) { return !(r[7] === 'migration' && monthSet[r[0]]); }, newRows);
+      var rr = _offReplace('gonguTargets', existing, function (r) { return !(r[7] === 'migration' && monthSet[r[0]]); }, newRows);
       res.written = newRows.length; res.removed = rr.removed;
-      _offMigrationLog(ss, auth, '공구 목표', range, newRows.length, plan.unmapped.join(', '), '성공' + (skippedInput ? ' (입력값 보존 ' + skippedInput + '건)' : ''));
+      _offMigrationLog(auth, '공구 목표', range, newRows.length, plan.unmapped.join(', '), '성공' + (skippedInput ? ' (입력값 보존 ' + skippedInput + '건)' : ''));
       _offInvalidateCache();
     }
-    res.recentLog = _offRecentMigrationLog(ss);
+    res.recentLog = _offRecentMigrationLog();
     return res;
   };
   return apply ? _offWithLock(run) : run();
@@ -466,12 +464,12 @@ function _homeGetSummary(data) {
   var key = 'home:summary:' + _offCacheGen() + ':' + ym + ':' + mode + ':' + cat;
   var hit = _cacheGetJSON(cache, key);
   if (hit) { hit.cached = true; return hit; }
-  var ss = _offSS(), y = ym.slice(0, 4);
+  var y = ym.slice(0, 4);
   var out = _homeSummaryCompute({ ym: ym, mode: mode, category: cat,
     monthly: _offGetMonthly({ from: y + '-01', to: y + '-12', totalsOnly: true }),
     inventory: _offGetInventory({}),
-    channels: _offChannelRows(ss),
-    gonguTargets: _offReadRows(_offSheet(ss, 'gonguTargets'), OFF_TABS.gonguTargets),
+    channels: _offChannelRows(),
+    gonguTargets: _offRead('gonguTargets'),
     unmatchedCount: _offGetUnmatched().items.length });
   out.success = true;
   _cachePutJSON(cache, key, out, OFF_CACHE_TTL_SEC);

@@ -285,13 +285,12 @@ function _offInventoryCompute(input) {
     storeChannel: storeFor, stores: storeFor ? storeRows : [] };
 }
 
-// 재고 지표에 필요한 탭을 한 번씩 읽는다
-function _offInventoryInput(ss) {
-  var read = function (k) { return _offReadRows(_offSheet(ss, k), OFF_TABS[k]); };
-  var st = ss.getSheetByName(OFF_TABS.settings.name);
-  return { today: _offToday(), settingsRows: st ? _offReadRows(st, OFF_TABS.settings) : [],
-    channels: read('channel'), skus: read('sku'), mappings: read('mapping'), stores: read('store'), sales: read('sales'),
-    stockDaily: read('stockDaily'), stockStore: read('stockStore'), uploadLog: read('uploadLog'), unmatchedTab: read('unmatched') };
+// 재고 지표에 필요한 탭을 batchGet 한 번에 읽는다(설정 탭은 setup 재실행 전이면 없다)
+function _offInventoryInput() {
+  var t = _offReadTabs(['settings', 'channel', 'sku', 'mapping', 'store', 'sales', 'stockDaily', 'stockStore', 'uploadLog', 'unmatched'], { optional: ['settings'] });
+  return { today: _offToday(), settingsRows: t.settings,
+    channels: t.channel, skus: t.sku, mappings: t.mapping, stores: t.store, sales: t.sales,
+    stockDaily: t.stockDaily, stockStore: t.stockStore, uploadLog: t.uploadLog, unmatchedTab: t.unmatched };
 }
 
 /* offline_getInventory — data.channelId 를 주면 그 채널의 점포 표(stores)도 준다.
@@ -302,7 +301,7 @@ function _offGetInventory(data) {
   var key = 'offline:inv:' + _offCacheGen() + ':' + ch;
   var hit = _cacheGetJSON(cache, key);
   if (hit) { hit.cached = true; return hit; }
-  var input = _offInventoryInput(_offSS());
+  var input = _offInventoryInput();
   input.storeChannel = ch;
   var out = _offInventoryCompute(input);
   out.success = true;
@@ -377,10 +376,9 @@ function _offGetDailySales(data) {
   var key = 'offline:daily:' + _offCacheGen() + ':' + from + ':' + to + ':' + ch + ':' + level;
   var hit = _cacheGetJSON(cache, key);
   if (hit) { hit.cached = true; return hit; }
-  var ss = _offSS();
-  var read = function (k) { return _offReadRows(_offSheet(ss, k), OFF_TABS[k]); };
+  var t = _offReadTabs(['channel', 'sku', 'mapping', 'sales']);
   var out = _offDailySalesCompute({ from: from, to: to, channelId: ch, level: level,
-    channels: read('channel'), skus: read('sku'), mappings: read('mapping'), sales: read('sales') });
+    channels: t.channel, skus: t.sku, mappings: t.mapping, sales: t.sales });
   out.success = true;
   _cachePutJSON(cache, key, out, OFF_CACHE_TTL_SEC);
   return out;
@@ -479,10 +477,9 @@ function _offGetSalesBreakdown(data) {
   var key = 'offline:breakdown:' + _offCacheGen() + ':' + [args.channelId, args.from, args.to, args.unit, args.category, args.measure].join(':');
   var hit = _cacheGetJSON(cache, key);
   if (hit) { hit.cached = true; return hit; }
-  var ss = _offSS();
-  var read = function (k) { return _offReadRows(_offSheet(ss, k), OFF_TABS[k]); };
-  args.channels = read('channel'); args.skus = read('sku'); args.mappings = read('mapping'); args.sales = read('sales');
-  args.stores = read('store'); args.unmatchedTab = read('unmatched');
+  var t = _offReadTabs(['channel', 'sku', 'mapping', 'sales', 'store', 'unmatched']);
+  args.channels = t.channel; args.skus = t.sku; args.mappings = t.mapping; args.sales = t.sales;
+  args.stores = t.store; args.unmatchedTab = t.unmatched;
   if (!args.channels.some(function (r) { return r[0] === ch; })) throw new Error('채널마스터에 없는 channel_id 입니다: ' + ch);
   var out = _offSalesBreakdownCompute(args);
   out.success = true;
@@ -536,9 +533,8 @@ function _offGetInventoryTrend(data) {
   var key = 'offline:trend:' + _offCacheGen() + ':' + [args.from, args.to, args.channelId, args.skuId, args.model, args.line, args.category].join(':');
   var hit = _cacheGetJSON(cache, key);
   if (hit) { hit.cached = true; return hit; }
-  var ss = _offSS();
-  var read = function (k) { return _offReadRows(_offSheet(ss, k), OFF_TABS[k]); };
-  args.channels = read('channel'); args.skus = read('sku'); args.mappings = read('mapping'); args.stockDaily = read('stockDaily');
+  var t = _offReadTabs(['channel', 'sku', 'mapping', 'stockDaily']);
+  args.channels = t.channel; args.skus = t.sku; args.mappings = t.mapping; args.stockDaily = t.stockDaily;
   var out = _offInventoryTrendCompute(args);
   out.success = true;
   _cachePutJSON(cache, key, out, OFF_CACHE_TTL_SEC);
@@ -566,9 +562,7 @@ function _offSaveSettings(data, auth) {
     clean[k] = v;
   });
   return _offWithLock(function () {
-    var ss = _offSS();
-    var def = OFF_TABS.settings, sheet = _offSheet(ss, 'settings');
-    var rows = _offReadRows(sheet, def), prev = rows.length;
+    var rows = _offRead('settings'), prev = rows.length;
     var next = _offSettingsFrom(rows);
     Object.keys(clean).forEach(function (k) { next[k] = clean[k]; });
     if (next['재고경보_결품위험일수'] >= next['재고경보_과다일수']) throw new Error('결품위험일수(' + next['재고경보_결품위험일수'] + ')는 과다일수(' + next['재고경보_과다일수'] + ')보다 작아야 합니다.');
@@ -578,7 +572,7 @@ function _offSaveSettings(data, auth) {
       if (!row) { row = [k, '', known[k][2]]; rows.push(row); }
       row[1] = clean[k];
     });
-    _offWriteAll(sheet, def, rows, prev);
+    _offRewrite('settings', rows, prev);
     _offInvalidateCache();
     Logger.log('[오프라인] 설정 저장 ' + JSON.stringify(clean) + ' by ' + auth.email);
     return { success: true, settings: _offSettingsFrom(rows) };

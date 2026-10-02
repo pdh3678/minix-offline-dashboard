@@ -375,11 +375,10 @@ function _offGetMonthly(data) {
   var key = 'offline:monthly:' + _offCacheGen() + ':' + from + ':' + to + ':' + ch + (totalsOnly ? ':t' : '');
   var hit = _cacheGetJSON(cache, key);
   if (hit) { hit.cached = true; return hit; }
-  var ss = _offSS();
-  var read = function (k) { return _offReadRows(_offSheet(ss, k), OFF_TABS[k]); };
+  var t = _offReadTabs(['channel', 'targets', 'prices', 'sales', 'mapping', 'sku']);
   var out = _offMonthlyCompute({ from: from, to: to, channelId: ch,
-    channels: read('channel'), targets: read('targets'), prices: read('prices'),
-    sales: read('sales'), mappings: read('mapping'), skus: read('sku') });
+    channels: t.channel, targets: t.targets, prices: t.prices,
+    sales: t.sales, mappings: t.mapping, skus: t.sku });
   if (totalsOnly) { out.rows = []; out.categoryRows = []; out.totalsOnly = true; }
   out.success = true;
   _cachePutJSON(cache, key, out, OFF_CACHE_TTL_SEC);
@@ -399,7 +398,7 @@ function _offQty(v, what) {
   if (typeof v === 'boolean' || !isFinite(n)) throw new Error(what + '은(는) 숫자여야 합니다: ' + v);
   return n;
 }
-function _offChannelRows(ss) { return _offReadRows(_offSheet(ss, 'channel'), OFF_TABS.channel).filter(function (r) { return r[0]; }); }
+function _offChannelRows() { return _offRead('channel').filter(function (r) { return r[0]; }); }
 // 품목군·모델 검증 — 카탈로그에 있는 모델만(표기는 카탈로그 label로 맞춰 저장)
 function _offCatalogModel(line, model, what) {
   if (OFFLINE_PRODUCT_LINES.indexOf(line) < 0) throw new Error(what + ' 품목군이 올바르지 않습니다: ' + line);
@@ -416,11 +415,10 @@ function _offSaveTargets(data, auth) {
   var items = data.items || [];
   if (!items.length) throw new Error('저장할 목표·실적이 없습니다.');
   return _offWithLock(function () {
-    var ss = _offSS();
+    var t = _offReadTabs(['channel', 'targets']);
     var chs = {};
-    _offChannelRows(ss).forEach(function (r) { chs[r[0]] = r; });
-    var def = OFF_TABS.targets, sheet = _offSheet(ss, 'targets');
-    var rows = _offReadRows(sheet, def), prev = rows.length;
+    t.channel.forEach(function (r) { if (r[0]) chs[r[0]] = r; });
+    var rows = t.targets, prev = rows.length;
     var idx = {};
     rows.forEach(function (r) { idx[_offRowKey(r)] = r; });
     var today = _offToday();
@@ -444,7 +442,7 @@ function _offSaveTargets(data, auth) {
       row[7] = 'input'; row[8] = today; row[9] = (auth && auth.email) || ''; row[11] = cat;
       if (it.note !== undefined) row[10] = String(it.note || '').trim();
     });
-    _offWriteAll(sheet, def, rows, prev);
+    _offRewrite('targets', rows, prev);
     _offInvalidateCache();
     return { success: true, saved: items.length };
   });
@@ -456,10 +454,10 @@ function _offSaveTargets(data, auth) {
 
 function _offPriceObj(r) { return { channelId: r[0], line: r[1], model: r[2], price: r[3], startDate: r[4], note: r[5], updatedAt: r[6], updatedBy: r[7] }; }
 function _offGetPrices() {
-  var ss = _offSS();
+  var t = _offReadTabs(['channel', 'prices']);
   var chOrder = {};
-  _offChannelRows(ss).forEach(function (r) { chOrder[r[0]] = Number(r[4]) || 99; });
-  var items = _offReadRows(_offSheet(ss, 'prices'), OFF_TABS.prices).filter(function (r) { return r[0] && r[1]; }).map(_offPriceObj);
+  t.channel.forEach(function (r) { if (r[0]) chOrder[r[0]] = Number(r[4]) || 99; });
+  var items = t.prices.filter(function (r) { return r[0] && r[1]; }).map(_offPriceObj);
   items.sort(function (a, b) {
     return ((chOrder[a.channelId] || 99) - (chOrder[b.channelId] || 99)) || (_OFF_LINE_ORDER.indexOf(a.line) - _OFF_LINE_ORDER.indexOf(b.line)) ||
       ((OFFLINE_PRODUCT_MODELS[a.line] || []).indexOf(a.model) - (OFFLINE_PRODUCT_MODELS[b.line] || []).indexOf(b.model)) ||
@@ -475,17 +473,16 @@ function _offSavePrices(data, auth) {
   var items = data.items || [];
   if (!items.length) throw new Error('저장할 단가가 없습니다.');
   return _offWithLock(function () {
-    var ss = _offSS();
-    var n = _offUpsertPrices(ss, items, auth);
+    var n = _offUpsertPrices(items, auth);
     _offInvalidateCache();
     return { success: true, saved: n };
   });
 }
-function _offUpsertPrices(ss, items, auth) {
+function _offUpsertPrices(items, auth) {
+  var t = _offReadTabs(['channel', 'prices']);
   var chs = {};
-  _offChannelRows(ss).forEach(function (r) { chs[r[0]] = true; });
-  var def = OFF_TABS.prices, sheet = _offSheet(ss, 'prices');
-  var rows = _offReadRows(sheet, def), prev = rows.length;
+  t.channel.forEach(function (r) { if (r[0]) chs[r[0]] = true; });
+  var rows = t.prices, prev = rows.length;
   var key = function (r) { return [r[0], r[1], r[2], r[4]].join(OFF_KEY_SEP); };
   var today = _offToday(), email = (auth && auth.email) || '';
   // 검증을 먼저 끝낸다 — 한 건이라도 틀리면 아무것도 쓰지 않는다
@@ -511,7 +508,7 @@ function _offUpsertPrices(ss, items, auth) {
     row[3] = it.price; row[6] = today; row[7] = email;
     if (it.note !== undefined) row[5] = String(it.note || '').trim();
   });
-  _offWriteAll(sheet, def, rows, prev);
+  _offRewrite('prices', rows, prev);
   return clean.length;
 }
 
@@ -522,9 +519,7 @@ function _offDeletePrice(data, auth) {
   if (!ch || OFFLINE_PRODUCT_LINES.indexOf(line) < 0 || !_offIsDate(start)) throw new Error('삭제할 단가(채널·품목군·모델·적용시작일)가 올바르지 않습니다.');
   var model = _offCanonModel(line, data.model).model;
   return _offWithLock(function () {
-    var ss = _offSS();
-    var def = OFF_TABS.prices, sheet = _offSheet(ss, 'prices');
-    var rows = _offReadRows(sheet, def), prev = rows.length;
+    var rows = _offRead('prices'), prev = rows.length;
     var k = [ch, line, model, start].join(OFF_KEY_SEP), hit = null;
     var kept = rows.filter(function (r) {
       var same = [r[0], r[1], _offCanonModel(r[1], r[2]).model, r[4]].join(OFF_KEY_SEP) === k;
@@ -532,8 +527,8 @@ function _offDeletePrice(data, auth) {
       return true;
     });
     if (!hit) throw new Error('단가마스터에 없는 행입니다: ' + ch + ' / ' + model + ' / ' + start);
-    _offWriteAll(sheet, def, kept, prev);
-    _offMigrationLog(ss, auth, '단가 삭제', start, 1, ch + ' / ' + line + ' / ' + model + ' / 공급가 ' + hit[3] + (hit[5] ? ' / 비고 ' + hit[5] : ''), '성공');
+    _offRewrite('prices', kept, prev);
+    _offMigrationLog(auth, '단가 삭제', start, 1, ch + ' / ' + line + ' / ' + model + ' / 공급가 ' + hit[3] + (hit[5] ? ' / 비고 ' + hit[5] : ''), '성공');
     _offInvalidateCache();
     return { success: true, deleted: _offPriceObj(hit) };
   });
@@ -709,18 +704,16 @@ function _offSuggestProduct(name, modelOnly) {
   return { level: 'category', line: '', model: '', category: OFFLINE_LINE_CATEGORY[line], ambiguous: false };
 }
 
-function _offMigrationLog(ss, auth, target, range, count, unmapped, status) {
-  var def = OFF_TABS.migrationLog, sheet = _offSheet(ss, 'migrationLog');
-  _offWriteBlock(sheet, def, sheet.getLastRow() + 1, [[
+function _offMigrationLog(auth, target, range, count, unmapped, status) {
+  _offAppend('migrationLog', [[
     Utilities.formatDate(new Date(), 'Asia/Seoul', 'yyyy-MM-dd HH:mm:ss'), (auth && auth.email) || '', target, range, count,
     String(unmapped || '').slice(0, 2000), status
   ]]);
 }
-function _offRecentMigrationLog(ss) {
-  var def = OFF_TABS.migrationLog, sheet = _offSheet(ss, 'migrationLog');
-  var last = sheet.getLastRow(), n = Math.min(20, Math.max(0, last - 1));
+function _offRecentMigrationLog() {
+  var all = _offRead('migrationLog'), n = Math.min(20, all.length);
   if (!n) return [];
-  return sheet.getRange(last - n + 1, 1, n, def.headers.length).getValues().map(function (r) {
+  return all.slice(all.length - n).map(function (r) {
     return { at: _offStr(r[0]), by: _offStr(r[1]), target: _offStr(r[2]), range: _offStr(r[3]), count: Number(r[4]) || 0, unmapped: _offStr(r[5]), status: _offStr(r[6]) };
   }).filter(function (x) { return x.at; }).reverse();
 }
@@ -804,7 +797,7 @@ function _offProgressPlan(parsed, channelRows, mapping) {
    IN실적원천 upload 채널(ERP 채널)은 IN 실적도 같은 원장 집계와 대조한다(side 'IN' 줄 — 원장 값은 OUT과 같다).
    원본을 대분류 단위로 연결한 품목(예: "건조기")이 있는 채널·대분류는, 원장도 그 대분류의 모델을 모두 더해
    "대분류 합계" 한 줄로 비교한다(원본에 모델 구분이 없으니 모델별로는 비교할 수 없다). */
-function _offCompareUploadStart(ss, parsed, plan, channelRows) {
+function _offCompareUploadStart(parsed, plan, channelRows) {
   var chMap = {}, prMap = {};
   plan.channels.forEach(function (c) { chMap[c.legacy] = c.channelId; });
   plan.products.forEach(function (p) { if (p.level) prMap[p.legacy] = p; });
@@ -821,8 +814,8 @@ function _offCompareUploadStart(ss, parsed, plan, channelRows) {
     legacy.OUT[k] = _offSumOrNull(legacy.OUT[k] == null ? null : legacy.OUT[k], v.outA);
     legacy.IN[k] = _offSumOrNull(legacy.IN[k] == null ? null : legacy.IN[k], v.inA);
   });
-  var read = function (k) { return _offReadRows(_offSheet(ss, k), OFF_TABS[k]); };
-  var sales = read('sales'), mappings = read('mapping'), skus = read('sku');
+  var t = _offReadTabs(['sales', 'mapping', 'sku']);
+  var sales = t.sales, mappings = t.mapping, skus = t.sku;
   var out = [];
   Object.keys(targets).forEach(function (ch) {
     var ym = targets[ch];
@@ -865,14 +858,13 @@ function _offCompareSide(out, ch, ym, side, legacy, catFold, mon, keyOf) {
 function _offMigrateProgress(data, auth) {
   var apply = data.mode === 'apply';
   var run = function () {
-    var ss = _offSS(), legacy = _offLegacySS();
+    var legacy = _offLegacySS();
     var parsed = _offParseLegacyProgress(_offLegacyGrid(legacy, LEGACY_PROGRESS_TAB));
-    var channelRows = _offChannelRows(ss);
+    var channelRows = _offChannelRows();
     var plan = _offProgressPlan(parsed, channelRows, data.mapping || null);
     var months = parsed.months.map(function (m) { return m.ym; });
     var range = months.length ? months[0] + '~' + months[months.length - 1] : '';
-    var def = OFF_TABS.targets, sheet = _offSheet(ss, 'targets');
-    var existing = _offReadRows(sheet, def);
+    var existing = _offRead('targets');
     var inputKeys = {};
     existing.forEach(function (r) { if (r[7] === 'input') inputKeys[_offRowKey(r)] = true; });
     var today = _offToday(), email = (auth && auth.email) || '';
@@ -887,14 +879,14 @@ function _offMigrateProgress(data, auth) {
     var res = { success: true, mode: apply ? 'apply' : 'preview', sheetName: LEGACY_PROGRESS_TAB, year: parsed.year, months: months,
       channels: plan.channels, products: plan.products, planRows: newRows.length, skippedInput: skippedInput,
       outSkippedUploadMonths: plan.outSkipped, inSkippedUploadMonths: plan.inSkipped, unmapped: plan.unmapped, badCells: parsed.badCells,
-      legacyRows: parsed.rows.length, compare: _offCompareUploadStart(ss, parsed, plan, channelRows) };
+      legacyRows: parsed.rows.length, compare: _offCompareUploadStart(parsed, plan, channelRows) };
     if (apply) {
-      var rr = _offReplaceRows(sheet, def, existing, function (r) { return !(r[7] === 'migration' && monthSet[r[0]]); }, newRows);
+      var rr = _offReplace('targets', existing, function (r) { return !(r[7] === 'migration' && monthSet[r[0]]); }, newRows);
       res.written = newRows.length; res.removed = rr.removed;
-      _offMigrationLog(ss, auth, '진행현황', range, newRows.length, plan.unmapped.join(', '), '성공' + (skippedInput ? ' (입력값 보존 ' + skippedInput + '건)' : ''));
+      _offMigrationLog(auth, '진행현황', range, newRows.length, plan.unmapped.join(', '), '성공' + (skippedInput ? ' (입력값 보존 ' + skippedInput + '건)' : ''));
       _offInvalidateCache();
     }
-    res.recentLog = _offRecentMigrationLog(ss);
+    res.recentLog = _offRecentMigrationLog();
     return res;
   };
   return apply ? _offWithLock(run) : run();
@@ -906,13 +898,14 @@ function _offMigrateProgress(data, auth) {
 function _offMigratePrices(data, auth) {
   var apply = data.mode === 'apply';
   var run = function () {
-    var ss = _offSS(), legacy = _offLegacySS();
+    var legacy = _offLegacySS();
     var parsed = _offParseLegacyPrices(_offLegacyGrid(legacy, LEGACY_PRICE_TAB));
-    var channelRows = _offChannelRows(ss);
+    var t = _offReadTabs(['channel', 'sku', 'mapping']);
+    var channelRows = t.channel.filter(function (r) { return r[0]; });
     // 모델명(MN 코드) → 이미 매핑된 SKU의 품목군·모델 (예: MNMD-120G → 미니 건조기 PRO+)
     var skus = {}, byModelCode = {};
-    _offReadRows(_offSheet(ss, 'sku'), OFF_TABS.sku).forEach(function (s) { skus[s[0]] = s; });
-    _offReadRows(_offSheet(ss, 'mapping'), OFF_TABS.mapping).forEach(function (m) {
+    t.sku.forEach(function (s) { skus[s[0]] = s; });
+    t.mapping.forEach(function (m) {
       var mc = (/MN[A-Z]{2,3}-[0-9A-Z]+/i.exec(String(m[1] || '')) || [''])[0].toUpperCase(), s = skus[m[2]];
       if (mc && s && s[2] && !byModelCode[mc]) byModelCode[mc] = { line: s[2], model: _offCanonModel(s[2], s[3]).model };
     });
@@ -938,12 +931,12 @@ function _offMigratePrices(data, auth) {
         items.push({ channelId: p.channelId, line: p.line, model: p.model, price: r.supplyPrice, startDate: startDate,
           note: LEGACY_PRICE_TAB + ' 이관 · 모델명 ' + (r.modelCode || '-') + (r.salePrice != null ? ' · 판매가 ' + r.salePrice : '') + ' · 부가세포함' });
       });
-      res.written = items.length ? _offUpsertPrices(ss, items, auth) : 0;
+      res.written = items.length ? _offUpsertPrices(items, auth) : 0;
       res.unmapped = unmapped; res.startDate = startDate;
-      _offMigrationLog(ss, auth, '단가', startDate, res.written, unmapped.join(', '), '성공');
+      _offMigrationLog(auth, '단가', startDate, res.written, unmapped.join(', '), '성공');
       _offInvalidateCache();
     }
-    res.recentLog = _offRecentMigrationLog(ss);
+    res.recentLog = _offRecentMigrationLog();
     return res;
   };
   return apply ? _offWithLock(run) : run();

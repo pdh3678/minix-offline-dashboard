@@ -8,6 +8,9 @@
  * 2. 프로젝트 설정 → 스크립트 속성에 OFFLINE_SHEET_ID = 오프라인 스프레드시트 ID 추가
  * 3. 편집기에서 offline_setupSheets 를 1회 실행(권한 승인) — 여러 번 실행해도 안전하다
  * 4. 배포 관리 → 기존 웹앱 배포 편집 → "새 버전"으로 업데이트(URL 유지)
+ * appsscript.json(프로젝트 설정 → "appsscript.json 매니페스트 파일 표시")도 저장소 것을 붙여넣는다 — 대시보드 요청의 시트 입출력이
+ * 쓰는 Sheets 고급 서비스(Sheets API v4)가 거기서 켜진다. 편집기 "서비스 ＋"로 켜면 다음 붙여넣기 때 사라진다.
+ * 빠지면 SpreadsheetApp으로 대신 읽고 써서 결과는 같지만 느리다 — offline_benchmarkReads 실행 로그 첫 줄로 확인한다.
  *
  * 핵심 설계: 원장(판매원장·재고 탭)에는 **원본코드만** 저장한다. sku_id·재고구분은 읽을 때
  * 코드매핑으로 해석한다(프론트 src/features/offline/resolver.js). 그래야 매핑을 나중에 추가·수정해도
@@ -456,19 +459,28 @@ function _offSettingsFrom(rows) {
   });
   return out;
 }
-function _offReadSettings(ss) {
-  var sheet = ss.getSheetByName(OFF_TABS.settings.name);
-  return _offSettingsFrom(sheet ? _offReadRows(sheet, OFF_TABS.settings) : []);
+function _offReadSettings() {
+  return _offSettingsFrom(_offReadTabs(['settings'], { optional: ['settings'] }).settings);
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // ── 시트 입출력 헬퍼 (탭마다 한 번에 읽고 한 번에 쓴다 — 행 단위 쓰기 금지) ──
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// 여기 SpreadsheetApp 헬퍼(_offReadRows·_offWriteBlock·_offWriteAll·_offReplaceRows)는 편집기에서 돌리는 setup·보정과
+// Sheets API를 못 쓸 때의 대체 경로가 쓴다. 대시보드 요청은 아래 "Sheets API 입출력" 헬퍼를 쓴다.
 
-function _offSS() {
+function _offSheetId() {
   var id = PropertiesService.getScriptProperties().getProperty(OFFLINE_SHEET_ID_PROP);
   if (!id) throw new Error('Script Properties에 ' + OFFLINE_SHEET_ID_PROP + ' 가 없습니다 — 오프라인 스프레드시트 ID를 등록하세요.');
-  return SpreadsheetApp.openById(id);
+  return id;
+}
+
+// 요청 범위(_offWithIo) 안에서는 한 번만 연다 — Sheets API 경로는 열 필요가 없고, 대체 경로·setup만 쓴다
+function _offSS() {
+  if (_offIo && _offIo.ss) return _offIo.ss;
+  var ss = SpreadsheetApp.openById(_offSheetId());
+  if (_offIo) _offIo.ss = ss;
+  return ss;
 }
 
 function _offSheet(ss, key) {
@@ -555,6 +567,13 @@ function _offWriteAll(sheet, def, rows, prevCount) {
    결과는 항상 "keep을 통과한 기존 행(원래 순서) + newRows"라, 같은 입력을 몇 번 넣어도 같다.
    완전히 빈 행(사람이 지운 흔적)은 이 기회에 같이 걷어낸다. */
 function _offReplaceRows(sheet, def, oldRows, keep, newRows) {
+  var p = _offReplacePlan(oldRows, keep, newRows);
+  _offWriteBlock(sheet, def, p.startRow, p.rows);
+  if (p.clear) sheet.getRange(p.startRow + p.rows.length, 1, p.clear, def.headers.length).clearContent();
+  return { removed: p.removed, added: p.added };
+}
+// 교체 계획 — startRow(1-based)부터 rows를 쓰고 그 아래 clear행을 비운다 (_offReplaceRows·_offReplace 공용)
+function _offReplacePlan(oldRows, keep, newRows) {
   var ok = function (r) { return !_offBlankRow(r) && keep(r); };
   var first = 0;
   while (first < oldRows.length && ok(oldRows[first])) first++;
@@ -562,12 +581,168 @@ function _offReplaceRows(sheet, def, oldRows, keep, newRows) {
   for (var i = first; i < oldRows.length; i++) if (ok(oldRows[i])) tail.push(oldRows[i]);
   var removed = (oldRows.length - first) - tail.length;
   tail = tail.concat(newRows);
-  var startRow = 2 + first;
-  _offWriteBlock(sheet, def, startRow, tail);
   var oldTail = oldRows.length - first;
-  if (oldTail > tail.length) sheet.getRange(startRow + tail.length, 1, oldTail - tail.length, def.headers.length).clearContent();
-  return { removed: removed, added: newRows.length };
+  return { startRow: 2 + first, rows: tail, clear: Math.max(0, oldTail - tail.length), removed: removed, added: newRows.length };
 }
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// ── Sheets API 입출력 (고급 서비스 Sheets v4 — appsscript.json에서 켠다, 2026-10-02) ──
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+/* 대시보드 요청의 시트 읽기·쓰기. SpreadsheetApp은 openById 뒤 탭마다 getSheetByName·getLastRow·getValues가 따로 왕복해서
+   (재고 현황 = 탭 10개 × 3번, 파트 홈은 같은 탭을 여러 번) 원장이 커질수록 느려졌다. 여기서는
+   · 읽기 — 여러 탭을 Values.batchGet 한 번에. 요청 범위(_offWithIo) 안에서는 읽은 탭을 기억해 두고 사본을 준다(파트 홈이 판매원장을 두 번 읽지 않게).
+   · 쓰기 — 한 탭의 행 늘리기·텍스트 서식('@')·값·남는 행 비우기를 batchUpdate 한 번에(요청 크기 제한을 넘을 만큼 크면 나눠서). 쓴 탭은 기억에서 지운다.
+   결과는 SpreadsheetApp 헬퍼와 같아야 한다:
+   · 값은 UNFORMATTED_VALUE — 숫자는 숫자, 텍스트 서식 셀은 문자열 그대로(날짜·코드를 텍스트로 저장하는 규칙 그대로 읽힌다).
+     날짜 셀은 getValues가 Date를 주고 _offStr이 'yyyy-MM-dd'로 바꾸지만 API는 일련번호(숫자)를 준다 → 텍스트 열에서 숫자가 나온
+     탭은 SpreadsheetApp으로 다시 읽는다(코드가 쓴 텍스트 열은 '@' 서식이라 숫자가 없다 — 사람이 서식 없는 칸에 고쳐 넣었을 때만).
+   · 문자열은 stringValue(해석하지 않고 그대로) — '0012'·'2026-09-01'이 숫자·날짜로 바뀌지 않는다. '' = 빈칸.
+   · API 응답은 뒤쪽 빈 행을 빼고 준다(getLastRow는 헤더 폭 밖 열의 값까지 센다) — 빈 행은 어느 쪽이든 거르거나 비우므로 결과는 같다.
+   Sheets가 없거나(appsscript.json 미반영) batchGet이 실패하면 SpreadsheetApp 헬퍼로 — 느릴 뿐 결과는 같다. */
+var _offIo = null; // 요청 하나 동안 — { rows: {탭이름: 행[]}, meta: {탭이름: {sheetId, rows}}, ss }
+
+// fn을 요청 범위 안에서 실행한다(겹쳐 부르면 바깥 범위를 그대로 쓴다). _offlineHandle·_offUpload가 연다
+function _offWithIo(fn) {
+  if (_offIo) return fn();
+  _offIo = { rows: {}, meta: null, ss: null };
+  try { return fn(); } finally { _offIo = null; }
+}
+function _offApiReady() { return typeof Sheets !== 'undefined' && !!Sheets && !!Sheets.Spreadsheets; }
+function _offA1(def) { return "'" + def.name.replace(/'/g, "''") + "'!A2:" + _colLetter(def.headers.length - 1); }
+function _offCopyRows(rows) { return rows.map(function (r) { return r.slice(); }); }
+
+/* 여러 탭을 읽는다 → { key: 행[] } (_offReadRows와 같은 모양 — 텍스트 열은 문자열, 숫자 열은 숫자 또는 '').
+   opt.optional = 없어도 되는 탭 key 목록(setup 재실행 전의 설정·거래처매핑) — 없으면 [] */
+function _offReadTabs(keys, opt) {
+  var memo = _offIo ? _offIo.rows : null, out = {}, need = [];
+  keys.forEach(function (k) {
+    var name = OFF_TABS[k].name;
+    if (memo && memo[name]) out[k] = _offCopyRows(memo[name]);
+    else if (need.indexOf(k) < 0) need.push(k);
+  });
+  if (!need.length) return out;
+  var got = _offApiReady() ? _offBatchGet(need) : null;
+  need.forEach(function (k) {
+    var rows = got ? got[k] : undefined;
+    if (rows === undefined) rows = _offReadLegacy(k, (opt && opt.optional || []).indexOf(k) >= 0);
+    if (memo) { memo[OFF_TABS[k].name] = rows; rows = _offCopyRows(rows); }
+    out[k] = rows;
+  });
+  return out;
+}
+function _offRead(key) { return _offReadTabs([key])[key]; }
+
+// batchGet 한 번 → { key: 행[] | undefined(이 탭은 SpreadsheetApp으로) } | null(요청 실패 — 전부 SpreadsheetApp으로)
+function _offBatchGet(keys) {
+  var res;
+  try {
+    res = Sheets.Spreadsheets.Values.batchGet(_offSheetId(), { ranges: keys.map(function (k) { return _offA1(OFF_TABS[k]); }),
+      valueRenderOption: 'UNFORMATTED_VALUE', dateTimeRenderOption: 'SERIAL_NUMBER' });
+  } catch (e) {
+    Logger.log('[Sheets API] batchGet 실패 → SpreadsheetApp으로 읽습니다 (' + keys.join(',') + '): ' + e);
+    return null;
+  }
+  var vr = res.valueRanges || [], out = {};
+  keys.forEach(function (k, i) { out[k] = _offApiRows(OFF_TABS[k], (vr[i] && vr[i].values) || []); });
+  return out;
+}
+
+// API 값 → _offReadRows와 같은 행. 텍스트 열에 숫자가 있으면(날짜 셀일 수 있다) undefined
+function _offApiRows(def, values) {
+  var W = def.headers.length, isText = _offIsTextCol(def), out = [];
+  for (var i = 0; i < values.length; i++) {
+    var r = values[i] || [], o = [];
+    for (var c = 0; c < W; c++) {
+      var v = c < r.length ? r[c] : '';
+      if (isText[c]) {
+        if (typeof v === 'number') { Logger.log('[Sheets API] ' + def.name + ' ' + (i + 2) + '행 ' + (c + 1) + '열 텍스트 열에 숫자 → 이 탭은 SpreadsheetApp으로 읽습니다'); return undefined; }
+        o.push(_offStr(v));
+      } else o.push(v === '' || v == null ? '' : (Number(v) || 0));
+    }
+    out.push(o);
+  }
+  return out;
+}
+
+function _offReadLegacy(key, optional) {
+  var ss = _offSS(), def = OFF_TABS[key];
+  if (optional) { var sheet = ss.getSheetByName(def.name); return sheet ? _offReadRows(sheet, def) : []; }
+  return _offReadRows(_offSheet(ss, key), def);
+}
+
+// 탭 메타(sheetId·행 수) — 요청 범위 안에서는 한 번만 받는다
+function _offTabMeta(key) {
+  var meta = _offIo && _offIo.meta;
+  if (!meta) {
+    meta = {};
+    (Sheets.Spreadsheets.get(_offSheetId(), { fields: 'sheets.properties' }).sheets || []).forEach(function (s) {
+      var p = s.properties || {};
+      meta[p.title] = { sheetId: p.sheetId || 0, rows: (p.gridProperties || {}).rowCount || 0 }; // 첫 탭의 sheetId는 0
+    });
+    if (_offIo) _offIo.meta = meta;
+  }
+  var m = meta[OFF_TABS[key].name];
+  if (!m) throw new Error('오프라인 시트에 "' + OFF_TABS[key].name + '" 탭이 없습니다 — 편집기에서 offline_setupSheets를 먼저 실행하세요.');
+  return m;
+}
+
+// 값 하나 → CellData (텍스트 열은 문자열 그대로, '' = 빈칸)
+function _offCell(v, text) {
+  if (v === '' || v == null) return {};
+  if (!text && typeof v === 'number' && isFinite(v)) return { userEnteredValue: { numberValue: v } };
+  if (!text && typeof v === 'boolean') return { userEnteredValue: { boolValue: v } };
+  return { userEnteredValue: { stringValue: String(v) } };
+}
+
+// batchUpdate 한 번에 보내는 칸 수 상한 — Sheets API 요청 크기 제한(10MB) 아래로(칸 하나 ≈ 50바이트). 보통의 반영은 한 번에 끝난다
+var OFF_API_CELLS_PER_CALL = 50000;
+
+/* key 탭의 startRow(1-based)부터 rows를 쓰고 그 바로 아래 clear행을 비운다 — batchUpdate 한 번(칸이 상한을 넘으면 나눠서).
+   _offWriteBlock + clearContent와 같다: 모자란 행은 끝에 덧붙이고, 텍스트 열은 쓴 행 범위에 '@' 서식을 건다. */
+function _offWriteRows(key, startRow, rows, clear) {
+  clear = clear || 0;
+  if (!rows.length && !clear) return;
+  var def = OFF_TABS[key], W = def.headers.length;
+  if (_offIo) delete _offIo.rows[def.name];
+  if (!_offApiReady()) {
+    var sheet = _offSheet(_offSS(), key);
+    _offWriteBlock(sheet, def, startRow, rows);
+    if (clear) sheet.getRange(startRow + rows.length, 1, clear, W).clearContent();
+    return;
+  }
+  var m = _offTabMeta(key), reqs = [], r0 = startRow - 1, need = r0 + rows.length;
+  if (need > m.rows) reqs.push({ appendDimension: { sheetId: m.sheetId, dimension: 'ROWS', length: need - m.rows } });
+  if (rows.length) _offTextRuns(def).forEach(function (run) {
+    reqs.push({ repeatCell: { range: { sheetId: m.sheetId, startRowIndex: r0, endRowIndex: need, startColumnIndex: run[0], endColumnIndex: run[0] + run[1] },
+      cell: { userEnteredFormat: { numberFormat: { type: 'TEXT', pattern: '@' } } }, fields: 'userEnteredFormat.numberFormat' } });
+  });
+  var isText = _offIsTextCol(def), step = Math.max(1, Math.floor(OFF_API_CELLS_PER_CALL / W)), i = 0;
+  var cells = function (r) {
+    var vals = [];
+    for (var c = 0; c < W; c++) vals.push(_offCell(r[c], isText[c]));
+    return { values: vals };
+  };
+  do {
+    var part = rows.slice(i, i + step), end = i + part.length >= rows.length;
+    // 행 늘리기·서식은 첫 요청에. range가 rows보다 길면(clear — 마지막 요청) 남는 칸은 fields(userEnteredValue)만 비워진다 — clearContent와 같다(서식은 그대로)
+    var req = i === 0 ? reqs : [];
+    req.push({ updateCells: { range: { sheetId: m.sheetId, startRowIndex: r0 + i, endRowIndex: r0 + i + part.length + (end ? clear : 0), startColumnIndex: 0, endColumnIndex: W },
+      rows: part.map(cells), fields: 'userEnteredValue' } });
+    Sheets.Spreadsheets.batchUpdate({ requests: req }, _offSheetId());
+    if (i === 0 && need > m.rows) m.rows = need;
+    i += step;
+  } while (i < rows.length);
+}
+// 데이터 영역 전체를 rows로 (_offWriteAll과 같다). prevCount = 기존 데이터 행 수
+function _offRewrite(key, rows, prevCount) { _offWriteRows(key, 2, rows, Math.max(0, prevCount - rows.length)); }
+// 원장 교체 (_offReplaceRows와 같다)
+function _offReplace(key, oldRows, keep, newRows) {
+  var p = _offReplacePlan(oldRows, keep, newRows);
+  _offWriteRows(key, p.startRow, p.rows, p.clear);
+  return { removed: p.removed, added: p.added };
+}
+// 끝에 덧붙인다 — 마지막 데이터 행 다음부터(getLastRow() + 1과 같다. 헤더 폭 밖 열에만 값이 있는 행은 세지 않는다)
+function _offAppend(key, rows) { _offWriteRows(key, 2 + _offRead(key).length, rows, 0); }
 
 // ── 날짜 (모두 'YYYY-MM-DD' 문자열, 타임존 영향 없는 UTC 산술) ──
 function _offToday() { return Utilities.formatDate(new Date(), 'Asia/Seoul', 'yyyy-MM-dd'); }
@@ -581,6 +756,8 @@ function _offAddDays(s, n) {
 function _offWithLock(fn) {
   var lock = LockService.getDocumentLock() || LockService.getScriptLock();
   if (!lock.tryLock(OFF_LOCK_WAIT_MS)) throw new Error('다른 오프라인 반영이 진행 중입니다. 잠시 후 다시 시도해주세요.');
+  // 락을 기다리는 사이 다른 반영이 썼을 수 있다 — 락 전에 읽어 둔 탭·메타는 버린다
+  if (_offIo) { _offIo.rows = {}; _offIo.meta = null; }
   try {
     var out = fn();
     SpreadsheetApp.flush(); // 락을 풀기 전에 반영을 끝낸다 — 다음 실행이 반쯤 쓰인 시트를 읽지 않게
@@ -611,7 +788,7 @@ function _offCodeSystem(channelRows) {
   (channelRows || []).forEach(function (r) { if (r[0]) m[r[0]] = String(r[8] == null ? '' : r[8]).trim() || r[0]; });
   return function (ch) { return m[ch] || ch; };
 }
-function _offCodeSystemOf(ss) { return _offCodeSystem(_offReadRows(_offSheet(ss, 'channel'), OFF_TABS.channel)); }
+function _offCodeSystemOf() { return _offCodeSystem(_offRead('channel')); }
 /* 채널이 아닌 코드체계(erp) — 여러 채널이 코드체계채널로 가리키지만 그 이름의 채널은 없다. 코드매핑·미매칭코드는 이 이름으로 쌓인다.
    → [{ id, name, channels[] }] (코드 매핑 화면의 그룹·채널 칸 표시용) */
 function _offVirtualCodeSystems(channelRows) {
@@ -634,8 +811,8 @@ function _offStockOffsetOf(r) {
 }
 function _offSplitList(v) { return String(v == null ? '' : v).split(',').map(function (x) { return x.trim(); }).filter(function (x) { return x; }); }
 /* split 파일 반영용 채널마스터 요약 — codeSys(코드체계채널), byBiz{원천업태명: 채널}, prefixes[{channelId, prefix}](긴 접두어 먼저) */
-function _offChannelMeta(ss) {
-  var rows = _offReadRows(_offSheet(ss, 'channel'), OFF_TABS.channel).filter(function (r) { return r[0]; });
+function _offChannelMeta() {
+  var rows = _offRead('channel').filter(function (r) { return r[0]; });
   var byBiz = {}, prefixes = [];
   rows.forEach(function (r) {
     _offSplitList(r[6]).forEach(function (b) { byBiz[b] = r[0]; });
@@ -676,14 +853,22 @@ function _offUpload(data, auth) {
   }
   _offValidateRecords(rec);
 
-  return _offWithLock(function () {
+  return _offWithIo(function () { return _offWithLock(function () {
     var ctx = {
-      ss: _offSS(), today: _offToday(), warnings: [], applied: {}, email: (auth && auth.email) || '',
+      today: _offToday(), warnings: [], applied: {}, email: (auth && auth.email) || '',
       uploadId: 'U' + Utilities.formatDate(new Date(), 'Asia/Seoul', 'yyyyMMdd-HHmmss') + '-' + Utilities.getUuid().slice(0, 4),
       // split 파일 — 반영한 채널 목록(업로드로그 channel_id = 'emart,traders')과 점포코드 → 채널(점포마스터 기록용)
       channels: null, storeChannel: null
     };
-    ctx.chMeta = _offChannelMeta(ctx.ss);
+    // 이 반영이 읽는 탭을 batchGet 한 번에 — 아래 함수들은 요청 범위에 기억된 사본을 받는다.
+    // 미리 읽기일 뿐이라 실패(탭 없음 등)는 넘긴다 — 아래 각 읽기가 원래 자리에서 같은 오류를 낸다(실패 로그도 원래대로)
+    var tabs = ['channel', 'store', 'mapping', 'unmatched', 'uploadLog'];
+    if (ft.kind === 'period' || ft.kind === 'himart') tabs.push('sales');
+    if (ft.kind !== 'period') tabs.push('stockDaily', 'stockStore');
+    if (ft.kind === 'himart') tabs.push('himartSnap');
+    if (ft.split === 'customer') tabs.push('customerMap');
+    try { _offReadTabs(tabs); } catch (e) {}
+    ctx.chMeta = _offChannelMeta();
     if (ft.kind === 'snapshot') _offStockBasis(ctx, meta, ft);
     try {
       var range = {};
@@ -704,7 +889,7 @@ function _offUpload(data, auth) {
       try { _offAppendLog(ctx, meta, auth, '실패: ' + String((e && e.message) || e).slice(0, 300), 0); } catch (e2) {}
       throw e;
     }
-  });
+  }); });
 }
 
 function _offValidateRecords(rec) {
@@ -760,8 +945,7 @@ function _offApplyPeriodSales(ctx, meta, rec, ft) {
   var replace = {};
   if (split) Object.keys(byCh).forEach(function (c) { replace[c] = true; });
   else replace[ch] = true;
-  var def = OFF_TABS.sales, sheet = _offSheet(ctx.ss, 'sales');
-  var res = _offReplaceRows(sheet, def, _offReadRows(sheet, def), function (r) {
+  var res = _offReplace('sales', _offRead('sales'), function (r) {
     return !(replace[r[3]] && r[0] >= s && r[1] <= e);
   }, rows);
   ctx.applied.sales = rows.length;
@@ -802,8 +986,7 @@ function _offApplyErpSales(ctx, meta, rec) {
   if (outside) ctx.warnings.push('교체 기간(' + s + '~' + e + ') 밖의 레코드 ' + outside + '건은 반영하지 않았습니다');
   var hk = Object.keys(held);
   if (hk.length) ctx.warnings.push('거래처매핑에 없는(또는 ERP 채널이 아닌 채널로 매핑된) 거래처 ' + hk.map(function (k) { return k + ' ' + held[k] + '건'; }).join(', ') + '은 반영을 보류했습니다 — 업로드 미리보기에서 채널을 고르거나 거래처매핑 탭을 확인하세요');
-  var def = OFF_TABS.sales, sheet = _offSheet(ctx.ss, 'sales');
-  var res = _offReplaceRows(sheet, def, _offReadRows(sheet, def), function (r) {
+  var res = _offReplace('sales', _offRead('sales'), function (r) {
     return !(erp[r[3]] && r[0] >= s && r[1] <= e);
   }, rows);
   ctx.applied.sales = rows.length;
@@ -824,8 +1007,7 @@ function _offApplyErpSales(ctx, meta, rec) {
 /* 거래처매핑 → { 거래처코드: { name, channelId } }. picks(미리보기에서 채널을 고른 새 거래처 {code, name, channelId})를 먼저 저장한다 —
    채널은 코드체계 erp 채널만 받는다(포털 채널로 잘못 고르면 그 채널의 판매원장을 지우게 되므로 저장 전에 거절). */
 function _offErpCustomers(ctx, erp, picks) {
-  var def = OFF_TABS.customerMap, sheet = _offSheet(ctx.ss, 'customerMap');
-  var rows = _offReadRows(sheet, def), prev = rows.length, idx = {};
+  var rows = _offRead('customerMap'), prev = rows.length, idx = {};
   rows.forEach(function (r) { if (r[0]) idx[r[0]] = r; });
   var clean = picks.map(function (p) {
     var code = String(p.code == null ? '' : p.code).trim(), ch = String(p.channelId || '').trim();
@@ -839,7 +1021,7 @@ function _offErpCustomers(ctx, erp, picks) {
     row[2] = p.channelId;
     row[3] = ('업로드 미리보기에서 지정 ' + ctx.today + ' ' + ctx.email).trim();
   });
-  if (clean.length) _offWriteAll(sheet, def, rows, prev);
+  if (clean.length) _offRewrite('customerMap', rows, prev);
   ctx.applied.customersAdded = clean.length;
   var out = {};
   rows.forEach(function (r) { if (r[0]) out[r[0]] = { name: r[1], channelId: r[2] }; });
@@ -850,15 +1032,13 @@ function _offErpCustomers(ctx, erp, picks) {
 function _offApplyStock(ctx, meta, rec, ft) {
   if (ft && ft.split === 'store') return _offApplyStockSplit(ctx, meta, rec);
   var ch = meta.channelId, D = meta.baseDate;
-  var dDef = OFF_TABS.stockDaily, dSheet = _offSheet(ctx.ss, 'stockDaily');
   var dRows = (rec.channelStock || []).map(function (r) {
     return [D, ch, r.code, Number(r.stock) || 0, _offOpt(r.transit), _offOpt(r.reserved), ctx.uploadId];
   });
-  _offReplaceRows(dSheet, dDef, _offReadRows(dSheet, dDef), function (r) { return !(r[0] === D && r[1] === ch); }, dRows);
+  _offReplace('stockDaily', _offRead('stockDaily'), function (r) { return !(r[0] === D && r[1] === ch); }, dRows);
   ctx.applied.stockDaily = dRows.length;
 
-  var sDef = OFF_TABS.stockStore, sSheet = _offSheet(ctx.ss, 'stockStore');
-  var sOld = _offReadRows(sSheet, sDef);
+  var sOld = _offRead('stockStore');
   var current = '';
   sOld.forEach(function (r) { if (r[1] === ch && r[0] > current) current = r[0]; });
   if (current && D < current) {
@@ -868,7 +1048,7 @@ function _offApplyStock(ctx, meta, rec, ft) {
     var sRows = (rec.storeStock || []).map(function (r) {
       return [D, ch, r.store || '', r.code, Number(r.stock) || 0, _offOpt(r.transit), _offOpt(r.reserved), _offOpt(r.monthIn), _offOpt(r.monthSale), ctx.uploadId];
     });
-    _offReplaceRows(sSheet, sDef, sOld, function (r) { return r[1] !== ch; }, sRows);
+    _offReplace('stockStore', sOld, function (r) { return r[1] !== ch; }, sRows);
     ctx.applied.stockStore = sRows.length;
   }
   return { baseDate: D };
@@ -904,7 +1084,7 @@ function _offOpt(v) { return (v === '' || v == null) ? '' : (Number(v) || 0); }
 function _offApplyStockSplit(ctx, meta, rec) {
   var root = meta.channelId, D = meta.baseDate, cm = ctx.chMeta, cs = cm.codeSys;
   var master = {};
-  _offReadRows(_offSheet(ctx.ss, 'store'), OFF_TABS.store).forEach(function (r) { if (r[0] && r[1] && cs(r[0]) === cs(root)) master[r[1]] = r[0]; });
+  _offRead('store').forEach(function (r) { if (r[0] && r[1] && cs(r[0]) === cs(root)) master[r[1]] = r[0]; });
   var names = {};
   (rec.stores || []).forEach(function (s) { if (s.code) names[String(s.code).trim()] = String(s.name || ''); });
   var prefixes = cm.prefixes.filter(function (p) { return cs(p.channelId) === cs(root); });
@@ -947,14 +1127,12 @@ function _offApplyStockSplit(ctx, meta, rec) {
   var inFile = {};
   chans.forEach(function (c) { inFile[c] = true; });
 
-  var dDef = OFF_TABS.stockDaily, dSheet = _offSheet(ctx.ss, 'stockDaily');
   var dRows = [];
   chans.forEach(function (c) { order.forEach(function (k) { var o = agg[k]; if (o.ch === c) dRows.push([D, c, o.code, o.stock, o.transit, o.reserved, ctx.uploadId]); }); });
-  _offReplaceRows(dSheet, dDef, _offReadRows(dSheet, dDef), function (r) { return !(r[0] === D && inFile[r[1]]); }, dRows);
+  _offReplace('stockDaily', _offRead('stockDaily'), function (r) { return !(r[0] === D && inFile[r[1]]); }, dRows);
   ctx.applied.stockDaily = dRows.length;
 
-  var sDef = OFF_TABS.stockStore, sSheet = _offSheet(ctx.ss, 'stockStore');
-  var sOld = _offReadRows(sSheet, sDef);
+  var sOld = _offRead('stockStore');
   var current = {};
   sOld.forEach(function (r) { if (inFile[r[1]] && r[0] > (current[r[1]] || '')) current[r[1]] = r[0]; });
   var replace = {}, sRows = [];
@@ -963,7 +1141,7 @@ function _offApplyStockSplit(ctx, meta, rec) {
     replace[c] = true;
     sRows = sRows.concat(sRowsByCh[c] || []);
   });
-  _offReplaceRows(sSheet, sDef, sOld, function (r) { return !replace[r[1]]; }, sRows);
+  _offReplace('stockStore', sOld, function (r) { return !replace[r[1]]; }, sRows);
   ctx.applied.stockStore = sRows.length;
 
   var byCh = {};
@@ -986,8 +1164,7 @@ function _offChName(cm, id) { for (var i = 0; i < cm.rows.length; i++) if (cm.ro
    수십만 셀을 읽고 쓰게 된다. */
 function _offApplyHimart(ctx, meta, rec) {
   var D0 = meta.baseDate;
-  var snapDef = OFF_TABS.himartSnap, snapSheet = _offSheet(ctx.ss, 'himartSnap');
-  var oldSnap = _offReadRows(snapSheet, snapDef);
+  var oldSnap = _offRead('himartSnap');
   var newSnap = [];
   (rec.himart || []).forEach(function (r) {
     if (!(r.real || r.sale || r.week || r.day)) return;
@@ -1015,8 +1192,7 @@ function _offApplyHimart(ctx, meta, rec) {
     if (res.mismatch) ctx.warnings.push('하이마트 ' + D + ' 당일판매 불일치 ' + res.mismatch + '건 (예: ' + res.samples.join(', ') + ')');
   });
 
-  var sDef = OFF_TABS.sales, sSheet = _offSheet(ctx.ss, 'sales');
-  var res2 = _offReplaceRows(sSheet, sDef, _offReadRows(sSheet, sDef), function (r) {
+  var res2 = _offReplace('sales', _offRead('sales'), function (r) {
     return !(r[3] === 'himart' && affectedSet[r[1]]);
   }, newSales);
   ctx.applied.sales = newSales.length;
@@ -1024,7 +1200,7 @@ function _offApplyHimart(ctx, meta, rec) {
 
   var cutoff = _offAddDays(ctx.today, -OFF_SNAPSHOT_KEEP_DAYS);
   var keepSnap = newSnap.filter(function (r) { return r[0] >= cutoff; });
-  _offReplaceRows(snapSheet, snapDef, oldSnap, function (r) { return r[0] !== D0 && r[0] >= cutoff; }, keepSnap);
+  _offReplace('himartSnap', oldSnap, function (r) { return r[0] !== D0 && r[0] >= cutoff; }, keepSnap);
   ctx.applied.himartSnap = keepSnap.length;
   return { recomputed: recomputed };
 }
@@ -1068,8 +1244,7 @@ function _offHimartSalesFor(D, byDate, dates, uploadId) {
 function _offUpsertStores(ctx, ch, stores) {
   if (!stores.length) return;
   var cs = (ctx.chMeta && ctx.chMeta.codeSys) || function (c) { return c; };
-  var def = OFF_TABS.store, sheet = _offSheet(ctx.ss, 'store');
-  var rows = _offReadRows(sheet, def);
+  var rows = _offRead('store');
   var prev = rows.length;
   var idx = {};
   rows.forEach(function (r) { idx[cs(r[0]) + OFF_KEY_SEP + r[1]] = r; });
@@ -1091,7 +1266,7 @@ function _offUpsertStores(ctx, ch, stores) {
     if (ctx.today > row[5]) row[5] = ctx.today;
     if (!row[6]) row[6] = _offStoreTypeOf(row[2], row[3]); // 점포유형은 비어 있을 때만 — 사람이 고친 값은 그대로
   });
-  _offWriteAll(sheet, def, rows, prev);
+  _offRewrite('store', rows, prev);
   ctx.applied.storesAdded = added;
   if (moved) ctx.applied.storesMoved = moved;
 }
@@ -1110,11 +1285,11 @@ function _offCodesOf(rec) {
 // 미매칭코드 갱신 — 이번 업로드에서 매핑 없는 코드를 누적(발견횟수 = 나온 업로드 수), 매핑된 코드는 정리.
 // ch가 다른 채널의 코드체계를 빌려 쓰면(트레이더스) 그 코드체계채널(emart) 이름으로 쌓는다
 function _offUpdateUnmatched(ctx, ch, codes) {
-  var cs = _offCodeSystemOf(ctx.ss);
+  var t = _offReadTabs(['channel', 'mapping', 'unmatched']);
+  var cs = _offCodeSystem(t.channel);
   ch = cs(ch);
-  var mapped = _offMappedKeys(_offReadRows(_offSheet(ctx.ss, 'mapping'), OFF_TABS.mapping), cs);
-  var def = OFF_TABS.unmatched, sheet = _offSheet(ctx.ss, 'unmatched');
-  var rows = _offReadRows(sheet, def);
+  var mapped = _offMappedKeys(t.mapping, cs);
+  var rows = t.unmatched;
   var prev = rows.length;
   var idx = {};
   rows.forEach(function (r) { idx[cs(r[0]) + OFF_KEY_SEP + r[1]] = r; });
@@ -1133,7 +1308,7 @@ function _offUpdateUnmatched(ctx, ch, codes) {
       rows.push(row); idx[k] = row;
     }
   });
-  _offWriteAll(sheet, def, rows.filter(function (r) { return !mapped[cs(r[0]) + OFF_KEY_SEP + r[1]]; }), prev);
+  _offRewrite('unmatched', rows.filter(function (r) { return !mapped[cs(r[0]) + OFF_KEY_SEP + r[1]]; }), prev);
   return list;
 }
 
@@ -1142,8 +1317,7 @@ function _offAppendLog(ctx, meta, auth, status, unmatchedCount) {
   var range = ft.kind === 'period' ? (meta.replaceStart + '~' + meta.replaceEnd) : (meta.baseDate || '');
   var a = ctx.applied;
   var appliedRows = (a.sales || 0) + (a.stockDaily || 0) + (a.stockStore || 0) + (a.himartSnap || 0);
-  var def = OFF_TABS.uploadLog, sheet = _offSheet(ctx.ss, 'uploadLog');
-  _offWriteBlock(sheet, def, sheet.getLastRow() + 1, [[
+  _offAppend('uploadLog', [[
     ctx.uploadId, Utilities.formatDate(new Date(), 'Asia/Seoul', 'yyyy-MM-dd HH:mm:ss'), (auth && auth.email) || '',
     String(meta.fileName || '').slice(0, 200), meta.fileType, (ctx.channels && ctx.channels.length ? ctx.channels.join(',') : meta.channelId), range,
     Number(meta.rawRowCount) || 0, appliedRows, unmatchedCount, ctx.warnings.join(' / ').slice(0, 2000), status
@@ -1153,7 +1327,11 @@ function _offAppendLog(ctx, meta, auth, status, unmatchedCount) {
 // ── API 라우팅 (doPost → 여기) ──
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // apps-script.js 의 doPost가 세션을 확인한 뒤 action이 offline_ · home_ 으로 시작하면 여기로 보낸다.
+// 요청 하나 = 요청 범위 하나(_offWithIo) — 같은 요청 안에서 같은 탭을 다시 읽지 않는다
 function _offlineHandle(action, data, auth) {
+  return _offWithIo(function () { return _offlineRoute(action, data, auth); });
+}
+function _offlineRoute(action, data, auth) {
   try {
     var out;
     if (action === 'offline_getMasters') out = _offGetMasters();
@@ -1201,12 +1379,12 @@ function _offGetMasters() {
   var cache = CacheService.getScriptCache();
   var hit = _cacheGetJSON(cache, 'offline:masters');
   if (hit) { hit.cached = true; return hit; }
-  var ss = _offSS();
-  var chRows = _offReadRows(_offSheet(ss, 'channel'), OFF_TABS.channel).filter(function (r) { return r[0]; });
-  var custSheet = ss.getSheetByName(OFF_TABS.customerMap.name); // setup 재실행 전이면 없다
+  // 거래처매핑·설정은 setup 재실행 전이면 없다
+  var t = _offReadTabs(['channel', 'sku', 'customerMap', 'mapping', 'store', 'settings'], { optional: ['customerMap', 'settings'] });
+  var chRows = t.channel.filter(function (r) { return r[0]; });
   var out = {
     success: true,
-    skus: _offReadRows(_offSheet(ss, 'sku'), OFF_TABS.sku).filter(function (r) { return r[0]; }).map(_offSkuObj),
+    skus: t.sku.filter(function (r) { return r[0]; }).map(_offSkuObj),
     channels: chRows.map(function (r) {
       return { channelId: r[0], name: r[1], channelCategory: r[2], active: r[3], order: r[4], uploadStartMonth: r[5] || '',
         bizNames: r[6] || '', storePrefix: r[7] || '', codeSystem: r[8] || r[0], stockOffset: _offStockOffsetOf(r), inSource: _offInSourceOf(r),
@@ -1214,41 +1392,38 @@ function _offGetMasters() {
     }),
     channelCategories: OFF_CHANNEL_CATEGORIES,
     codeSystems: _offVirtualCodeSystems(chRows),
-    customers: (custSheet ? _offReadRows(custSheet, OFF_TABS.customerMap) : []).filter(function (r) { return r[0]; }).map(function (r) {
+    customers: t.customerMap.filter(function (r) { return r[0]; }).map(function (r) {
       return { code: r[0], name: r[1], channelId: r[2], note: r[3] };
     }),
-    mappings: _offReadRows(_offSheet(ss, 'mapping'), OFF_TABS.mapping).filter(function (r) { return r[0] && r[1]; }).map(_offMappingObj),
-    stores: _offReadRows(_offSheet(ss, 'store'), OFF_TABS.store).filter(function (r) { return r[0] && r[1]; }).map(function (r) {
+    mappings: t.mapping.filter(function (r) { return r[0] && r[1]; }).map(_offMappingObj),
+    stores: t.store.filter(function (r) { return r[0] && r[1]; }).map(function (r) {
       return { channelId: r[0], code: r[1], name: r[2], region: r[3], firstSeen: r[4], lastSeen: r[5], storeType: r[6] || _offStoreTypeOf(r[2], r[3]) };
     }),
     productLines: OFFLINE_PRODUCT_LINES,
     stockTypes: OFF_STOCK_TYPES,
-    settings: _offReadSettings(ss)
+    settings: _offSettingsFrom(t.settings)
   };
   _cachePutJSON(cache, 'offline:masters', out, OFF_CACHE_TTL_SEC);
   return out;
 }
 
 function _offGetUnmatched() {
-  var ss = _offSS();
-  var cs = _offCodeSystemOf(ss);
-  var mapped = _offMappedKeys(_offReadRows(_offSheet(ss, 'mapping'), OFF_TABS.mapping), cs);
-  var items = _offReadRows(_offSheet(ss, 'unmatched'), OFF_TABS.unmatched)
+  var t = _offReadTabs(['channel', 'mapping', 'unmatched']);
+  var cs = _offCodeSystem(t.channel);
+  var mapped = _offMappedKeys(t.mapping, cs);
+  var items = t.unmatched
     .filter(function (r) { return r[0] && r[1] && !mapped[cs(r[0]) + OFF_KEY_SEP + r[1]]; })
     .map(function (r) { return { channelId: r[0], code: r[1], name: r[2], firstSeen: r[3], lastSeen: r[4], count: Number(r[5]) || 0 }; });
   items.sort(function (a, b) { return (b.count - a.count) || (b.lastSeen < a.lastSeen ? -1 : b.lastSeen > a.lastSeen ? 1 : 0); });
   return { success: true, items: items };
 }
 
-// 최근 50건 — 로그 전체를 읽지 않고 끝부분만 읽는다
+// 최근 50건 — 로그는 batchGet 한 번에 통째로 읽고(끝 행 번호를 따로 묻는 왕복이 더 비싸다) 끝부분만 쓴다
 function _offGetUploadLog() {
-  var ss = _offSS();
-  var def = OFF_TABS.uploadLog;
-  var sheet = _offSheet(ss, 'uploadLog');
-  var last = sheet.getLastRow();
-  var n = Math.min(50, Math.max(0, last - 1));
+  var all = _offRead('uploadLog');
+  var n = Math.min(50, all.length);
   if (!n) return { success: true, items: [] };
-  var rows = sheet.getRange(last - n + 1, 1, n, def.headers.length).getValues();
+  var rows = all.slice(all.length - n);
   var items = rows.map(function (r) {
     return {
       uploadId: _offStr(r[0]), at: _offStr(r[1]), uploader: _offStr(r[2]), fileName: _offStr(r[3]),
@@ -1269,9 +1444,9 @@ function _offGetStatus() {
   var cache = CacheService.getScriptCache();
   var hit = _cacheGetJSON(cache, 'offline:status');
   if (hit) { hit.cached = true; return hit; }
-  var ss = _offSS();
-  var channels = _offReadRows(_offSheet(ss, 'channel'), OFF_TABS.channel).filter(function (r) { return r[0]; });
-  var logRows = _offReadRows(_offSheet(ss, 'uploadLog'), OFF_TABS.uploadLog);
+  var t = _offReadTabs(['channel', 'uploadLog']);
+  var channels = t.channel.filter(function (r) { return r[0]; });
+  var logRows = t.uploadLog;
   var today = _offToday();
   var monthStart = today.slice(0, 8) + '01';
   var yesterday = _offAddDays(today, -1);
@@ -1346,10 +1521,8 @@ function _offSaveSku(data, auth) {
   if (order !== '' && !isFinite(order)) throw new Error('정렬순서는 숫자여야 합니다.');
   if (s.active !== undefined && s.active !== 'Y' && s.active !== 'N') throw new Error('활성은 Y 또는 N 이어야 합니다: ' + s.active);
   return _offWithLock(function () {
-    var ss = _offSS();
-    var def = OFF_TABS.sku;
-    var sheet = _offSheet(ss, 'sku');
-    var rows = _offReadRows(sheet, def);
+    var t = _offReadTabs(['sku', 'mapping']);
+    var rows = t.sku;
     var prev = rows.length;
     var id = String(s.skuId || '').trim();
     var row = null, isNew = !id;
@@ -1371,8 +1544,8 @@ function _offSaveSku(data, auth) {
     if (!keep(s.note)) row[7] = String(s.note || '').trim();
     // 기타 품목군은 모델이 '기타' 하나뿐이라 옵션이 곧 품명이다(예: 3kg 건조기 전시대) — 비면 무엇인지 알 수 없다
     if (line === '기타' && !row[4]) throw new Error('기타 품목군은 옵션에 품명을 입력해야 합니다 (예: 3kg 건조기 전시대).');
-    _offWriteAll(sheet, def, rows, prev);
-    var mappedCodes = _offReadRows(_offSheet(ss, 'mapping'), OFF_TABS.mapping).filter(function (m) { return m[0] && m[1] && m[2] === id; }).length;
+    _offRewrite('sku', rows, prev);
+    var mappedCodes = t.mapping.filter(function (m) { return m[0] && m[1] && m[2] === id; }).length;
     _offInvalidateCache();
     Logger.log('[오프라인] SKU 저장 ' + id + ' by ' + auth.email + (!isNew && prevLine !== line ? ' (품목군 ' + prevLine + ' → ' + line + ')' : ''));
     return { success: true, sku: _offSkuObj(row), mappedCodes: mappedCodes, lineChanged: !isNew && prevLine !== line };
@@ -1387,18 +1560,17 @@ function _offSaveMapping(data, auth) {
   var items = data.items || [];
   if (!items.length) throw new Error('저장할 매핑이 없습니다.');
   return _offWithLock(function () {
-    var ss = _offSS();
+    var t = _offReadTabs(['sku', 'channel', 'mapping', 'unmatched']);
     var today = _offToday();
     var skuIds = {}, channelIds = {};
-    _offReadRows(_offSheet(ss, 'sku'), OFF_TABS.sku).forEach(function (r) { if (r[0]) skuIds[r[0]] = true; });
-    var chRows = _offReadRows(_offSheet(ss, 'channel'), OFF_TABS.channel);
+    t.sku.forEach(function (r) { if (r[0]) skuIds[r[0]] = true; });
+    var chRows = t.channel;
     chRows.forEach(function (r) { if (r[0]) channelIds[r[0]] = true; });
     // 채널이 아닌 코드체계(erp)로 온 매핑도 받는다 — 미매칭 목록이 그 이름으로 뜬다
     _offVirtualCodeSystems(chRows).forEach(function (c) { channelIds[c.id] = true; });
     var cs = _offCodeSystem(chRows);
 
-    var mDef = OFF_TABS.mapping, mSheet = _offSheet(ss, 'mapping');
-    var mRows = _offReadRows(mSheet, mDef);
+    var mRows = t.mapping;
     var mPrev = mRows.length;
     var idx = {};
     mRows.forEach(function (r) { idx[cs(r[0]) + OFF_KEY_SEP + r[1]] = r; });
@@ -1428,11 +1600,10 @@ function _offSaveMapping(data, auth) {
       if (it.note !== undefined) row[7] = String(it.note || '').trim();
       mappedNow[k] = true;
     });
-    _offWriteAll(mSheet, mDef, mRows, mPrev);
+    _offRewrite('mapping', mRows, mPrev);
 
     // 미매칭코드 — 매핑된 코드는 빼고, 비활성화된 코드는 다시 올린다
-    var uDef = OFF_TABS.unmatched, uSheet = _offSheet(ss, 'unmatched');
-    var uRows = _offReadRows(uSheet, uDef);
+    var uRows = t.unmatched;
     var uPrev = uRows.length;
     var kept = uRows.filter(function (r) { return !mappedNow[cs(r[0]) + OFF_KEY_SEP + r[1]]; });
     var inList = {};
@@ -1440,9 +1611,73 @@ function _offSaveMapping(data, auth) {
     deactivated.forEach(function (r) {
       if (!inList[cs(r[0]) + OFF_KEY_SEP + r[1]]) kept.push([cs(r[0]), r[1], r[4], today, today, 0]);
     });
-    _offWriteAll(uSheet, uDef, kept, uPrev);
+    _offRewrite('unmatched', kept, uPrev);
     _offInvalidateCache();
     Logger.log('[오프라인] 매핑 저장 ' + items.length + '건 by ' + auth.email);
     return { success: true, saved: Object.keys(mappedNow).length, deactivated: deactivated.length };
   });
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// ── 읽기 점검 (편집기에서 직접 실행 — 시트·캐시에 아무것도 쓰지 않는다) ──
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+/* offline_benchmarkReads — 운영 시트로 Sheets API 전환을 확인한다. 이전 방식과 지금 방식을 번갈아 3번씩 재서 평균을 낸다.
+   ① 탭별 — 행 수 · 이전 방식(getSheetByName + getLastRow + getValues) ms · Sheets API(batchGet 한 탭) ms · 읽은 행이 같은지
+   ② 조회 액션별(그 액션이 읽는 탭 묶음) — 이전 방식(openById + 탭마다 위 세 번. 파트 홈은 월별·재고·미매칭을 따로 열어 읽던 그대로) ms ·
+      지금 방식(요청 범위 하나에서 batchGet — 실제 액션과 같은 묶음, 파트 홈은 이미 읽은 탭을 다시 읽지 않는다) ms
+   읽은 행이 탭마다 같으면 계산(월별 해석·재고 지표·판매 분석·파트 홈)은 같은 코드라 결과도 같다. 대시보드 왕복 시간은 브라우저에서 잰다. */
+var OFF_BENCH_ACTIONS = [
+  ['offline_getMonthly', [['channel', 'targets', 'prices', 'sales', 'mapping', 'sku']]],
+  ['offline_getInventory', [['settings', 'channel', 'sku', 'mapping', 'store', 'sales', 'stockDaily', 'stockStore', 'uploadLog', 'unmatched']]],
+  ['offline_getSalesBreakdown', [['channel', 'sku', 'mapping', 'sales', 'store', 'unmatched']]],
+  ['home_getSummary', [['channel', 'targets', 'prices', 'sales', 'mapping', 'sku'],
+    ['settings', 'channel', 'sku', 'mapping', 'store', 'sales', 'stockDaily', 'stockStore', 'uploadLog', 'unmatched'],
+    ['channel', 'gonguTargets'], ['channel', 'mapping', 'unmatched']]]
+];
+function offline_benchmarkReads() {
+  var REPS = 3, id = _offSheetId(), api = _offApiReady(), log = [], out = { sheetsApi: api, tabs: [], actions: [] };
+  var say = function (s) { log.push(s); Logger.log(s); };
+  var ms = function (fn) { var t = Date.now(); fn(); return Date.now() - t; };
+  var avg = function (a) { return a.length ? Math.round(a.reduce(function (s, x) { return s + x; }, 0) / a.length) : null; };
+  var oldRead = function (ss, k) { var sh = ss.getSheetByName(OFF_TABS[k].name); return sh ? _offReadRows(sh, OFF_TABS[k]) : []; };
+  say(api ? 'Sheets 고급 서비스 켜짐 — 대시보드 요청은 Sheets API로 읽고 쓴다' : '⚠ Sheets 고급 서비스가 꺼져 있다(appsscript.json 미반영?) — 대시보드는 SpreadsheetApp 대체 경로로 동작한다. 이전 방식만 잰다');
+  var keys = [];
+  OFF_BENCH_ACTIONS.forEach(function (a) { a[1].forEach(function (g) { g.forEach(function (k) { if (keys.indexOf(k) < 0) keys.push(k); }); }); });
+  var ss0 = SpreadsheetApp.openById(id);
+  keys.forEach(function (k) {
+    var o = [], n = [], oldRows = null, apiRows;
+    for (var i = 0; i < REPS; i++) {
+      o.push(ms(function () { oldRows = oldRead(ss0, k); }));
+      if (api) n.push(ms(function () { apiRows = _offBatchGet([k]); }));
+    }
+    var row = { tab: OFF_TABS[k].name, rows: oldRows.length, oldMs: avg(o), apiMs: avg(n), same: null, note: '' };
+    if (api) {
+      var got = apiRows && apiRows[k];
+      if (!apiRows) row.note = 'batchGet 실패 → SpreadsheetApp 대체';
+      else if (got === undefined) row.note = '텍스트 열에 숫자(날짜 셀?) → 이 탭은 SpreadsheetApp 대체';
+      var mine = _offReadTabs([k], { optional: ['settings'] })[k];
+      row.same = JSON.stringify(mine) === JSON.stringify(oldRows);
+      if (!row.same) {
+        var trim = function (rows) { rows = rows.slice(); while (rows.length && _offBlankRow(rows[rows.length - 1])) rows.pop(); return JSON.stringify(rows); };
+        if (trim(mine) === trim(oldRows)) { row.same = true; row.note = (row.note ? row.note + ' · ' : '') + '뒤쪽 빈 행 ' + (oldRows.length - mine.length) + '개만 다름(헤더 폭 밖 열에 값 — 결과 영향 없음)'; }
+      }
+    }
+    out.tabs.push(row);
+    say('[탭] ' + row.tab + ' ' + row.rows + '행 · 이전 ' + row.oldMs + 'ms' + (api ? ' · API ' + row.apiMs + 'ms · 읽은 행 ' + (row.same ? '같음' : '⚠ 다름') : '') + (row.note ? ' · ' + row.note : ''));
+  });
+  OFF_BENCH_ACTIONS.forEach(function (a) {
+    var o = [], n = [], loaded = {}, calls = 0, reads = 0;
+    a[1].forEach(function (g) { reads += g.length; if (g.some(function (k) { return !loaded[k]; })) calls++; g.forEach(function (k) { loaded[k] = true; }); });
+    for (var i = 0; i < REPS; i++) {
+      o.push(ms(function () { a[1].forEach(function (g) { var ss = SpreadsheetApp.openById(id); g.forEach(function (k) { oldRead(ss, k); }); }); }));
+      if (api) n.push(ms(function () { _offWithIo(function () { a[1].forEach(function (g) { _offReadTabs(g, { optional: ['settings'] }); }); }); }));
+    }
+    var row = { action: a[0], oldMs: avg(o), newMs: avg(n), oldCalls: a[1].length + ' openById · 탭 읽기 ' + reads + '번', newCalls: 'batchGet ' + calls + '번' };
+    out.actions.push(row);
+    say('[액션] ' + row.action + ' · 이전 ' + row.oldMs + 'ms(' + row.oldCalls + ')' + (api ? ' · 지금 ' + row.newMs + 'ms(' + row.newCalls + ') · ' + (row.newMs ? (row.oldMs / row.newMs).toFixed(1) + '배' : '') : ''));
+  });
+  var bad = out.tabs.filter(function (t) { return t.same === false; });
+  say(api ? (bad.length ? '⚠ 읽은 행이 다른 탭: ' + bad.map(function (t) { return t.tab; }).join(', ') : '모든 탭 — Sheets API로 읽은 행 = 이전 방식으로 읽은 행') : '');
+  out.log = log;
+  return out;
 }
