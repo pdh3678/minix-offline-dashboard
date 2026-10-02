@@ -2,7 +2,7 @@
 
    지키려는 성질:
      · offline_setupSheets가 '공구목표_월' 탭을 만든다(멱등) — 키 (연월, 벤더, 품목군, 모델), 출처 input/migration
-     · 채널군: 전문점·할인점·창고형·백화점 = 오프라인 / 폐쇄몰·특판 = 폐쇄몰·특판 / 공동구매는 채널이 아니다
+     · 채널군(채널마스터 채널대분류): 양판점·할인점·백화점 = 오프라인 / 폐쇄몰·렌탈·특판 = 특수 / 공동구매는 채널이 아니다
      · 원본 '공동구매 26년 목표' 파싱 — 행 번호가 아니라 제목 글자('매출 계획'·'마감 매출')와 머리글(구분/채널/상품명/수량/매출)로
        블록을 찾고, 병합 셀(벤더·월 머리글)을 채워 읽는다. 2025년 '매출 현황' 블록은 이관 대상이 아니다
      · 이관 대상은 벤더별 상품 행만(소계·채널 합계 행 제외), 값이 있는 월만. 금액은 원본 값 그대로(수량 × 매출금액 아님)
@@ -35,10 +35,12 @@ const { buildLegacy } = require(path.join(__dirname, 'lib', 'gongu-legacy-fixtur
     const rep = g.ctx.offline_setupSheets();
     check('다시 실행해도 새로 만들지 않고 확인만(멱등)', rep.created.length === 0 && rep.verified.indexOf('공구목표_월') >= 0, rep);
     const G = g.ctx._offChannelGroup;
-    check('채널군 — 전문점·할인점·창고형·백화점 = 오프라인', ['전문점', '할인점', '창고형', '백화점'].every(t => G(t) === 'offline'));
-    check('채널군 — 폐쇄몰·특판·렌탈 = 특수', G('폐쇄몰') === 'closed' && G('특판') === 'closed' && G(' 특판 ') === 'closed' && G('렌탈') === 'closed');
-    check('모르는 유형은 빈칸', G('온라인') === '' && G('') === '');
-    check('채널군 목록 순서 = 오프라인 → 특수(폐쇄몰·특판·렌탈) → 공동구매', J(g.ctx.OFF_CHANNEL_GROUPS.map(x => x.label)) === J(['오프라인', '특수(폐쇄몰·특판·렌탈)', '공동구매']));
+    check('채널군 — 양판점·할인점·백화점 = 오프라인', ['양판점', '할인점', '백화점'].every(t => G(t) === 'offline'));
+    check('  ↳ 채널대분류가 아닌 옛 유형(전문점·창고형)은 모름', G('전문점') === '' && G('창고형') === '');
+    check('채널군 — 폐쇄몰·렌탈·특판 = 특수', G('폐쇄몰') === 'closed' && G('특판') === 'closed' && G(' 특판 ') === 'closed' && G('렌탈') === 'closed');
+    check('모르는 채널대분류는 빈칸', G('온라인') === '' && G('') === '');
+    check('채널군 목록 순서·표시명 = 오프라인 → 특수(폐쇄몰·렌탈·특판) → 공동구매', J(g.ctx.OFF_CHANNEL_GROUPS.map(x => x.label)) === J(['오프라인', '특수(폐쇄몰·렌탈·특판)', '공동구매']));
+    check('채널군의 채널대분류 = 채널대분류 목록을 빠짐없이 한 번씩', J(g.ctx.OFF_CHANNEL_GROUPS.reduce((a, x) => a.concat(x.channelCategories), [])) === J(g.ctx.OFF_CHANNEL_CATEGORIES));
   }
 
   console.log('\n[2] 공구 목표 저장·조회');
@@ -139,7 +141,7 @@ const { buildLegacy } = require(path.join(__dirname, 'lib', 'gongu-legacy-fixtur
     const g = FX.env();
     const T = g.ctx.OFF_TABS;
     const append = (key, rows) => { const sh = g.tab(T[key].name); g.ctx._offWriteBlock(sh, T[key], sh.getLastRow() + 1, rows); };
-    // 폐쇄몰 채널 + 유형 모르는 채널, 필터 SKU
+    // 폐쇄몰 채널 + 채널대분류 모르는 채널, 필터 SKU
     append('channel', [['theablen', '디에이블앤', '폐쇄몰', 'N', 6, '', '', '', 'theablen'], ['odd', '이상한 채널', '온라인', 'N', 9, '', '', '', 'odd']]);
     append('sku', [['SKU-0009', '필터 하드락필터', '필터', '하드락필터', '', 'Y', '', '']]);
     const TG = (ym, ch, line, model, type, t, a) => [ym, ch, line, model, type, t, a, 'input', FX.TODAY, 'a', '', ''];
@@ -156,14 +158,23 @@ const { buildLegacy } = require(path.join(__dirname, 'lib', 'gongu-legacy-fixtur
     const s = g.call('home_getSummary', { ym: '2026-09', mode: 'month' });
     check('성공 · 1~12월 · 범위 = 그 달', s.success && s.months.length === 12 && J(s.range) === J(['2026-09']), s.error || s.range);
     const S = (grp, ym) => s.series[grp][ym];
-    check('오프라인 9월 IN 실적 = 하이마트 80×400,000 + 이마트 60×390,000 + 유형 모르는 채널 1×100,000(오프라인으로)',
+    check('오프라인 9월 IN 실적 = 하이마트 80×400,000 + 이마트 60×390,000 + 채널대분류 모르는 채널 1×100,000(오프라인으로)',
       S('offline', '2026-09').actual === 80 * 400000 + 60 * 390000 + 100000, S('offline', '2026-09'));
     check('오프라인 9월 IN 목표 금액', S('offline', '2026-09').target === 100 * 400000 + 50 * 390000 + 2 * 100000, S('offline', '2026-09'));
     check('단가 없는 모델이 섞이면 금액 미완 표시', S('offline', '2026-09').incomplete === true);
     check('폐쇄몰·특판 = 디에이블앤 5 × 200,000', S('closed', '2026-09').actual === 1000000 && S('closed', '2026-09').target === 2000000, S('closed', '2026-09'));
     check('필터는 본품 합계에서 빠지고 따로(9월 IN 30개 × 20,000)', s.filter.amount === 600000 && s.filter.qty === 30 && S('offline', '2026-09').actual < 60000000, s.filter);
     check('공동구매 목표 = 공구목표_월 목표금액(본품)', S('gongu', '2026-09').target === 44900000 + 3590000 && S('gongu', '2026-09').targetQty === 110 && S('gongu', '2026-08').target === 1795000 && S('gongu', '2026-09').actual == null, S('gongu', '2026-09'));
-    check('유형 모르는 채널 경고', s.warnings.some(w => /이상한 채널\(온라인\)/.test(w)), s.warnings);
+    check('채널대분류 모르는 채널 경고', s.warnings.some(w => /이상한 채널\(온라인\)/.test(w)), s.warnings);
+    // 채널군 카드 아래 상세 표 — 채널마다 선택 범위 IN 금액(채널 합 = 채널군 합, 채널대분류 순서 → 정렬순서)
+    const sumCh = (list, f) => list.reduce((a, c) => (c[f] == null ? a : (a || 0) + c[f]), null);
+    ['offline', 'closed'].forEach(k => {
+      const chs = s.channels.filter(c => c.group === k);
+      check('채널 표 ' + k + ' — 채널 합 = 채널군 9월 목표·실적', sumCh(chs, 'actual') === S(k, '2026-09').actual && sumCh(chs, 'target') === S(k, '2026-09').target, chs);
+    });
+    check('채널 표 — 채널대분류·채널군·순서(양판점 → 할인점 → 폐쇄몰 → 모르는 대분류), 채널대분류 목록', J(s.channels.map(c => c.channelId + ':' + c.channelCategory + ':' + c.group)) ===
+      J(['himart:양판점:offline', 'etland:양판점:offline', 'emart:할인점:offline', 'theablen:폐쇄몰:closed', 'odd:온라인:offline']) && J(s.channelCategories) === J(g.ctx.OFF_CHANNEL_CATEGORIES), s.channels);
+    check('  ↳ 하이마트 9월 IN = 목표 100×400,000+20(단가 없음) · 실적 80×400,000+필터 제외, 단가 없는 모델 → 미완', s.channels[0].actual === 80 * 400000 && s.channels[0].target === 100 * 400000 && s.channels[0].incomplete === true, s.channels[0]);
     // 채널 현황의 IN 금액(= offline_getMonthly byChannelMonth 합)과 같다
     const mon = g.call('offline_getMonthly', { from: '2026-01', to: '2026-12', totalsOnly: true });
     ['2026-08', '2026-09'].forEach(ym => {
@@ -172,6 +183,9 @@ const { buildLegacy } = require(path.join(__dirname, 'lib', 'gongu-legacy-fixtur
     });
     const ytd = g.call('home_getSummary', { ym: '2026-09', mode: 'ytd' });
     check('연 누적 범위 = 1~9월, 필터 누적', ytd.range.length === 9 && ytd.range[8] === '2026-09' && ytd.filter.amount === 600000, ytd.range);
+    const ytdGrp = k => ytd.range.reduce((a, ym) => { const x = ytd.series[k][ym].actual; return x == null ? a : (a || 0) + x; }, null);
+    check('연 누적 채널 표 — 하이마트 = 8월 40×400,000 + 9월 80×400,000, 채널 합 = 채널군 1~9월 합', ytd.channels[0].actual === 120 * 400000 &&
+      ['offline', 'closed'].every(k => ytd.channels.filter(c => c.group === k).reduce((a, c) => a + (c.actual || 0), 0) === ytdGrp(k)), ytd.channels);
     // 대분류별 그 달 판매 — OUT(원장): 하이마트 더 플렌더 MAX 9월 28 + 전자랜드 4 = 32 · 미니 건조기 PRO 28 · 더 슬림 28
     const cs = {}; s.categorySales.forEach(c => { cs[c.category] = c; });
     check('대분류별 판매 = 본품 대분류(필터·기타 없음)', J(s.categorySales.map(c => c.category)) === J(['음식물처리기', '김치냉장고', '청소기', '건조기', '식세기']), s.categorySales.map(c => c.category));

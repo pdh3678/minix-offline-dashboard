@@ -21,17 +21,17 @@
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // ── 채널군 ──
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-/* 채널마스터 '유형' → 채널군. 공동구매는 채널마스터 채널이 아니라 공구 데이터(실적통합)라 types가 비어 있다.
-   목록에 없는 유형은 '' — 파트 홈은 그 채널을 오프라인으로 더하고 경고를 남긴다(합계에서 조용히 빠지지 않게).
-   key 'closed'는 그대로 두고 표시명만 넓혔다(2026-09-30 렌탈 추가) — 화면·캐시가 이 key를 쓴다. */
+/* 채널마스터 '채널대분류'(OFF_CHANNEL_CATEGORIES — apps-script-offline.js) → 채널군. 공동구매는 채널마스터 채널이 아니라
+   공구 데이터(실적통합)라 channelCategories가 비어 있다. 목록에 없는 채널대분류는 '' — 파트 홈은 그 채널을 오프라인으로 더하고
+   경고를 남긴다(합계에서 조용히 빠지지 않게). key 'closed'는 그대로 두고 표시명만 바꿔 왔다 — 화면·캐시가 이 key를 쓴다. */
 var OFF_CHANNEL_GROUPS = [
-  { key: 'offline', label: '오프라인', types: ['전문점', '할인점', '창고형', '백화점'] },
-  { key: 'closed', label: '특수(폐쇄몰·특판·렌탈)', types: ['폐쇄몰', '특판', '렌탈'] },
-  { key: 'gongu', label: '공동구매', types: [] }
+  { key: 'offline', label: '오프라인', channelCategories: ['양판점', '할인점', '백화점'] },
+  { key: 'closed', label: '특수(폐쇄몰·렌탈·특판)', channelCategories: ['폐쇄몰', '렌탈', '특판'] },
+  { key: 'gongu', label: '공동구매', channelCategories: [] }
 ];
-function _offChannelGroup(type) {
-  var t = String(type == null ? '' : type).trim();
-  for (var i = 0; i < OFF_CHANNEL_GROUPS.length; i++) if (OFF_CHANNEL_GROUPS[i].types.indexOf(t) >= 0) return OFF_CHANNEL_GROUPS[i].key;
+function _offChannelGroup(cat) {
+  var t = String(cat == null ? '' : cat).trim();
+  for (var i = 0; i < OFF_CHANNEL_GROUPS.length; i++) if (OFF_CHANNEL_GROUPS[i].channelCategories.indexOf(t) >= 0) return OFF_CHANNEL_GROUPS[i].key;
   return '';
 }
 
@@ -346,17 +346,20 @@ function _gtMigrate(data, auth) {
    input: { ym, mode('month'|'ytd'), category('' = 본품 전체), monthly(_offMonthlyCompute 결과 — totals만 씀),
             inventory(_offInventoryCompute 결과), channels(채널마스터 행), gonguTargets(공구목표_월 행), unmatchedCount }
    반환 series[채널군][연월] = { target, actual, incomplete } — 1~12월 전부. 공동구매는 target(·targetQty)만(실적은 브라우저).
-   채널 현황 화면과 같은 합계(byChannelMonth = 본품 합계 · 대분류 필터면 byCategory)를 채널 유형으로 나눈 것이라
-   오프라인 + 폐쇄몰·특판 = 채널 현황의 IN 금액. */
+   채널 현황 화면과 같은 합계(byChannelMonth = 본품 합계 · 대분류 필터면 byCategory)를 채널대분류 → 채널군으로 나눈 것이라
+   오프라인 + 특수 = 채널 현황의 IN 금액.
+   channels[] = 같은 값을 채널마다 선택 범위(range)로 더한 것(채널군 카드 아래 상세 표 — 채널대분류 → 채널). 채널 합 = 채널군 합 */
 function _homeSummaryCompute(input) {
   var ym = input.ym, y = ym.slice(0, 4), cat = input.category || '', mode = input.mode === 'ytd' ? 'ytd' : 'month';
   var months = _offYmList(y + '-01', y + '-12');
   var range = mode === 'ytd' ? months.filter(function (m) { return m <= ym; }) : [ym];
+  var inRange = {};
+  range.forEach(function (m) { inRange[m] = true; });
   var sum = _offSumOrNull, warnings = [];
   var chInfo = {}, unknown = {};
-  (input.channels || []).forEach(function (r) { if (r[0]) chInfo[r[0]] = { name: r[1] || r[0], type: r[2] || '' }; });
+  (input.channels || []).forEach(function (r) { if (r[0]) chInfo[r[0]] = { name: r[1] || r[0], category: String(r[2] == null ? '' : r[2]).trim(), active: r[3], order: r[4] }; });
   var groupOf = function (ch) {
-    var info = chInfo[ch] || { name: ch, type: '' }, g = _offChannelGroup(info.type);
+    var info = chInfo[ch] || { name: ch, category: '' }, g = _offChannelGroup(info.category);
     if (!g) { unknown[ch] = info; g = 'offline'; }
     return g;
   };
@@ -364,16 +367,27 @@ function _homeSummaryCompute(input) {
   OFF_CHANNEL_GROUPS.forEach(function (g) { series[g.key] = {}; months.forEach(function (m) { series[g.key][m] = { target: null, actual: null, incomplete: false }; }); });
   months.forEach(function (m) { series.gongu[m].targetQty = null; });
 
-  // 1) 오프라인·폐쇄몰·특판 — IN 목표·실적 금액
+  // 1) 오프라인·특수 — IN 목표·실적 금액(채널군 월별 + 채널별 선택 범위 합)
   var tot = (input.monthly && input.monthly.totals) || {};
   var list = cat ? (tot.byCategory || []).filter(function (x) { return x.category === cat; }) : (tot.byChannelMonth || []);
+  var byCh = {};
   list.forEach(function (x) {
     var s = series[groupOf(x.channelId)][x.ym];
     if (!s) return;
     s.target = sum(s.target, x['in'].targetAmount);
     s.actual = sum(s.actual, x['in'].actualAmount);
     if (x['in'].amountIncomplete) s.incomplete = true;
+    if (!inRange[x.ym]) return;
+    var c = byCh[x.channelId] || (byCh[x.channelId] = { target: null, actual: null, incomplete: false });
+    c.target = sum(c.target, x['in'].targetAmount);
+    c.actual = sum(c.actual, x['in'].actualAmount);
+    if (x['in'].amountIncomplete) c.incomplete = true;
   });
+  // 채널 표 — 활성 채널 + 값이 있는 채널, 채널대분류 순서 → 정렬순서
+  var chList = Object.keys(chInfo).filter(function (ch) { return chInfo[ch].active === 'Y' || byCh[ch]; }).map(function (ch) {
+    var info = chInfo[ch], v = byCh[ch] || { target: null, actual: null, incomplete: false };
+    return { channelId: ch, name: info.name, channelCategory: info.category, group: groupOf(ch), order: info.order, target: v.target, actual: v.actual, incomplete: v.incomplete };
+  }).sort(function (a, b) { return (_offChannelCatRank(a.channelCategory) - _offChannelCatRank(b.channelCategory)) || ((Number(a.order) || 99) - (Number(b.order) || 99)); });
   // 2) 공동구매 목표 — 공구목표_월(본품만, 대분류 필터면 그 대분류)
   (input.gonguTargets || []).forEach(function (r) {
     if (!r[0] || !r[3]) return;
@@ -415,7 +429,7 @@ function _homeSummaryCompute(input) {
     o.qty = sum(o.qty, x.out.actual); o.amount = sum(o.amount, x.out.actualAmount);
     if (x.out.amountIncomplete) o.incomplete = true;
   });
-  Object.keys(unknown).forEach(function (ch) { warnings.push('채널군을 모르는 채널 유형 — 오프라인으로 더했습니다: ' + unknown[ch].name + '(' + (unknown[ch].type || '유형 없음') + ')'); });
+  Object.keys(unknown).forEach(function (ch) { warnings.push('채널군을 모르는 채널대분류 — 오프라인으로 더했습니다: ' + unknown[ch].name + '(' + (unknown[ch].category || '채널대분류 없음') + ')'); });
 
   // 5) 오늘 챙길 것(오프라인 쪽) — 재고 현황·코드 매핑 화면과 같은 정의
   var inv = input.inventory || {}, invCh = inv.channels || [];
@@ -427,12 +441,13 @@ function _homeSummaryCompute(input) {
   });
   (inv.storeOuts || []).forEach(function (s) { if (!cat || skuCat[s.skuId] === cat) alerts.storeOut++; });
   var chView = function (c) {
-    return { channelId: c.channelId, name: c.name, salesDate: c.salesDate, stockDate: c.stockDate, salesAge: c.salesAge, stockAge: c.stockAge,
+    return { channelId: c.channelId, name: c.name, channelCategory: c.channelCategory || '', salesDate: c.salesDate, stockDate: c.stockDate, salesAge: c.salesAge, stockAge: c.stockAge,
       staleSales: !!c.staleSales, staleStock: !!c.staleStock };
   };
   return {
     ym: ym, year: y, mode: mode, category: cat, months: months, range: range,
-    groups: OFF_CHANNEL_GROUPS.map(function (g) { return { key: g.key, label: g.label, types: g.types }; }),
+    groups: OFF_CHANNEL_GROUPS.map(function (g) { return { key: g.key, label: g.label, channelCategories: g.channelCategories }; }),
+    channelCategories: OFF_CHANNEL_CATEGORIES, channels: chList,
     series: series, filter: filter, categorySales: cats.map(function (c) { return cs[c]; }),
     today: { delayed: invCh.filter(function (c) { return c.staleSales || c.staleStock; }).map(chView), unmatched: input.unmatchedCount || 0, alerts: alerts },
     freshness: invCh.filter(function (c) { return c.hasStock || c.hasSales; }).map(chView),
