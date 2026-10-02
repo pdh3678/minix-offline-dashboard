@@ -70,7 +70,7 @@ function _osaHtml(){
       ${d&&d.hasInst?tog('measure',[['sale','판매등록'],['inst','설치완료']]):''}
       ${_OSA.loading?'<span class="up-progress">불러오는 중…</span>':''}
     </div>`;
-  const head=`<div class="card-hd"><span>판매 분석 <span class="of-sub">${_escHtml(r.from===r.to?r.from:r.from+' ~ '+r.to)} · 판매원장 ${_OSA.measure==='inst'?'설치완료':'판매 등록'} 기준</span></span>
+  const head=`<div class="card-hd"><span>판매 분석 <span class="of-sub">${_escHtml(_offlineChannelLabel(_OSA.ch))} · ${_escHtml(r.from===r.to?r.from:r.from+' ~ '+r.to)} · 판매원장 ${_OSA.measure==='inst'?'설치완료':'판매 등록'} 기준</span></span>
     <span class="card-hd-r">${d?`합계 <b>${_osaQty(d.totals.qty)}</b>${d.totals.unmatchedQty?` · 미매칭 ${_osaQty(d.totals.unmatchedQty)} 포함`:''}`:''}</span></div>`;
   if(_OSA.err)return head+ctl+`<div class="up-err">${_escHtml(_OSA.err)}</div>`;
   if(!d)return head+ctl+'<div class="mp-empty">불러오는 중…</div>';
@@ -145,8 +145,8 @@ function _osaRenderStores(){
 function _osaStoreCsv(){
   const d=_OSA.data;if(!d)return;
   const ci=_ofChannelInv(_OCD.inv,_OCD.ch)||{};
-  const head=['채널','기간','점포코드','점포명','지역','점포유형','합계'].concat(d.keys.map(k=>k.label));
-  const lines=[head].concat(_osaStoreList(d).map(s=>[ci.name||_OCD.ch,d.from===d.to?d.from:d.from+'~'+d.to,s.store,s.storeName,s.region,s.storeType,s.total]
+  const head=['채널대분류','채널','기간','점포코드','점포명','지역','점포유형','합계'].concat(d.keys.map(k=>k.label));
+  const lines=[head].concat(_osaStoreList(d).map(s=>[_offlineChannelCatOf(_OCD.ch),ci.name||_OCD.ch,d.from===d.to?d.from:d.from+'~'+d.to,s.store,s.storeName,s.region,s.storeType,s.total]
     .concat(d.keys.map(k=>s.byKey[k.key]||0)))).map(a=>a.map(_ocdCsvCell).join(','));
   const blob=new Blob(['﻿'+lines.join('\r\n')],{type:'text/csv;charset=utf-8'});
   const a=document.createElement('a');

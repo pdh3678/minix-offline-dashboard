@@ -62,6 +62,11 @@
 .of-gap-pos{color:var(--warn)}
 .of-nodata{font-size:12px;color:var(--text-3);border-top:1px dashed var(--border);padding-top:9px}
 .of-card-foot{font-size:10.5px;color:var(--text-3)}
+/* 채널대분류 묶음(채널 현황) — 머리 = 대분류 합계, 아래 = 채널 카드 */
+.of-grp{display:flex;flex-direction:column;gap:8px}
+.of-grp-hd{display:flex;align-items:center;gap:6px 14px;flex-wrap:wrap;padding:0 2px}
+.of-grp-name{font-size:14px;font-weight:800;color:var(--navy);letter-spacing:-.2px}
+.of-grp-kv{font-size:12px;color:var(--text-2);font-variant-numeric:tabular-nums;white-space:nowrap}
 
 /* 공용 표 */
 .of-tbl td,.of-tbl th{padding:6px 9px}
@@ -76,6 +81,9 @@
 .of-tbl .of-lv-sku td:first-child{padding-left:46px}
 .of-tbl .of-lv-note td{font-size:11.5px;color:var(--warn);background:var(--warn-bg);padding-left:30px}
 .of-tbl .of-lv-total td{font-weight:800;border-top:2px solid var(--border);background:var(--minix-lt);color:var(--minix)}
+/* 채널대분류 소계 줄 · 매트릭스 머리의 채널대분류 묶음 */
+.of-tbl .of-lv-sub td{font-weight:800;background:var(--surface-2);border-top:1px solid var(--border)}
+.of-tbl th.of-mx-grp{text-align:center;font-size:11px;color:var(--text-3);border-bottom:1px solid var(--border)}
 .of-tbl .of-lv-um td{color:var(--warn)}
 /* 본품 외 대분류(필터·기타) — 본품 합계 줄 아래 구분선 뒤에 / 카드·채널 상세의 "필터 판매 · 필터 재고" 한 줄 */
 .of-tbl .of-lv-sep td{border-top:2px dashed var(--border-s);padding-top:12px;font-size:11px;font-weight:700;color:var(--text-3);background:var(--surface)}
@@ -118,6 +126,9 @@
 .of-tab.on{background:var(--navy);border-color:var(--navy);color:#fff}
 .of-tab .of-sub{margin-left:4px}
 .of-tab.on .of-sub{color:rgba(255,255,255,.7)}
+.of-tabs{gap:6px 14px}
+.of-tab-grp{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.of-tab-grp-lb{font-size:11px;font-weight:800;color:var(--text-3);margin-right:2px}
 
 /* 경보 목록 탭 */
 .of-atabs{display:inline-flex;border:1px solid var(--border);border-radius:6px;overflow:hidden}

@@ -24,6 +24,12 @@
 .home-tbl{margin-top:10px}
 .home-tbl summary{cursor:pointer;font-size:12px;font-weight:700;color:var(--text-2)}
 .home-tbl .of-tbl{margin-top:8px}
+/* ① 채널 대분류별 실적 펼침 표 — 채널군 → 채널대분류 → 채널 */
+.home-dt .home-dt-grp td{font-weight:800;background:var(--surface-2)}
+.home-dt .home-dt-cat td{font-weight:700}
+.home-dt .home-dt-cat td:first-child{padding-left:22px}
+.home-dt .home-dt-ch td{color:var(--text-2);font-size:12px}
+.home-dt .home-dt-ch td:first-child{padding-left:38px}
 .home-sel td{background:var(--minix-lt)}
 
 /* ③ 오늘 챙길 것 */

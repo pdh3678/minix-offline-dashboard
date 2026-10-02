@@ -5,7 +5,9 @@
    (actual 키를 빼면 서버가 실적 칸을 그대로 둔다). 대분류 단위 이관 행(모델 구분 없는 과거 수치)은 읽기 전용 줄.
    칸을 고칠 때는 표를 다시 그리지 않고 합계 칸만 갱신한다(월별 입력 탭과 같은 이유 — Tab으로 연달아 입력).
    채널 전체를 볼 때는 맨 아래에 읽기 전용 '공동구매' 줄(목표 = 공구목표_월 수량, 실적 = 공구 분석과 같은 규칙의 판매수량)과
-   IN 쪽에서 '파트 합계(IN + 공동구매)' 줄을 붙인다 — 파트 합계 확인용(금액 기준 파트 합계는 파트 홈). */
+   IN 쪽에서 '파트 합계(IN + 공동구매)' 줄을 붙인다 — 파트 합계 확인용(금액 기준 파트 합계는 파트 홈).
+   채널은 채널대분류 → 채널 순으로 묶고 대분류마다 소계 줄(월별 입력 탭과 같은 규칙). 채널 대분류 필터가 걸리면 그 대분류 채널만이고
+   공동구매·파트 합계 줄은 숨긴다(채널 일부 + 공구 전체를 더하면 파트 합계가 아니다). */
 
 const _TGA={year:'',side:'IN',view:'target',ch:'',data:null,err:'',edits:{},saving:false,collapsed:{},rows:[],gongu:null,gonguErr:''};
 function _tgaMonths(){const o=[];for(let m=1;m<=12;m++)o.push(_TGA.year+'-'+String(m).padStart(2,'0'));return o;}
@@ -33,8 +35,7 @@ function _tgaSet(k,v){_TGA[k]=v;_tgRender();}
 function _tgaBuild(){
   const d=_TGA.data||{rows:[],categoryRows:[]},m=OFFLINE_MASTERS||{};
   const hasData=ch=>(d.rows||[]).some(r=>r.channelId===ch)||(d.categoryRows||[]).some(c=>c.channelId===ch);
-  const chans=(m.channels||[]).slice().sort((a,b)=>(Number(a.order)||99)-(Number(b.order)||99))
-    .filter(c=>_TGA.ch?c.channelId===_TGA.ch:(c.active==='Y'||hasData(c.channelId)));
+  const chans=_offlineSortChannels((m.channels||[]).filter(c=>(_TGA.ch?c.channelId===_TGA.ch:(c.active==='Y'||hasData(c.channelId)))&&_ofInScope(c.channelId)));
   const byKey={};(d.rows||[]).forEach(r=>{const k=r.channelId+'|'+r.line+'|'+r.model;(byKey[k]=byKey[k]||{known:r.knownModel!==false,m:{}}).m[r.ym]=r;});
   const cat={};(d.categoryRows||[]).forEach(c=>{(cat[c.channelId+'|'+c.category]=cat[c.channelId+'|'+c.category]||{})[c.ym]=c;});
   const rows=[];
@@ -73,7 +74,7 @@ function _tgaCell(row,ym){
 }
 function _tgaCatCell(cr,ym,f){return _tgaOrig(cr,ym,f);}
 
-/* 합계 — scope: cat:ch|대분류 · ln:ch|품목군 · ch:ch · all. 대분류·채널·전체에는 대분류 단위(이관) 행도 더한다(월별 입력 탭과 같은 규칙).
+/* 합계 — scope: cat:ch|대분류 · ln:ch|품목군 · ch:ch · grp:채널대분류(소계) · all. 대분류·채널·전체에는 대분류 단위(이관) 행도 더한다(월별 입력 탭과 같은 규칙).
    채널·전체 = 본품 합계(필터·기타는 자기 대분류 합계에만 — 월별 입력 탭과 같은 규칙).
    반환 {ym|'Y': {t, a}} — t = 목표 합(고친 값 포함), a = 실적 합 */
 function _tgaTotals(){
@@ -86,15 +87,15 @@ function _tgaTotals(){
   const shown={};
   _TGA.rows.forEach(r=>{shown[r.ch]=true;months.forEach(ym=>{
     const t=_tgaTarget(r,ym),a=_tgaOrig(r.months,ym,'actual');
-    ['cat:'+r.ch+'|'+r.category,'ln:'+r.ch+'|'+r.line,'row:'+r.key].concat(_tgIsMain(r.category)?['ch:'+r.ch,'all']:[]).forEach(s=>{add(s,ym,t,a);add(s,'Y',t,a);});
+    ['cat:'+r.ch+'|'+r.category,'ln:'+r.ch+'|'+r.line,'row:'+r.key].concat(_tgIsMain(r.category)?['ch:'+r.ch,'grp:'+_offlineChannelCatOf(r.ch),'all']:[]).forEach(s=>{add(s,ym,t,a);add(s,'Y',t,a);});
   });});
   Object.keys(_TGA.cat||{}).forEach(k=>{
     const [ch,cat]=k.split('|');if(!shown[ch])return;
     months.forEach(ym=>{const t=_tgaOrig(_TGA.cat[k],ym,'target'),a=_tgaOrig(_TGA.cat[k],ym,'actual');
-      ['cat:'+k,'catrow:'+k].concat(_tgIsMain(cat)?['ch:'+ch,'all']:[]).forEach(s=>{add(s,ym,t,a);add(s,'Y',t,a);});});
+      ['cat:'+k,'catrow:'+k].concat(_tgIsMain(cat)?['ch:'+ch,'grp:'+_offlineChannelCatOf(ch),'all']:[]).forEach(s=>{add(s,ym,t,a);add(s,'Y',t,a);});});
   });
-  // 공동구매(읽기 전용) · 파트 합계(IN + 공동구매) — 채널 전체를 볼 때만
-  if(!_TGA.ch){
+  // 공동구매(읽기 전용) · 파트 합계(IN + 공동구매) — 채널 전체를 볼 때만(채널 대분류 필터 없이)
+  if(_tgaShowGongu()){
     const g=_tgaGongu();
     months.forEach(ym=>{add('gongu',ym,g[ym].t,g[ym].a);add('gongu','Y',g[ym].t,g[ym].a);});
     if(_TGA.side==='IN')months.concat(['Y']).forEach(ym=>{
@@ -113,6 +114,7 @@ function _tgaGongu(){
   });
   return out;
 }
+function _tgaShowGongu(){return !_TGA.ch&&!OFFLINE_FILTER.chCat;}
 function _tgaFmtTot(o){
   if(!o)return '';
   if(_TGA.view==='target')return _tgFmt(o.t);
@@ -123,13 +125,13 @@ const _tgaId=scope=>'tga'+scope.replace(/[^A-Za-z0-9]/g,c=>'_'+c.charCodeAt(0));
 
 // ── 그리기 ──
 function _tgaHtml(){
-  const m=OFFLINE_MASTERS||{},Y=+(_TGA.year||(_TG.ym||_tgThisYm()).slice(0,4));
+  const Y=+(_TGA.year||(_TG.ym||_tgThisYm()).slice(0,4));
   const tog=(k,opts)=>`<span class="axis-toggle">${opts.map(([v,l])=>`<button type="button" class="${_TGA[k]===v?'on':''}" onclick="_tgaSet('${k}','${v}')">${l}</button>`).join('')}</span>`;
   const head=`<div class="card"><div class="card-hd">연간 보기<span class="card-hd-r">월별 입력과 같은 해석 · 목표 보기에서만 편집(엑셀 범위 붙여넣기 가능) · 저장은 바뀐 목표 칸만</span></div>
     <div class="cm-filters">
       <select class="f-sel" onchange="_tgaSetYear(this.value)">${[Y-1,Y,Y+1].map(y=>`<option value="${y}"${String(y)===_TGA.year?' selected':''}>${y}년</option>`).join('')}</select>
-      <select class="f-sel" onchange="_tgaSetCh(this.value)"><option value="">활성 채널 전체</option>${(m.channels||[]).map(c=>
-        `<option value="${_escAttr(c.channelId)}"${_TGA.ch===c.channelId?' selected':''}>${_escHtml(c.name)}${c.active==='Y'?'':' (비활성)'}</option>`).join('')}</select>
+      ${_ofChCatSelectHtml('_tgSetChCat(this.value)')}
+      <select class="f-sel" onchange="_tgaSetCh(this.value)">${_tgChFilterOpts(_TGA.ch)}</select>
       ${tog('side',[['IN','IN'],['OUT','OUT']])}${tog('view',[['target','목표'],['actual','실적'],['rate','달성률']])}${_tgNonMainToggleHtml()}
       ${_TGA.view==='target'?`<button type="button" class="btn-primary up-btn" id="tgaSaveBtn" ${_TGA.saving?'disabled':''} onclick="_tgaSave()">저장</button>
         <button type="button" class="btn-cancel up-btn" onclick="_tgaRevert()">되돌리기</button>`:''}
@@ -141,7 +143,7 @@ function _tgaHtml(){
   const th=`<tr><th>채널 / 품목</th>${months.map(ym=>`<th class="num-col">${+ym.slice(5)}월</th>`).join('')}<th class="num-col">연 합계</th></tr>`;
   const totRow=(scope,label,cls)=>`<tr class="${cls}"><td>${label}</td>${months.concat(['Y']).map(ym=>`<td class="num-col" id="${_tgaId(scope)}_${ym.slice(-2)}"></td>`).join('')}</tr>`;
   let body='';
-  chans.forEach(c=>{
+  const chHtml=c=>{
     body+=`<tr class="tg-ch"><td colspan="14">${_escHtml(c.name)}${c.active==='Y'?'':' <span class="up-chip">비활성</span>'}${c.uploadStartMonth&&(_TGA.side==='OUT'||c.inSource==='upload')?` <span class="up-chip ready">${_TGA.side} 실적 = 업로드 원장(${_escHtml(c.uploadStartMonth)}~)</span>`:''}</td></tr>`;
     // 본품 대분류 → 채널 합계(본품) → "비본품 표시"면 구분선 뒤에 필터·기타
     const catBody=cat=>{
@@ -161,9 +163,11 @@ function _tgaHtml(){
     };
     body+=PRODUCT_MAIN_CATEGORIES.map(catBody).join('')+totRow('ch:'+c.channelId,_escHtml(c.name)+' 합계','tg-chtot');
     if(_TG.nonMain)body+=`<tr class="tg-sep"><td colspan="14">본품 외 — ${_escHtml(c.name)} 합계·전체 합계에 들어가지 않습니다</td></tr>`+PRODUCT_EXTRA_CATEGORIES.map(catBody).join('');
-  });
-  body+=totRow('all','전체 합계','tg-grand');
-  if(!_TGA.ch){
+  };
+  // 채널대분류 → 채널, 대분류마다 소계
+  _offlineGroupChannels(chans).forEach(g=>{body+=_tgGroupHeadHtml(g,14);g.channels.forEach(chHtml);body+=totRow('grp:'+g.cat,_escHtml(g.cat)+' 소계','tg-grptot');});
+  body+=totRow('all',_tgAllLabel(),'tg-grand');
+  if(_tgaShowGongu()){
     body+=`<tr class="tga-gongu-sep"><td colspan="14">공동구매 — 채널이 아니라 공구 데이터(목표 = [공구 목표] 탭 수량 · 실적 = 공구 분석과 같은 규칙의 판매수량) · 읽기 전용${_TGA.gonguErr?' · ⚠ 공구 목표를 불러오지 못했습니다: '+_escHtml(_TGA.gonguErr):''}</td></tr>`+
       totRow('gongu','공동구매','tg-catrow')+(_TGA.side==='IN'?totRow('part','파트 합계 (IN + 공동구매)','tg-grand'):'');
   }

@@ -78,7 +78,7 @@ function renderMappingPanel(hostId,items,opts){
       ?`<div class="mp-sugg">제안(${sugg.via==='name'?'같은 상품명':'모델 '+_escHtml(sugg.model)}): <button type="button" class="mp-chip" onclick="_mpApplySugg('${hostId}',${i})">${_escHtml(_mpSkuName(sugg.skuId))}</button></div>`
       :cs?_mpCatSuggHtml(hostId,i,cs):'';
     return `<tr>
-      ${O.showChannel?`<td>${_escHtml(_offlineChannelName(it.channelId))}</td>`:''}
+      ${O.showChannel?`<td>${_escHtml(_offlineChannelLabel(it.channelId))}</td>`:''}
       <td class="mp-code">${_escHtml(it.code)}</td>
       <td>${_escHtml(it.name||'')}</td>
       ${O.showStats?`<td class="num-col">${_escHtml(it.count)}</td><td>${_escHtml(it.lastSeen||'')}</td>`:''}

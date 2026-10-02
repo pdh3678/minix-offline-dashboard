@@ -112,7 +112,7 @@ function _homeBarHtml(){
   const s=HOME.sum;
   const fresh=s?(s.freshness||[]).map(c=>{
     const part=(lb,d,age,st)=>d?`${lb} <b>${_escHtml(_ofMD(d))}</b>${st?` <span class="of-stale" title="오늘보다 ${age}일 전 — 지연 경고 기준 ${s.staleDays}일 초과">⚠ ${age}일 전</span>`:''}`:`${lb} <span class="off-muted">없음</span>`;
-    return `<span class="of-fresh-chip${c.staleSales||c.staleStock?' stale':''}"><span class="of-fresh-ch">${_escHtml(c.name)}</span> ${part('판매',c.salesDate,c.salesAge,c.staleSales)} · ${part('재고',c.stockDate,c.stockAge,c.staleStock)}</span>`;
+    return `<span class="of-fresh-chip${c.staleSales||c.staleStock?' stale':''}"><span class="of-fresh-ch">${_escHtml(_ofChLabel(c.channelCategory,c.name))}</span> ${part('판매',c.salesDate,c.salesAge,c.staleSales)} · ${part('재고',c.stockDate,c.stockAge,c.staleStock)}</span>`;
   }).join(''):'';
   const live=typeof _lastLiveAt!=='undefined'&&_lastLiveAt?new Date(_lastLiveAt).toLocaleTimeString('ko-KR',{hour:'2-digit',minute:'2-digit'}):'';
   return `<div class="card of-bar">
@@ -148,8 +148,32 @@ function _homePartHtml(){
       <div><div class="home-hero-lb">달성률</div><div class="home-hero-v2 ${rateCls(part.rate)}">${_ofPct(part.rate)}</div></div>
     </div>
     <div class="home-mini-row">${mini}</div>
-    ${filterLine}${warn}
+    ${_homeChannelDetailHtml(s)}${filterLine}${warn}
     <div class="of-note">매출 기준: 오프라인 Sell-in × 공급가(ERP 매출이익리스트 채널은 파일의 금액) + 공구 판매 × 공구가 (VAT 포함, 수수료 차감 전) · 목표 = 오프라인 IN 목표 금액 + 공구 목표 금액</div></div>`;
+}
+
+/* ① 아래 펼침 표 — 채널군 → 채널대분류 → 채널, 선택 범위 IN 금액 목표·실적·달성률(서버 channels[] — 채널군 카드와 같은 값을 채널마다 나눈 것).
+   채널대분류 줄 = 소속 채널 합, 채널군 줄 = 그 채널대분류 합(= 위 카드). 공동구매는 채널이 아니라 위 카드만 */
+function _homeChannelDetailHtml(s){
+  const list=s.channels||[];
+  if(!list.length)return '';
+  const sumOf=arr=>{const o={target:null,actual:null,incomplete:false};arr.forEach(x=>{o.target=_homeSum(o.target,x.target);o.actual=_homeSum(o.actual,x.actual);if(x.incomplete)o.incomplete=true;});return o;};
+  const row=(cls,label,o)=>`<tr class="${cls}"><td>${label}</td><td class="num-col"${_homeWonTitle(o.target)}>${_ofWonShort(o.target)}</td>`+
+    `<td class="num-col"${_homeWonTitle(o.actual)}>${_ofWonShort(o.actual)}${_homeInc(o.incomplete)}</td><td class="num-col">${_ofPct(_ofRate(o.actual,o.target))}</td></tr>`;
+  let body='';
+  PART_GROUPS.forEach(g=>{
+    const chs=list.filter(c=>c.group===g.key);
+    if(!chs.length)return;
+    body+=row('home-dt-grp',`<span class="home-dot" style="background:${g.color}"></span>${_escHtml(g.label)}`,sumOf(chs));
+    const cats=[];
+    chs.forEach(c=>{let b=cats.find(x=>x.cat===c.channelCategory);if(!b)cats.push(b={cat:c.channelCategory,chs:[]});b.chs.push(c);});
+    cats.forEach(b=>{
+      body+=row('home-dt-cat',_escHtml(b.cat||OFFLINE_UNCATEGORIZED),sumOf(b.chs));
+      b.chs.forEach(c=>{body+=row('home-dt-ch',_escHtml(c.name),c);});
+    });
+  });
+  return `<details class="home-tbl home-dt"><summary>채널 대분류별 실적 — 채널대분류 → 채널 (IN 금액)</summary><div class="tbl-wrap"><table class="of-tbl">
+    <thead><tr><th>채널군 / 채널대분류 / 채널</th><th class="num-col">목표</th><th class="num-col">실적</th><th class="num-col">달성률</th></tr></thead><tbody>${body}</tbody></table></div></details>`;
 }
 
 // ② 연간 추이 — 채널군별 누적 막대(실적) + 파트 월 목표 선. 막대를 누르면 그 달로
@@ -256,7 +280,7 @@ function _homeGoCalendar(ymd){
   requestAnimationFrame(()=>{const el=document.querySelector(`[data-ym="${ym}"]`);if(el&&el.scrollIntoView)el.scrollIntoView({block:'start'});});
 }
 
-// ⑤ 대분류별 이번 달 판매 — 오프라인·특수(폐쇄몰·특판·렌탈) Sell-out(서버) + 공구 판매(브라우저), 선택 연월 기준
+// ⑤ 대분류별 이번 달 판매 — 오프라인·특수(폐쇄몰·렌탈·특판) Sell-out(서버) + 공구 판매(브라우저), 선택 연월 기준
 function _homeCatRows(){
   const s=HOME.sum,g=partGonguByCategory(HOME.ym);
   const cats=s?s.categorySales:(HOME.category?[HOME.category]:PRODUCT_MAIN_CATEGORIES).map(c=>({category:c}));
@@ -278,7 +302,7 @@ function _homeCatHtml(){
     ${HOME.err?`<div class="up-err">오프라인 판매를 불러오지 못했습니다 — 공구 판매만 표시합니다: ${_escHtml(HOME.err)}</div>`:''}
     <div class="home-chart home-chart-cat"><canvas id="homeCatCanvas" aria-label="대분류별 채널군 판매 수량"></canvas></div>
     <div class="tbl-wrap"><table class="of-tbl"><thead><tr><th>대분류</th>${PART_GROUPS.map(g=>`<th class="num-col"><span class="home-dot" style="background:${g.color}"></span>${_escHtml(g.label)}</th>`).join('')}<th class="num-col">합계</th><th class="num-col">금액</th></tr></thead><tbody>${body}</tbody></table></div>
-    <div class="of-note">오프라인·특수(폐쇄몰·특판·렌탈) = 판매원장·목표 관리의 OUT(Sell-out) 실적 · 공구 = 시작일이 이 달인 완료·진행중 공구의 판매수량 · 금액 = 오프라인 OUT × 공급가(ERP 매출이익리스트 채널은 파일의 금액) + 공구가 × 판매수량(총매출)</div></div>`;
+    <div class="of-note">오프라인·특수(폐쇄몰·렌탈·특판) = 판매원장·목표 관리의 OUT(Sell-out) 실적 · 공구 = 시작일이 이 달인 완료·진행중 공구의 판매수량 · 금액 = 오프라인 OUT × 공급가(ERP 매출이익리스트 채널은 파일의 금액) + 공구가 × 판매수량(총매출)</div></div>`;
 }
 function _homeDrawCat(){
   const el=document.getElementById('homeCatCanvas');

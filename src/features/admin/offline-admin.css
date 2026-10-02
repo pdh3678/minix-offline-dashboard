@@ -99,6 +99,11 @@
 .tg-line td{font-weight:700;color:var(--text-2)}
 .tg-chtot td{font-weight:800;border-top:2px solid var(--border)}
 .tg-grand td{font-weight:800;background:var(--minix-lt);color:var(--minix)}
+/* 채널대분류 묶음 머리 · 소계(목표 관리) / 묶음 머리(데이터 현황) */
+.tg-chcat td{background:var(--navy);color:#fff;font-weight:800;font-size:12.5px;padding-top:7px;padding-bottom:7px}
+.tg-chcat td .off-muted{color:rgba(255,255,255,.7)}
+.tg-grptot td{font-weight:800;background:var(--surface-2);border-top:2px solid var(--border-s)}
+.off-status tr.off-grp td{background:var(--surface-2);font-weight:800;font-size:11.5px;color:var(--text-2)}
 .tg-model{padding-left:30px!important;white-space:nowrap}
 .tg-fold{border:none;background:none;cursor:pointer;font-size:11px;color:var(--text-2);padding:0 4px;font-family:inherit}
 .tg-amt{font-size:11px;line-height:1.4;color:var(--text-2)}

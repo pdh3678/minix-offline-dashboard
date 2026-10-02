@@ -15,11 +15,19 @@ let _ocdMonthlyChart=null,_ocdDailyChart=null;
 const OCD_STORE_ROWS=300;
 
 async function mountChannelPage(param){
-  _ofOnFilter=()=>{_ocdRender();_ocdLoad();};
+  _ofOnFilter=k=>{
+    // 채널 대분류를 바꾸면 그 대분류의 채널로 옮긴다(지금 채널이 이미 그 대분류면 탭만 다시 그림)
+    if(k==='chCat'){
+      const f=_ofInScope(_OCD.ch)?null:_ocdFirstChannel();
+      if(f&&f.channelId!==_OCD.ch){_ofGo('offline-channel',f.channelId);return;}
+      _ocdRender();return;
+    }
+    _ocdRender();_ocdLoad();
+  };
   if(!param){
-    // #offline/channel → 첫 활성 채널(정렬순서)로
+    // #offline/channel → 첫 활성 채널(채널대분류 → 정렬순서, 채널 대분류 필터 범위 안)로
     try{await _offlineLoadMasters();}catch(e){_OCD.err=e.message;_ocdRender();return;}
-    const first=((OFFLINE_MASTERS&&OFFLINE_MASTERS.channels)||[]).slice().sort((a,b)=>(Number(a.order)||99)-(Number(b.order)||99)).find(c=>c.active==='Y');
+    const first=_ocdFirstChannel();
     if(first){_ofGo('offline-channel',first.channelId);return;}
   }
   if(param!==_OCD.ch){
@@ -31,6 +39,11 @@ async function mountChannelPage(param){
   _ocdLoad();
 }
 PAGE_MOUNTS['offline-channel']=mountChannelPage;
+// 채널 대분류 필터 범위의 첫 채널(활성 먼저) — 범위에 채널이 없으면 첫 활성 채널
+function _ocdFirstChannel(){
+  const all=_offlineSortChannels((OFFLINE_MASTERS&&OFFLINE_MASTERS.channels)||[]),inScope=all.filter(c=>_ofInScope(c.channelId));
+  return inScope.find(c=>c.active==='Y')||inScope[0]||all.find(c=>c.active==='Y')||null;
+}
 // 다른 화면(재고 현황 경보 목록)에서 점포·SKU를 짚고 들어올 때
 function _ocdOpenFocus(ch,o){
   o=o||{};
@@ -80,9 +93,10 @@ function _ocdSetDmode(v){_OCD.dmode=v;_ocdRenderDaily();}
 function _ocdRender(){
   const host=document.getElementById('page-offline-channel');
   if(!host)return;
-  const chans=((OFFLINE_MASTERS&&OFFLINE_MASTERS.channels)||[]).slice().sort((a,b)=>(Number(a.order)||99)-(Number(b.order)||99))
-    .filter(c=>c.active==='Y'||c.channelId===_OCD.ch);
-  const tabs=`<div class="of-tabs">${chans.map(c=>`<button type="button" class="of-tab${c.channelId===_OCD.ch?' on':''}" onclick="_ofGo('offline-channel','${_escAttr(c.channelId)}')">${_escHtml(c.name)}${c.active==='Y'?'':'<span class="of-sub">비활성</span>'}</button>`).join('')}</div>`;
+  // 채널 탭 — 채널대분류로 묶어서(채널 대분류 필터 범위의 활성 채널 + 지금 채널)
+  const chans=_offlineSortChannels(((OFFLINE_MASTERS&&OFFLINE_MASTERS.channels)||[]).filter(c=>c.channelId===_OCD.ch||(c.active==='Y'&&_ofInScope(c.channelId))));
+  const tab=c=>`<button type="button" class="of-tab${c.channelId===_OCD.ch?' on':''}" onclick="_ofGo('offline-channel','${_escAttr(c.channelId)}')">${_escHtml(c.name)}${c.active==='Y'?'':'<span class="of-sub">비활성</span>'}</button>`;
+  const tabs=`<div class="of-tabs">${_offlineGroupChannels(chans).map(g=>`<div class="of-tab-grp"><span class="of-tab-grp-lb">${_escHtml(g.cat)}</span>${g.channels.map(tab).join('')}</div>`).join('')}</div>`;
   const bar=_ofFilterBarHtml(null,`<span class="of-bar-r"><button type="button" class="btn-cancel up-btn" onclick="_ocdLoad(true)">새로고침</button></span>`);
   if(_OCD.err&&!_OCD.mon){host.innerHTML=tabs+bar+_ofErrorHtml(_OCD.err);return;}
   if(!_OCD.ch){host.innerHTML=tabs+'<div class="card"><div class="mp-empty">활성 채널이 없습니다 — 채널마스터를 확인하세요.</div></div>';return;}

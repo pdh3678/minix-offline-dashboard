@@ -37,14 +37,15 @@ const MASTERS = {
   success: true,
   skus: [{ skuId: 'SKU-0001', name: '더 플렌더 MAX 그레이지', line: '더플렌더', model: '더 플렌더 MAX', option: '그레이지', active: 'Y', order: 1 },
     { skuId: 'SKU-0002', name: '미니 건조기', line: '미니건조기', model: '', option: '', active: 'N', order: '' }],
-  channels: [{ channelId: 'himart', name: '하이마트' }, { channelId: 'etland', name: '전자랜드' }, { channelId: 'emart', name: '이마트' }],
+  channels: [{ channelId: 'himart', name: '하이마트', channelCategory: '양판점' }, { channelId: 'etland', name: '전자랜드', channelCategory: '양판점' }, { channelId: 'emart', name: '이마트', channelCategory: '할인점' }],
+  channelCategories: ['양판점', '할인점', '백화점', '폐쇄몰', '렌탈', '특판'],
   mappings: [{ channelId: 'etland', code: 'MNFD-200G', skuId: 'SKU-0001', stockType: '정상', name: '가상 MAX' }],
   stores: [], productLines: [], stockTypes: ['정상', '전시', '리퍼']
 };
 const STATUS = { success: true, today: '2026-09-27', month: '2026-09', channels: [
-  { channelId: 'himart', name: '하이마트', salesLast: '2026-09-24', stockLast: '2026-09-24',
+  { channelId: 'himart', name: '하이마트', channelCategory: '양판점', salesLast: '2026-09-24', stockLast: '2026-09-24',
     missingDays: ['2026-09-01', '2026-09-02', '2026-09-03', '2026-09-25', '2026-09-26'] },
-  { channelId: 'etland', name: '전자랜드', salesLast: '', stockLast: '', missingDays: [] }] };
+  { channelId: 'etland', name: '전자랜드', channelCategory: '양판점', salesLast: '', stockLast: '', missingDays: [] }] };
 
 function setup() {
   const { ctx, X } = loadFrontend(PROJ, SHIM);
@@ -237,7 +238,7 @@ function setup() {
     check('들어오면 마스터·미매칭을 받는다', calls.some(c => c.action === 'offline_getMasters') && calls.some(c => c.action === 'offline_getUnmatched'));
     check('두 영역과 미매칭 수', page().indexOf('미매칭 코드 1개') >= 0 && page().indexOf('전체 매핑') >= 0 && page().indexOf('준비 중') < 0);
     const ph = el('cmUnmatched').innerHTML;
-    check('미매칭 패널: 채널·발견횟수·최근발견일 열, 모델 제안', ph.indexOf('<th>채널</th>') >= 0 && ph.indexOf('<td>하이마트</td>') >= 0 && ph.indexOf('<td class="num-col">3</td>') >= 0 && ph.indexOf('제안(모델 MNFD-200G)') >= 0);
+    check('미매칭 패널: 채널(채널대분류 · 채널명)·발견횟수·최근발견일 열, 모델 제안', ph.indexOf('<th>채널</th>') >= 0 && ph.indexOf('<td>양판점 · 하이마트</td>') >= 0 && ph.indexOf('<td class="num-col">3</td>') >= 0 && ph.indexOf('제안(모델 MNFD-200G)') >= 0);
     check('전체 매핑 3건, 건수 표시', (table().match(/class="mp-code"/g) || []).length === 3 && el('cmCount').textContent === '3 / 3건', el('cmCount').textContent);
     check('비활성 매핑: "비활성" + 다시 매핑 버튼(비활성화 버튼 없음)', /off-miss">비활성/.test(table()) && table().indexOf('다시 매핑') >= 0);
     check('상품명 이스케이프', table().indexOf('<i>x</i>') < 0);

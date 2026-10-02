@@ -46,9 +46,11 @@ function _cmSetTab(t){_CM.tab=t;_cmRender();}
 
 // 매핑의 주인 채널만(코드체계채널 = 자기 자신) — 트레이더스처럼 다른 채널 매핑을 빌려 쓰는 채널은 따로 보이지 않는다.
 // 채널이 아닌 코드체계(ERP (백화점·폐쇄몰·렌탈 공통))는 그 이름의 그룹 하나로
+// 채널은 '채널대분류 · 채널명'(채널대분류 → 정렬순서), 코드체계는 그 표시 이름
 function _cmOwnChannels(){
   const m=OFFLINE_MASTERS||{};
-  return (m.channels||[]).filter(c=>!c.codeSystem||c.codeSystem===c.channelId).concat((m.codeSystems||[]).map(c=>({channelId:c.id,name:c.name})));
+  return _offlineSortChannels((m.channels||[]).filter(c=>!c.codeSystem||c.codeSystem===c.channelId)).map(c=>({channelId:c.channelId,name:_offlineChannelLabel(c.channelId)}))
+    .concat((m.codeSystems||[]).map(c=>({channelId:c.id,name:c.name})));
 }
 function _cmSharedNoteHtml(){
   const chs=(OFFLINE_MASTERS&&OFFLINE_MASTERS.channels)||[],by={},order=[];
@@ -106,7 +108,7 @@ function _cmRenderTable(){
       const k=_cmKey(x),sku=skuById[x.skuId],off=!x.skuId;
       if(_CM.editKey===k)return _cmEditRowHtml(x,i);
       return `<tr class="${off?'cm-off':''}">
-        <td>${_escHtml(_offlineChannelName(x.channelId))}</td><td class="mp-code">${_escHtml(x.code)}</td><td class="cm-wrap">${_escHtml(x.name)}</td>
+        <td>${_escHtml(_offlineChannelLabel(x.channelId))}</td><td class="mp-code">${_escHtml(x.code)}</td><td class="cm-wrap">${_escHtml(x.name)}</td>
         <td class="cm-wrap">${off?'<span class="off-miss">비활성</span>':(sku?_escHtml(sku.name)+'<div class="cm-reg">'+_escHtml(x.skuId)+'</div>':_escHtml(x.skuId))}</td>
         <td>${sku?_escHtml(lineLabel(sku.line)):''}</td><td>${_escHtml(x.stockType)}</td>
         <td class="cm-reg">${_escHtml(x.registeredAt)}<br>${_escHtml(x.registeredBy)}</td><td class="cm-wrap cm-reg">${_escHtml(x.note)}</td>
@@ -118,7 +120,7 @@ function _cmRenderTable(){
 }
 function _cmEditRowHtml(x,i){
   const e=_CM.edit;
-  return `<tr><td>${_escHtml(_offlineChannelName(x.channelId))}</td><td class="mp-code">${_escHtml(x.code)}</td><td class="cm-wrap">${_escHtml(x.name)}</td>
+  return `<tr><td>${_escHtml(_offlineChannelLabel(x.channelId))}</td><td class="mp-code">${_escHtml(x.code)}</td><td class="cm-wrap">${_escHtml(x.name)}</td>
     <td colspan="2"><select class="f-sel" onchange="_cmEditSet('skuId',this.value)">${_mpSkuOptions(e.skuId)}</select></td>
     <td><select class="f-sel mp-type" onchange="_cmEditSet('stockType',this.value)">${OfflineResolver.STOCK_TYPES.map(t=>`<option${t===e.stockType?' selected':''}>${t}</option>`).join('')}</select></td>
     <td class="cm-reg">저장하면 오늘·<br>내 이메일로 기록</td>

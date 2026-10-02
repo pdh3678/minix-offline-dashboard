@@ -61,3 +61,38 @@ function _offlineChannelName(id){
   const c=(m.channels||[]).find(x=>x.channelId===id)||(m.codeSystems||[]).find(x=>x.id===id);
   return c?c.name:id;
 }
+
+/* 채널대분류(채널마스터 '채널대분류' — 양판점·할인점·백화점·폐쇄몰·렌탈·특판). 순서는 서버 마스터 channelCategories 한 곳에서 받는다.
+   목록 밖 값은 그 뒤(처음 나온 순), 빈칸은 '미분류'. 채널이 아닌 코드체계(erp)는 '' */
+const OFFLINE_UNCATEGORIZED='미분류';
+function _offlineChannelCatOf(id){
+  const c=((OFFLINE_MASTERS&&OFFLINE_MASTERS.channels)||[]).find(x=>x.channelId===id);
+  return c?(c.channelCategory||OFFLINE_UNCATEGORIZED):'';
+}
+function _offlineChannelCats(){
+  const out=((OFFLINE_MASTERS&&OFFLINE_MASTERS.channelCategories)||[]).slice();
+  ((OFFLINE_MASTERS&&OFFLINE_MASTERS.channels)||[]).forEach(c=>{const k=c.channelCategory||OFFLINE_UNCATEGORIZED;if(out.indexOf(k)<0)out.push(k);});
+  return out;
+}
+const _ofChLabel=(cat,name)=>cat?cat+' · '+name:name;
+// '채널대분류 · 채널명' (코드체계 erp 등 채널이 아니면 이름만)
+function _offlineChannelLabel(id){return _ofChLabel(_offlineChannelCatOf(id),_offlineChannelName(id));}
+// 여러 채널(업로드로그 'emart,traders') → '할인점 · 이마트·트레이더스 / 백화점 · …' (채널대분류로 묶어서)
+function _offlineChannelsLabel(csv){
+  const ids=String(csv||'').split(',').map(x=>x.trim()).filter(Boolean);
+  return _offlineGroupChannels(ids.map(id=>({channelId:id,name:_offlineChannelName(id)})))
+    .map(g=>_ofChLabel(g.cat,g.channels.map(c=>c.name).join('·'))).join(' / ');
+}
+// 채널대분류 순서 → 정렬순서
+function _offlineSortChannels(list){
+  const cats=_offlineChannelCats(),rk=c=>{const i=cats.indexOf(_offlineChannelCatOf(c.channelId));return i<0?99:i;};
+  return list.slice().sort((a,b)=>(rk(a)-rk(b))||((Number(a.order)||99)-(Number(b.order)||99)));
+}
+/* 채널 목록 → [{cat, channels[]}] — 채널대분류 순서, 대분류 안은 받은 순서 그대로(정렬해서 넘길 것).
+   채널마스터에 없는 id는 cat '' 그룹 */
+function _offlineGroupChannels(list){
+  const cats=_offlineChannelCats(),by={},order=[];
+  list.forEach(c=>{const k=_offlineChannelCatOf(c.channelId);if(!by[k]){by[k]=[];order.push(k);}by[k].push(c);});
+  order.sort((a,b)=>{const x=cats.indexOf(a),y=cats.indexOf(b);return (x<0?99:x)-(y<0?99:y);});
+  return order.map(k=>({cat:k,channels:by[k]}));
+}

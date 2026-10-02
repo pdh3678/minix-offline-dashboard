@@ -226,7 +226,7 @@ function env() {
     check('채널 현황 카드에 트레이더스(활성)', names.indexOf('트레이더스') >= 0 && names.indexOf('이마트') >= 0, names);
     const i = h.indexOf("_ofGo('offline-channel','traders')"), card = h.slice(i, h.indexOf('<div class="of-card"', i + 10) < 0 ? h.length : h.indexOf('<div class="of-card"', i + 10)).replace(/<[^>]+>/g, ' ');
     check('  ↳ 트레이더스 카드: 업로드 데이터 있음(정상재고 4)', !/업로드 데이터 없음/.test(card) && /정상재고\s+4/.test(card), card.replace(/\s+/g, ' ').slice(0, 300));
-    check('데이터 기준일에 트레이더스', /<span class="of-fresh-ch">트레이더스<\/span>/.test(h));
+    check('데이터 기준일에 트레이더스(채널대분류 · 채널명)', /<span class="of-fresh-ch">할인점 · 트레이더스<\/span>/.test(h));
     finish7();
   })();
   function finish7() {

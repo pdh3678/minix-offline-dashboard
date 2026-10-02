@@ -9,8 +9,8 @@
    채널군 색은 이 순서로 고정한다(데이터 시각화 팔레트 1~3번 — 필터로 채널군이 빠져도 남은 색은 그대로). */
 
 const PART_GROUPS=[
-  {key:'offline',label:'오프라인',color:'#2a78d6'},
-  {key:'closed',label:'특수(폐쇄몰·특판·렌탈)',color:'#eb6834'}, // 라벨은 GAS OFF_CHANNEL_GROUPS와 같게
+  {key:'offline',label:'오프라인',color:'#2a78d6'}, // 채널대분류 양판점·할인점·백화점
+  {key:'closed',label:'특수(폐쇄몰·렌탈·특판)',color:'#eb6834'}, // 라벨은 GAS OFF_CHANNEL_GROUPS와 같게 — 채널대분류 폐쇄몰·렌탈·특판
   {key:'gongu',label:'공동구매',color:'#1baf7a'}
 ];
 const _partYm=(y,m)=>y+'-'+String(m).padStart(2,'0');

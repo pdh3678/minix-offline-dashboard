@@ -1,7 +1,8 @@
 'use strict';
 /* 채널 현황(#offline/channels) — 채널별 목표 대비 실적(IN = Sell-in, OUT = Sell-out)과 재고 요약.
    데이터: offline_getMonthly(그 해 1~12월 합계만, totalsOnly — 월/연 누적은 여기서 더한다) + offline_getInventory(전체 채널)
-   위: 요약 KPI / 가운데: 채널 카드(누르면 채널 상세) / 아래: 채널 × 대분류 매트릭스(달성률 색, IN/OUT 전환).
+   위: 요약 KPI / 가운데: 채널 카드 — 채널대분류로 묶고 묶음 머리에 대분류 합계(누르면 채널 상세) /
+   아래: 채널 × 대분류 매트릭스(채널대분류 소계 줄, 달성률 색, IN/OUT 전환). 채널 대분류 필터가 걸리면 KPI·카드·매트릭스 모두 그 대분류 채널만.
    재고 지표(정상재고·재고일수·진열 점포·경보)는 서버 계산값을 그대로 쓴다 — 채널 상세·재고 현황과 같은 정의.
    대분류 필터 '전체'의 숫자는 본품 합계(서버가 필터·기타를 뺀다) — 필터는 카드 아래 "필터 판매 · 필터 재고" 한 줄로 따로. */
 
@@ -36,10 +37,10 @@ function _ocsRender(){
   if(_OCS.err){host.innerHTML=bar+_ofErrorHtml(_OCS.err);return;}
   if(!_OCS.mon||!_OCS.inv){host.innerHTML=bar+_ofLoadingHtml();return;}
   const chans=_ofShownChannels(_OCS.mon);
-  const um=(_OCS.inv.channels||[]).reduce((s,c)=>s+(c.unmatchedStock||0),0);
+  const um=(_OCS.inv.channels||[]).filter(c=>_ofInScope(c.channelId)).reduce((s,c)=>s+(c.unmatchedStock||0),0);
   host.innerHTML=bar+_ofFreshnessHtml(_OCS.inv)+_ocsKpiHtml()+
     (OFFLINE_FILTER.category?'':_ofUnmatchedNote(um,0))+
-    `<div class="of-cards">${chans.map(_ocsCardHtml).join('')||'<div class="mp-empty">보여 줄 채널이 없습니다.</div>'}</div>`+
+    (chans.length?_offlineGroupChannels(chans).map(_ocsGroupHtml).join(''):'<div class="of-cards"><div class="mp-empty">보여 줄 채널이 없습니다.</div></div>')+
     _ocsMatrixHtml(chans);
 }
 
@@ -55,8 +56,9 @@ function _ocsKpiHtml(){
   };
   const amt=(lb,side)=>`<div class="kpi"><div class="kpi-lbl">${lb}</div><div class="kpi-val">${_ofWonShort(side.actualAmount)}${side.amountIncomplete?'<span class="of-inc" title="단가가 없는 모델·대분류 단위 이관 행은 금액에서 빠졌습니다">*</span>':''}</div>`+
     `<div class="kpi-sub">목표 ${_ofWonShort(side.targetAmount)} · ${_ofPct(_ofRate(side.actualAmount,side.targetAmount))}</div></div>`;
-  return `<div class="kpi-row">${rateKpi('전체 IN 달성률',t.in)}${rateKpi('전체 OUT 달성률',t.out)}${amt('IN 금액(실적)',t.in)}${amt('OUT 금액(실적)',t.out)}`+
-    `<div class="kpi"><div class="kpi-lbl">전체 정상재고${cat?' · '+_escHtml(cat):''}</div><div class="kpi-val">${_ofNum(g.stock['정상'])}<span class="kpi-unit"> 대</span></div>`+
+  const sc=OFFLINE_FILTER.chCat?' · '+_escHtml(OFFLINE_FILTER.chCat):''; // 채널 대분류 필터 — '전체'가 그 대분류 채널만이라는 표시
+  return `<div class="kpi-row">${rateKpi('전체 IN 달성률'+sc,t.in)}${rateKpi('전체 OUT 달성률'+sc,t.out)}${amt('IN 금액(실적)',t.in)}${amt('OUT 금액(실적)',t.out)}`+
+    `<div class="kpi"><div class="kpi-lbl">전체 정상재고${sc}${cat?' · '+_escHtml(cat):''}</div><div class="kpi-val">${_ofNum(g.stock['정상'])}<span class="kpi-unit"> 대</span></div>`+
     `<div class="kpi-sub">재고일수 ${_ofDays(g)} · 전시 ${_ofNum(g.stock['전시'])} · 리퍼 ${_ofNum(g.stock['리퍼'])}</div></div>`+
     `<div class="kpi"><div class="kpi-lbl">경보</div><div class="kpi-val ${a.over+a.risk+a.storeOut?'cw':''}">${_ofNum(a.over+a.risk+a.storeOut)}<span class="kpi-unit"> 건</span></div>`+
     `<div class="kpi-sub">과다 ${a.over} · 결품 위험 ${a.risk} · 점포 결품 ${a.storeOut} <a class="of-link" onclick="_ofGo('offline-inventory')">재고 현황 →</a></div></div></div>`;
@@ -68,6 +70,14 @@ function _ocsMeter(lb,side){
   return `<div class="of-meter-row"><span class="of-meter-lb">${lb}</span><div class="of-meter"><div class="of-meter-fill${r!=null&&r>=1?' over':''}" style="width:${w.toFixed(1)}%"></div></div>`+
     `<span class="of-meter-val ${r==null?'of-dim':''}">${_ofPct(r)}</span>`+
     `<span class="of-meter-sub">실적 ${_ofFmtUnit(_ofPick(side,'actual'))}${_ofIncompleteMark(side)} / 목표 ${_ofFmtUnit(_ofPick(side,'target'))}</span></div>`;
+}
+// 채널대분류 묶음 — 머리 = 대분류 합계(IN·OUT 실적 / 목표 · 달성률 = 소속 채널 합, 수량/금액·대분류 필터 그대로), 아래 = 채널 카드
+function _ocsGroupHtml(grp){
+  const t=_ofTotals(_OCS.mon,grp.channels.map(c=>c.channelId),null,OFFLINE_FILTER.category);
+  const kv=(lb,side)=>{const r=_ofSideRate(side);
+    return `<span class="of-grp-kv"><b>${lb}</b> <span class="of-cell-rate ${_ofRateCls(r)}">${_ofPct(r)}</span> <span class="of-sub">실적 ${_ofFmtUnit(_ofPick(side,'actual'))}${_ofIncompleteMark(side)} / 목표 ${_ofFmtUnit(_ofPick(side,'target'))}</span></span>`;};
+  return `<div class="of-grp"><div class="of-grp-hd"><span class="of-grp-name">${_escHtml(grp.cat)}</span><span class="of-sub">채널 ${grp.channels.length}개 합계</span>${kv('IN',t.in)}${kv('OUT',t.out)}</div>
+    <div class="of-cards">${grp.channels.map(_ocsCardHtml).join('')}</div></div>`;
 }
 function _ocsCardHtml(c){
   const cat=OFFLINE_FILTER.category;
@@ -86,7 +96,7 @@ function _ocsCardHtml(c){
     </div><div class="of-card-foot">기준일 재고 ${_escHtml(_ofMD(ci.stockDate))||'—'}${ci.staleStock?' <span class="of-stale">⚠</span>':''} · 판매 ${_escHtml(_ofMD(ci.salesDate))||'—'}${ci.staleSales?' <span class="of-stale">⚠</span>':''}${ci.unmatchedStock&&!cat?` · 미매칭 재고 ${_ofNum(ci.unmatchedStock)}`:''}</div>`
     :'<div class="of-nodata">업로드 데이터 없음 — 목표·실적만 표시합니다(OUT 실적은 목표 관리에서 입력·이관한 값).</div>');
   return `<div class="of-card" role="button" tabindex="0" onclick="_ofGo('offline-channel','${_escAttr(c.channelId)}')" onkeydown="if(event.key==='Enter')_ofGo('offline-channel','${_escAttr(c.channelId)}')">
-    <div class="of-card-hd"><span class="of-card-name">${_escHtml(c.name)}</span><span class="of-card-type">${_escHtml(c.type||'')}${c.active==='Y'?'':' · 비활성'}</span><span class="of-badges">${up&&ci.hasStock?_ofAlertBadges(_ofAlertCounts(_OCS.inv,c.channelId)):''}</span></div>
+    <div class="of-card-hd"><span class="of-card-name">${_escHtml(c.name)}</span><span class="of-card-type">${_escHtml(c.channelCategory||'')}${c.active==='Y'?'':' · 비활성'}</span><span class="of-badges">${up&&ci.hasStock?_ofAlertBadges(_ofAlertCounts(_OCS.inv,c.channelId)):''}</span></div>
     ${_ocsMeter('IN',t.in)}${_ocsMeter('OUT',t.out)}
     <div class="of-gap" title="IN 실적 − OUT 실적. 양수가 계속 쌓이면 채널 재고가 늘고 있다는 신호">IN−OUT 갭 <b class="${gap>0?'of-gap-pos':''}">${gap==null?'—':(gap>0?'+':'')+_ofFmtUnit(gap)}</b></div>
     ${stock}${_ofFilterLineHtml(_OCS.mon,_OCS.inv,c.channelId)}</div>`;
@@ -94,6 +104,7 @@ function _ocsCardHtml(c){
 
 // 채널 × 대분류 — 셀 = 표시 중인 쪽(IN/OUT) 달성률, 색도 그 달성률(100% 이상 초록 · 80% 미만 빨강)
 // 열은 본품 대분류(합계 = 본품 합계). 필터·기타는 대분류 필터로 골랐을 때만 그 한 열
+// 행은 채널대분류로 묶어 채널들 뒤에 '○○ 소계'(소속 채널 합) — 전체 = 채널 대분류 필터 범위의 합
 function _ocsMatrixHtml(chans){
   const side=_OCS.mx,cat=OFFLINE_FILTER.category;
   const cats=cat?[cat]:PRODUCT_MAIN_CATEGORIES;
@@ -103,8 +114,10 @@ function _ocsMatrixHtml(chans){
     if(a==null&&tg==null)return '<td><span class="of-dim">—</span></td>';
     return `<td><span class="of-mx-cell ${_ofRateCls(r)}"><span class="of-mx-main">${_ofPct(r)}</span><span class="of-mx-sub">${_ofFmtUnit(a)}${_ofIncompleteMark(t)} / ${_ofFmtUnit(tg)}</span></span></td>`;
   };
-  const rows=chans.map(c=>`<tr><td><a class="of-link" onclick="_ofGo('offline-channel','${_escAttr(c.channelId)}')">${_escHtml(c.name)}</a></td>${cats.map(k=>cell(c.channelId,k)).join('')}${cat?'':cell(c.channelId,'')}</tr>`).join('');
-  const total=`<tr class="of-lv-total"><td>전체</td>${cats.map(k=>cell('',k)).join('')}${cat?'':cell('','')}</tr>`;
+  const row=(ch,label,cls)=>`<tr${cls?` class="${cls}"`:''}><td>${label}</td>${cats.map(k=>cell(ch,k)).join('')}${cat?'':cell(ch,'')}</tr>`;
+  const rows=_offlineGroupChannels(chans).map(g=>g.channels.map(c=>row(c.channelId,`<a class="of-link" onclick="_ofGo('offline-channel','${_escAttr(c.channelId)}')">${_escHtml(c.name)}</a>`)).join('')+
+    row(g.channels.map(c=>c.channelId),_escHtml(g.cat)+' 소계','of-lv-sub')).join('');
+  const total=row('',OFFLINE_FILTER.chCat?'전체 ('+_escHtml(OFFLINE_FILTER.chCat)+')':'전체','of-lv-total');
   return `<div class="card"><div class="card-hd"><span>채널 × 대분류 달성률
       <span class="axis-toggle"><button type="button" class="${side==='in'?'on':''}" onclick="_ocsSetMx('in')">IN</button><button type="button" class="${side==='out'?'on':''}" onclick="_ocsSetMx('out')">OUT</button></span></span>
       <span class="card-hd-r">${_escHtml(_ofRangeLabel())} · 셀 = 달성률(실적 / 목표) · 초록 100%↑ · 노랑 80~100% · 빨강 80% 미만</span></div>

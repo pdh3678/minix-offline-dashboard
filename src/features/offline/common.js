@@ -1,11 +1,12 @@
 'use strict';
 /* 오프라인 화면 공용 — 채널 현황(#offline/channels)·채널 상세(#offline/channel/{id})·재고 현황(#offline/inventory)이 같이 쓴다.
-   · 상단 필터 바(연월 · [월 / 연 누적] · [수량 / 금액] · 대분류) — 세 화면이 한 상태(OFFLINE_FILTER)를 공유한다
+   · 상단 필터 바(연월 · [월 / 연 누적] · [수량 / 금액] · 대분류 · 채널 대분류) — 세 화면이 한 상태(OFFLINE_FILTER)를 공유한다
+     채널 대분류(chCat) = 채널마스터 채널대분류(양판점·할인점…). 걸리면 '전체' 합계·경보·재고·기준일 칩이 그 대분류 채널만이다(목표 관리도 같은 값)
    · 데이터 기준일(채널별 판매·재고 최신 기준일, 지연 경고 배지 → 데이터 업로드 링크)
    · 목표·실적 합계 — offline_getMonthly의 월 합계를 선택 범위(그 달 / 1월~그 달)만큼 더한다. 달성률은 2-A 규칙 그대로
      (실적 ÷ 목표, 목표 0·빈칸이면 없음). 재고 지표는 계산하지 않는다 — 서버(offline_getInventory)가 준 값을 그대로 쓴다. */
 
-const OFFLINE_FILTER={ym:'',mode:'month',unit:'qty',category:''};
+const OFFLINE_FILTER={ym:'',mode:'month',unit:'qty',category:'',chCat:''};
 let _ofOnFilter=null; // 지금 보고 있는 화면이 등록한 "필터가 바뀌면 다시 그리기"
 function _ofThisYm(){const d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0');}
 function _ofToday(){const d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');}
@@ -56,13 +57,17 @@ function _ofAddTot(t,x){
   });
   return t;
 }
+// 채널 대분류 필터 범위 안의 채널인지 — 필터가 없으면 전부
+function _ofInScope(id){return !OFFLINE_FILTER.chCat||_offlineChannelCatOf(id)===OFFLINE_FILTER.chCat;}
 /* 선택 범위·대분류 필터로 채널 합계 — mon = offline_getMonthly 응답(totalsOnly여도 됨).
-   대분류 필터가 있으면 byCategory(대분류 단위 이관 행 포함), 없으면 byChannelMonth. ch를 비우면 전체 채널 */
+   대분류 필터가 있으면 byCategory(대분류 단위 이관 행 포함), 없으면 byChannelMonth.
+   ch = 채널 하나 | 채널 배열(채널대분류 소계) | '' = 전체(채널 대분류 필터 범위 안) */
 function _ofTotals(mon,ch,months,category){
   const t=_ofEmptyTot(),mset={};(months||_ofRangeMonths()).forEach(m=>{mset[m]=true;});
   const tot=(mon&&mon.totals)||{};
   const list=category?(tot.byCategory||[]).filter(x=>x.category===category):(tot.byChannelMonth||[]);
-  list.forEach(x=>{if(mset[x.ym]&&(!ch||x.channelId===ch))_ofAddTot(t,x);});
+  const hit=Array.isArray(ch)?(id=>ch.indexOf(id)>=0):ch?(id=>id===ch):_ofInScope;
+  list.forEach(x=>{if(mset[x.ym]&&hit(x.channelId))_ofAddTot(t,x);});
   if(category)t.out.unmatchedQty=0; // 미매칭 코드는 대분류를 모른다
   return t;
 }
@@ -74,16 +79,37 @@ function _ofSideRate(side){return _ofRate(_ofPick(side,'actual'),_ofPick(side,'t
 function _ofIncompleteMark(side){return OFFLINE_FILTER.unit==='amount'&&side.amountIncomplete?'<span class="of-inc" title="단가가 없는 모델·대분류 단위 이관 행은 금액에서 빠졌습니다">*</span>':'';}
 
 // ── 재고 지표 조회(서버 값 그대로) ──
-function _ofGroup(inv,ch,level,key){return ((inv&&inv.groups)||[]).find(g=>g.channelId===ch&&g.level===level&&g.key===(key||''))||null;}
+function _ofGroup(inv,ch,level,key){
+  // 전체 채널('*') — 채널 대분류 필터가 걸리면 서버의 '*' 대신 그 대분류 채널을 더한 값
+  if(ch==='*'&&OFFLINE_FILTER.chCat)return _ofScopeGroup(inv,level,key);
+  return ((inv&&inv.groups)||[]).find(g=>g.channelId===ch&&g.level===level&&g.key===(key||''))||null;
+}
+/* 채널 대분류 필터 범위의 '전체' 그룹 — 서버 '*' 그룹과 같은 규칙으로 채널 그룹을 더한다: 재고가 있는 채널만(재고 없는 ERP 채널의
+   판매는 '*'에 넣지 않는다), 일평균 = 판매 합 ÷ N, 재고일수 = 정상재고 ÷ 일평균, 점포 수·점포 결품은 채널마다 다른 점포라 그대로 더한다.
+   경보 색(alert)은 서버만 정하므로 합친 값에는 없다. 범위에 재고 채널이 없으면 null */
+function _ofScopeGroup(inv,level,key){
+  const chans=((inv&&inv.channels)||[]).filter(c=>c.hasStock&&_ofInScope(c.channelId));
+  const gs=chans.map(c=>((inv.groups||[]).find(g=>g.channelId===c.channelId&&g.level===level&&g.key===(key||''))||null)).filter(Boolean);
+  if(!gs.length)return null;
+  const f=gs[0],g={channelId:'*',level,key:key||'',category:f.category,line:f.line,model:f.model,skuId:f.skuId,name:f.name,active:f.active,
+    stock:{'정상':0,'전시':0,'리퍼':0},windowQty:0,displayStores:0,handlingStores:0,storeOuts:0,alert:''};
+  gs.forEach(x=>{['정상','전시','리퍼'].forEach(t=>{g.stock[t]+=x.stock[t]||0;});['windowQty','displayStores','handlingStores','storeOuts'].forEach(k=>{g[k]+=x[k]||0;});});
+  g.total=g.stock['정상']+g.stock['전시']+g.stock['리퍼'];
+  const hasSales=chans.some(c=>c.hasSales);
+  g.dailyAvg=hasSales?g.windowQty/(inv.windowDays||1):null;
+  g.noSales=hasSales&&!(g.dailyAvg>0);
+  g.days=g.dailyAvg>0?g.stock['정상']/g.dailyAvg:null;
+  return g;
+}
 // 대분류 필터가 있으면 그 대분류 그룹, 없으면 채널 전체
 function _ofStockGroup(inv,ch){const c=OFFLINE_FILTER.category;return c?_ofGroup(inv,ch,'category',c):_ofGroup(inv,ch,'channel','');}
 function _ofChannelInv(inv,ch){return ((inv&&inv.channels)||[]).find(c=>c.channelId===ch)||null;}
-// 채널 × SKU 경보 건수(대분류 필터 적용)
+// 채널 × SKU 경보 건수(대분류 필터 적용) — ch '' = 전체(채널 대분류 필터 범위 안)
 function _ofAlertCounts(inv,ch){
-  const cat=OFFLINE_FILTER.category,o={over:0,risk:0,storeOut:0};
-  ((inv&&inv.groups)||[]).forEach(g=>{if(g.level==='sku'&&g.channelId!=='*'&&(!ch||g.channelId===ch)&&(!cat||g.category===cat)&&g.alert)o[g.alert]++;});
+  const cat=OFFLINE_FILTER.category,o={over:0,risk:0,storeOut:0},chOk=id=>ch?id===ch:_ofInScope(id);
+  ((inv&&inv.groups)||[]).forEach(g=>{if(g.level==='sku'&&g.channelId!=='*'&&chOk(g.channelId)&&(!cat||g.category===cat)&&g.alert)o[g.alert]++;});
   const skuCat={};((inv&&inv.groups)||[]).forEach(g=>{if(g.level==='sku')skuCat[g.skuId]=g.category;});
-  ((inv&&inv.storeOuts)||[]).forEach(s=>{if((!ch||s.channelId===ch)&&(!cat||skuCat[s.skuId]===cat))o.storeOut++;});
+  ((inv&&inv.storeOuts)||[]).forEach(s=>{if(chOk(s.channelId)&&(!cat||skuCat[s.skuId]===cat))o.storeOut++;});
   return o;
 }
 /* 필터 따로 한 줄 — 필터는 본품합계포함 N이라 위의 본품 숫자(달성률·재고·재고일수)에 없다. ch '' = 전체 채널
@@ -102,13 +128,13 @@ function _ofAlertBadges(a){
   if(a.storeOut)b.push(`<span class="of-badge of-b-out" title="당월판매가 있는데 재고 0인 점포·SKU">점포 결품 ${a.storeOut}</span>`);
   return b.join('');
 }
-// 화면에 보일 채널 — 활성 채널 + 비활성이어도 범위 안에 목표·실적 데이터가 있는 채널(목표 관리와 같은 규칙), 정렬순서대로
+// 화면에 보일 채널 — 활성 채널 + 비활성이어도 범위 안에 목표·실적 데이터가 있는 채널(목표 관리와 같은 규칙),
+// 채널 대분류 필터 범위 안만, 채널대분류 순서 → 정렬순서
 function _ofShownChannels(mon){
   const has={};((mon&&mon.totals&&mon.totals.byChannelMonth)||[]).forEach(x=>{
     if([x.in.target,x.in.actual,x.out.target,x.out.actual].some(v=>v!=null&&v!==0))has[x.channelId]=true;
   });
-  return ((OFFLINE_MASTERS&&OFFLINE_MASTERS.channels)||[]).slice().sort((a,b)=>(Number(a.order)||99)-(Number(b.order)||99))
-    .filter(c=>c.active==='Y'||has[c.channelId]);
+  return _offlineSortChannels(((OFFLINE_MASTERS&&OFFLINE_MASTERS.channels)||[]).filter(c=>(c.active==='Y'||has[c.channelId])&&_ofInScope(c.channelId)));
 }
 
 // ── 이동 ──
@@ -118,30 +144,38 @@ function _ofGo(pageId,param){navPage(pageId,_findPageEl(pageId),param);}
 function _ofToggle(k,opts){
   return `<span class="axis-toggle">${opts.map(([v,l])=>`<button type="button" class="${OFFLINE_FILTER[k]===v?'on':''}" onclick="_ofSetFilter('${k}','${v}')">${l}</button>`).join('')}</span>`;
 }
-/* 상단 필터 바. opts: { ym, mode, unit, category } 중 보일 것만 true, extra = 오른쪽에 붙일 HTML */
+/* 상단 필터 바. opts: { ym, mode, unit, category, chCat } 중 보일 것만 true, extra = 오른쪽에 붙일 HTML */
 function _ofFilterBarHtml(opts,extra){
-  const o=opts||{ym:true,mode:true,unit:true,category:true};
+  const o=opts||{ym:true,mode:true,unit:true,category:true,chCat:true};
   const parts=[];
   if(o.ym)parts.push(`<label class="of-fl"><span>연월</span><input type="month" class="f-inp of-month" value="${_escAttr(_ofYm())}" onchange="_ofSetFilter('ym',this.value)"></label>`);
   if(o.mode)parts.push(_ofToggle('mode',[['month','월'],['ytd','연 누적']]));
   if(o.unit)parts.push(_ofToggle('unit',[['qty','수량'],['amount','금액']]));
   if(o.category)parts.push(`<label class="of-fl"><span>대분류</span><select class="f-inp f-sel dash-filter-select dash-pill-select" onchange="_ofSetFilter('category',this.value)">`+
     `<option value="">전체</option>${PRODUCT_CATEGORIES.map(c=>`<option value="${_escAttr(c)}"${OFFLINE_FILTER.category===c?' selected':''}>${_escHtml(c)}</option>`).join('')}</select></label>`);
+  if(o.chCat)parts.push(_ofChCatSelectHtml("_ofSetFilter('chCat',this.value)"));
   return `<div class="card of-bar">${parts.join('')}${o.mode?`<span class="of-range">${_escHtml(_ofRangeLabel())}</span>`:''}${extra||''}</div>`;
+}
+// 채널 대분류 선택 — 공통 필터 바와 목표 관리가 같은 값(OFFLINE_FILTER.chCat)을 쓴다. onchange = 바꿀 때 부를 코드(this.value)
+function _ofChCatSelectHtml(onchange){
+  return `<label class="of-fl"><span>채널 대분류</span><select class="f-inp f-sel dash-filter-select dash-pill-select" onchange="${onchange}">`+
+    `<option value="">전체</option>${_offlineChannelCats().map(c=>`<option value="${_escAttr(c)}"${OFFLINE_FILTER.chCat===c?' selected':''}>${_escHtml(c)}</option>`).join('')}</select></label>`;
 }
 function _ofRangeLabel(){const m=_ofRangeMonths();return m.length>1?m[0]+' ~ '+m[m.length-1]+' 누적':m[0];}
 
-/* 데이터 기준일 — 업로드 데이터가 있는 채널만. 기준일이 오늘보다 설정 일수(데이터지연_경고일수)보다 오래되면 경고 배지 + 업로드 링크 */
+/* 데이터 기준일 — 업로드 데이터가 있는 채널만('채널대분류 · 채널명', 채널 대분류 필터 범위 안). 기준일이 오늘보다 설정 일수(데이터지연_경고일수)보다
+   오래되면 경고 배지 + 업로드 링크 */
 function _ofFreshnessHtml(inv,only){
   if(!inv)return '';
   const lim=inv.settings?inv.settings['데이터지연_경고일수']:3;
-  const chips=(inv.channels||[]).filter(c=>(c.hasStock||c.hasSales)&&(!only||c.channelId===only)).map(c=>{
+  const chOk=c=>only?c.channelId===only:_ofInScope(c.channelId);
+  const chips=(inv.channels||[]).filter(c=>(c.hasStock||c.hasSales)&&chOk(c)).map(c=>{
     const stale=c.staleStock||c.staleSales;
     const part=(lb,d,age,st)=>d?`${lb} <b>${_escHtml(_ofMD(d))}</b>${st?` <span class="of-stale" title="오늘보다 ${age}일 전 — 지연 경고 기준 ${lim}일 초과">⚠ ${age}일 전</span>`:''}`:`${lb} <span class="off-muted">없음</span>`;
-    return `<span class="of-fresh-chip${stale?' stale':''}"><span class="of-fresh-ch">${_escHtml(c.name)}</span> ${part('판매',c.salesDate,c.salesAge,c.staleSales)} · ${part('재고',c.stockDate,c.stockAge,c.staleStock)}</span>`;
+    return `<span class="of-fresh-chip${stale?' stale':''}"><span class="of-fresh-ch">${_escHtml(_ofChLabel(c.channelCategory,c.name))}</span> ${part('판매',c.salesDate,c.salesAge,c.staleSales)} · ${part('재고',c.stockDate,c.stockAge,c.staleStock)}</span>`;
   });
   if(!chips.length)return `<div class="of-fresh"><span class="off-muted">업로드된 판매·재고 데이터가 없습니다.</span> <a class="of-link" onclick="_ofGo('admin-upload')">데이터 업로드 →</a></div>`;
-  const anyStale=(inv.channels||[]).some(c=>(!only||c.channelId===only)&&(c.staleStock||c.staleSales));
+  const anyStale=(inv.channels||[]).some(c=>chOk(c)&&(c.staleStock||c.staleSales));
   return `<div class="of-fresh"><span class="of-fresh-lb">데이터 기준일</span>${chips.join('')}${anyStale?`<a class="of-link" onclick="_ofGo('admin-upload')">데이터 업로드 →</a>`:''}</div>`;
 }
 // 미매칭 안내 — 수량이 합계에서 빠지지 않고 '미매칭'으로 따로 잡혔음을 알리고 코드 매핑으로 보낸다

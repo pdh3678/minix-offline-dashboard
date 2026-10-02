@@ -224,7 +224,7 @@ function setup() {
     await settle();
     check('SKU 링크 → 그 모델 펼침 + 강조', /<tr class="of-lv-sku of-focus" id="ocdSku-SKU-0003">/.test(page('offline-channel')));
     const trend = charts.filter(c => c.type === 'line').pop();
-    check('추이 차트: 채널별 선', trend && trend.data.datasets.map(d => d.label).join() === '하이마트', trend && trend.data.datasets.map(d => d.label));
+    check('추이 차트: 채널별 선(채널대분류 · 채널명)', trend && trend.data.datasets.map(d => d.label).join() === '양판점 · 하이마트', trend && trend.data.datasets.map(d => d.label));
   }
 
   console.log('\n' + '─'.repeat(50));

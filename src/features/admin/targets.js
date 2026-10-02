@@ -4,6 +4,9 @@
           [단가] offline_getPrices·savePrices·deletePrice /
           [이관] offline_migrateProgress·migratePrices·migrateGonguTargets(미리보기 → 매핑 확인 → 반영)
 
+   채널은 채널대분류 → 채널 순으로 묶고 대분류마다 소계 줄(소속 채널 합계의 합). 채널 대분류 필터(OFFLINE_FILTER.chCat — 채널 현황 등과 같은 값)
+   를 걸면 그 대분류 채널만 보이고 전체 합계도 그 채널들의 합이다. 저장하지 않은 변경이 있으면 채널 대분류를 바꿀 수 없다.
+
    본품 외 대분류(필터·기타) 행은 기본으로 숨기고 "비본품 표시"(월별 입력·연간 보기 공유)로 채널 합계 아래에 보인다.
    채널·전체 합계는 켜도 본품 합계다.
 
@@ -55,6 +58,25 @@ function _tgSetYm(v){
 function _tgKeepEdits(){_TG.confirmDiscard=null;_tgRender();}
 function _tgDiscardAndGo(){const v=_TG.confirmDiscard;_TG.confirmDiscard=null;_TG.edits={};_TG.ym=v;_tgLoad();}
 function _tgSetCh(v){_TG.ch=v;_tgRender();}
+/* 채널 대분류(월별 입력·연간 보기 공통) — 저장하지 않은 변경이 있으면 바꾸지 않는다(숨은 줄의 변경이 저장에서 빠지지 않게).
+   고른 채널이 그 대분류 밖이면 '활성 채널 전체'로(연간 보기는 채널별로 받으므로 다시 받는다) */
+function _tgSetChCat(v){
+  const n=_tgChangedCount()+_tgaChangedCount();
+  if(n){showToast('저장하지 않은 변경 '+n+'칸이 있습니다 — 저장하거나 되돌린 뒤 채널 대분류를 바꾸세요.',{type:'error'});_tgRender();return;}
+  OFFLINE_FILTER.chCat=v;
+  if(_TG.ch&&!_ofInScope(_TG.ch))_TG.ch='';
+  if(_TGA.ch&&!_ofInScope(_TGA.ch)){_TGA.ch='';_TGA.data=null;if(_TG.tab==='annual'){_tgaLoad();return;}}
+  _tgRender();
+}
+// 채널 고르기(월별 입력·연간 보기) — '활성 채널 전체' + 채널대분류 묶음(채널 대분류 필터 범위 안)
+function _tgChFilterOpts(cur){
+  const chs=_offlineSortChannels(((OFFLINE_MASTERS&&OFFLINE_MASTERS.channels)||[]).filter(c=>_ofInScope(c.channelId)));
+  return `<option value="">${OFFLINE_FILTER.chCat?_escHtml(OFFLINE_FILTER.chCat)+' ':''}활성 채널 전체</option>`+_offlineGroupChannels(chs).map(g=>`<optgroup label="${_escAttr(g.cat)}">${g.channels.map(c=>
+    `<option value="${_escAttr(c.channelId)}"${cur===c.channelId?' selected':''}>${_escHtml(c.name)}${c.active==='Y'?'':' (비활성)'}</option>`).join('')}</optgroup>`).join('');
+}
+// 채널대분류 묶음 머리 줄(월별 입력·연간 보기)
+function _tgGroupHeadHtml(g,cols){return `<tr class="tg-chcat"><td colspan="${cols}">${_escHtml(g.cat)} <span class="off-muted">채널 ${g.channels.length}개</span></td></tr>`;}
+function _tgAllLabel(){return OFFLINE_FILTER.chCat?'전체 합계 ('+_escHtml(OFFLINE_FILTER.chCat)+')':'전체 합계';}
 
 // ── 단가(클라이언트에서 금액 미리 계산 — 서버와 같은 규칙: 그 달 1일 기준 가장 최근 적용시작일) ──
 function _tgPriceFor(ch,line,model,ym){
@@ -80,8 +102,7 @@ function _tgBuildView(){
   const catRows={};(d.categoryRows||[]).forEach(c=>{catRows[c.channelId+'|'+c.category]=c;});
   _TG.catRows=catRows;
   const hasData=ch=>(d.rows||[]).some(r=>r.channelId===ch)||(d.categoryRows||[]).some(c=>c.channelId===ch);
-  const chans=(m.channels||[]).slice().sort((a,b)=>(Number(a.order)||99)-(Number(b.order)||99))
-    .filter(c=>_TG.ch?c.channelId===_TG.ch:(c.active==='Y'||hasData(c.channelId)));
+  const chans=_offlineSortChannels((m.channels||[]).filter(c=>(_TG.ch?c.channelId===_TG.ch:(c.active==='Y'||hasData(c.channelId)))&&_ofInScope(c.channelId)));
   const view=[];
   chans.forEach(c=>{
     PRODUCT_CATALOG.forEach(line=>{
@@ -129,7 +150,7 @@ function _tgRowAmt(row,f,p){
   return p==null||v===''||!isFinite(v)?null:v*p;
 }
 
-// 합계: 대분류(cat:ch|대분류) · 품목군(ln:ch|line) · 채널(ch:ch) · 전체(all)
+// 합계: 대분류(cat:ch|대분류) · 품목군(ln:ch|line) · 채널(ch:ch) · 채널대분류 소계(grp:채널대분류) · 전체(all)
 // 대분류·채널·전체 합계에는 대분류 단위(이관) 행도 더한다 — 대분류 합계 = 대분류 단위 행 + 그 대분류 모델 행
 // 채널·전체 합계 = 본품 합계 — 본품 외 대분류(필터·기타)는 자기 대분류 합계에만 들어간다(비본품 표시와 무관)
 function _tgTotals(){
@@ -143,11 +164,11 @@ function _tgTotals(){
     if(o!=null)s.outAAmt=(s.outAAmt||0)+o;
   };
   const addCat=(scope,cr)=>{const s=bucket(scope);_TG_FIELDS.forEach(f=>{const v=_tgCatVal(cr,f);if(v!=='')s[f]=(s[f]||0)+v;});};
-  _TG.view.forEach(r=>{add('cat:'+r.ch+'|'+r.category,r);add('ln:'+r.ch+'|'+r.line,r);if(_tgIsMain(r.category)){add('ch:'+r.ch,r);add('all',r);}});
+  _TG.view.forEach(r=>{add('cat:'+r.ch+'|'+r.category,r);add('ln:'+r.ch+'|'+r.line,r);if(_tgIsMain(r.category)){add('ch:'+r.ch,r);add('grp:'+_offlineChannelCatOf(r.ch),r);add('all',r);}});
   const shown={};_TG.view.forEach(r=>{shown[r.ch]=true;});
   Object.keys(_TG.catRows||{}).forEach(k=>{
     const cr=_TG.catRows[k];if(!shown[cr.channelId])return;
-    addCat('cat:'+k,cr);if(_tgIsMain(cr.category)){addCat('ch:'+cr.channelId,cr);addCat('all',cr);}
+    addCat('cat:'+k,cr);if(_tgIsMain(cr.category)){addCat('ch:'+cr.channelId,cr);addCat('grp:'+_offlineChannelCatOf(cr.channelId),cr);addCat('all',cr);}
   });
   return t;
 }
@@ -179,12 +200,11 @@ function _tgRender(){
 }
 
 function _tgMonthlyHtml(){
-  const m=OFFLINE_MASTERS||{};
   const head=`<div class="card"><div class="card-hd">월별 목표·실적<span class="card-hd-r">IN = Sell-in(입고) · OUT = Sell-out(판매) · 업로드 채널은 업로드시작월부터 OUT 실적을 판매원장에서 집계(ERP 채널은 IN 실적도)</span></div>
     <div class="cm-filters">
       <input type="month" class="f-inp" value="${_TG.ym}" onchange="_tgSetYm(this.value)">
-      <select class="f-sel" onchange="_tgSetCh(this.value)"><option value="">활성 채널 전체</option>${(m.channels||[]).map(c=>
-        `<option value="${_escAttr(c.channelId)}"${_TG.ch===c.channelId?' selected':''}>${_escHtml(c.name)}${c.active==='Y'?'':' (비활성)'}</option>`).join('')}</select>
+      ${_ofChCatSelectHtml('_tgSetChCat(this.value)')}
+      <select class="f-sel" onchange="_tgSetCh(this.value)">${_tgChFilterOpts(_TG.ch)}</select>
       <button type="button" class="btn-cancel up-btn" ${_TG.loading||_TG.saving?'disabled':''} onclick="_tgCopyPrev()">전월 목표 복사</button>
       <button type="button" class="btn-primary up-btn" id="tgSaveBtn" ${_TG.saving?'disabled':''} onclick="_tgSave()">저장</button>
       <button type="button" class="btn-cancel up-btn" onclick="_tgRevert()">되돌리기</button>
@@ -199,7 +219,7 @@ function _tgMonthlyHtml(){
   const warn=[];
   if(d.unmatched&&d.unmatched.length){
     const q=d.unmatched.reduce((a,u)=>a+u.qty,0),qa=d.unmatched.reduce((a,u)=>u.amount==null?a:(a||0)+u.amount,null);
-    warn.push(`<div class="up-err">⚠ 매핑 안 된 코드 ${d.unmatched.length}건(수량 ${q}${qa!=null?' · 금액 '+_tgWon(qa):''})은 실적에 들어가지 않았습니다 — <a href="#admin/code-mapping">코드 매핑</a>에서 연결하세요. <span class="off-muted">${d.unmatched.map(u=>_escHtml(_offlineChannelName(u.channelId)+' '+u.code+' '+u.qty)).join(' · ')}</span></div>`);
+    warn.push(`<div class="up-err">⚠ 매핑 안 된 코드 ${d.unmatched.length}건(수량 ${q}${qa!=null?' · 금액 '+_tgWon(qa):''})은 실적에 들어가지 않았습니다 — <a href="#admin/code-mapping">코드 매핑</a>에서 연결하세요. <span class="off-muted">${d.unmatched.map(u=>_escHtml(_offlineChannelLabel(u.channelId)+' '+u.code+' '+u.qty)).join(' · ')}</span></div>`);
   }
   const priceWarn=(d.warnings||[]).filter(w=>/^단가 없음/.test(w));
   if(priceWarn.length)warn.push(`<details class="tg-warn"><summary>단가 없는 모델 ${priceWarn.length}개 — 금액이 계산되지 않습니다(단가 탭에서 추가)</summary>${priceWarn.map(w=>'<div>'+_escHtml(w)+'</div>').join('')}</details>`);
@@ -209,7 +229,7 @@ function _tgMonthlyHtml(){
   return head+`<div class="card">${warn.join('')}<div class="up-err" id="tgDupWarn" style="display:none"></div><div class="tbl-wrap"><table class="tg-tbl"><thead><tr>
       <th>채널 / 품목</th><th class="num-col">IN 목표</th><th class="num-col">IN 실적</th><th class="num-col">IN 달성률</th>
       <th class="num-col">OUT 목표</th><th class="num-col">OUT 실적</th><th class="num-col">OUT 달성률</th><th class="num-col">금액(실적 환산)</th></tr></thead>
-    <tbody>${chans.map(_tgChannelHtml).join('')}${_tgTotalRowHtml('all','전체 합계','tg-grand')}</tbody></table></div></div>`;
+    <tbody>${_offlineGroupChannels(chans).map(g=>_tgGroupHeadHtml(g,8)+g.channels.map(_tgChannelHtml).join('')+_tgTotalRowHtml('grp:'+g.cat,_escHtml(g.cat)+' 소계','tg-grptot')).join('')}${_tgTotalRowHtml('all',_tgAllLabel(),'tg-grand')}</tbody></table></div></div>`;
 }
 function _tgChannelHtml(c){
   const rows=_TG.view.filter(r=>r.ch===c.channelId);
@@ -372,8 +392,10 @@ function _tgModelOpts(line,cur){
   const l=PRODUCT_CATALOG.find(x=>x.key===line);
   return '<option value="">— 모델 —</option>'+(l?l.models:[]).map(m=>`<option value="${_escAttr(m.label)}"${m.label===cur?' selected':''}>${_escHtml(m.label)}</option>`).join('');
 }
+// 채널 선택지 — 채널대분류 묶음(optgroup) → 정렬순서
 function _tgChOpts(cur,blank){
-  return (blank?'<option value="">— 채널 —</option>':'')+((OFFLINE_MASTERS&&OFFLINE_MASTERS.channels)||[]).map(c=>`<option value="${_escAttr(c.channelId)}"${c.channelId===cur?' selected':''}>${_escHtml(c.name)}</option>`).join('');
+  return (blank?'<option value="">— 채널 —</option>':'')+_offlineGroupChannels(_offlineSortChannels((OFFLINE_MASTERS&&OFFLINE_MASTERS.channels)||[])).map(g=>
+    `<optgroup label="${_escAttr(g.cat)}">${g.channels.map(c=>`<option value="${_escAttr(c.channelId)}"${c.channelId===cur?' selected':''}>${_escHtml(c.name)}</option>`).join('')}</optgroup>`).join('');
 }
 const _tgPriceKey=p=>[p.channelId,p.line,p.model,p.startDate].join('\u0001');
 function _tgPricesHtml(){
@@ -390,13 +412,13 @@ function _tgPricesHtml(){
     const k=_tgPriceKey(p),cur=current[[p.channelId,p.line,p.model].join('|')]===p.startDate;
     if(_TG.priceEditKey===k){
       const e=_TG.priceEdit;
-      return `<tr><td>${_escHtml(_offlineChannelName(p.channelId))}</td><td>${_escHtml(lineLabel(p.line))}</td><td>${_escHtml(p.model)}</td>
+      return `<tr><td>${_escHtml(_offlineChannelLabel(p.channelId))}</td><td>${_escHtml(lineLabel(p.line))}</td><td>${_escHtml(p.model)}</td>
         <td><input class="f-inp tg-inp" value="${_escAttr(e.price)}" oninput="_TG.priceEdit.price=this.value"></td>
         <td><input type="date" class="f-inp" value="${_escAttr(e.startDate)}" onchange="_TG.priceEdit.startDate=this.value"></td>
         <td><input class="f-inp" value="${_escAttr(e.note)}" oninput="_TG.priceEdit.note=this.value"></td><td></td>
         <td><div class="cm-acts"><button type="button" class="btn-primary up-btn" ${_TG.priceBusy?'disabled':''} onclick="_tgPriceSaveEdit()">저장</button><button type="button" class="btn-cancel up-btn" onclick="_tgPriceCancel()">취소</button></div></td></tr>`;
     }
-    return `<tr class="${cur?'':'cm-off'}"><td>${_escHtml(_offlineChannelName(p.channelId))}</td><td>${_escHtml(lineLabel(p.line))}</td><td>${_escHtml(p.model)}</td>
+    return `<tr class="${cur?'':'cm-off'}"><td>${_escHtml(_offlineChannelLabel(p.channelId))}</td><td>${_escHtml(lineLabel(p.line))}</td><td>${_escHtml(p.model)}</td>
       <td class="num-col">${_tgFmt(p.price)}</td><td>${_escHtml(p.startDate)} ${cur?'<span class="up-chip ready">현재 적용</span>':(p.startDate>today?'<span class="up-chip">예정</span>':'')}</td>
       <td class="cm-wrap cm-reg">${_escHtml(p.note)}</td><td class="cm-reg">${_escHtml(p.updatedAt)}<br>${_escHtml(p.updatedBy)}</td>
       <td><div class="cm-acts"><button type="button" class="btn-cancel up-btn" onclick="_tgPriceStartEdit('${_escAttr(k)}')">수정</button>
@@ -535,7 +557,7 @@ function _tgProgPreviewHtml(pv){
       <td><select class="f-sel" onchange="_tgProgSetLine('${_escAttr(p.legacy)}',this.value)"><option value="">— 품목군 —</option>${_tgLineOpts(isCat?'':cur.line)}${catOpts}</select></td>
       <td>${isCat?'<span class="off-muted">모델 구분 없음 — 대분류 합계</span>':`<select class="f-sel" onchange="_tgProgSetModel('${_escAttr(p.legacy)}',this.value)">${_tgModelOpts(cur.line,cur.model)}</select>`}</td></tr>`;
   }).join('');
-  const cmp=(pv.compare||[]).map(x=>`<tr class="${x.total?'tg-chtot':''}"><td>${_escHtml(_offlineChannelName(x.channelId))}</td><td>${_escHtml(x.side||'OUT')}</td><td>${_escHtml(x.model)}</td>
+  const cmp=(pv.compare||[]).map(x=>`<tr class="${x.total?'tg-chtot':''}"><td>${_escHtml(_offlineChannelLabel(x.channelId))}</td><td>${_escHtml(x.side||'OUT')}</td><td>${_escHtml(x.model)}</td>
     <td class="num-col">${x.legacy==null?'—':_tgFmt(x.legacy)}</td><td class="num-col">${_tgFmt(x.ledger)}</td>
     <td class="num-col ${x.diff?'tg-diff':''}">${x.diff>0?'+':''}${_tgFmt(x.diff)}</td><td class="cm-reg">${x.total&&x.unmatchedQty?'미매칭 '+x.unmatchedQty:''}</td></tr>`).join('');
   return `<div class="up-stats">원본 <b>${_escHtml(pv.sheetName)}</b> · ${pv.months.length?_escHtml(pv.months[0]+' ~ '+pv.months[pv.months.length-1]):'-'} (${pv.months.length}개월) · 품목 행 <b>${pv.legacyRows}</b> ·

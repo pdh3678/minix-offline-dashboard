@@ -1,6 +1,7 @@
 'use strict';
 /* 재고 현황(#offline/inventory) — SKU × 채널 재고와 경보. 지표는 전부 offline_getInventory(서버 _offInventoryCompute) 값 그대로.
    · 매트릭스: 셀 = 재고수량(재고구분 토글 [정상 / 전시 / 리퍼 / 전체]) + 재고일수(항상 정상 기준), 경보 색. 대분류 필터
+     열 = 재고 채널(채널대분류로 묶은 머리). 채널 대분류 필터가 걸리면 그 대분류 채널만 · '전체' 열도 그 채널의 합(경보 색은 채널 열에만)
      대분류 '전체'면 본품 → 합계(본품) → 구분선 → 본품 외(필터·기타)
    · 경보 목록: [과다 / 결품 위험 / 점포 결품] — 채널 상세(해당 SKU·점포)로 이동. 기타는 서버가 경보에서 뺀다(필터는 포함)
    · 재고 추이: 모델 또는 SKU → 채널별 선(offline_getInventoryTrend, 재고_채널일별)
@@ -45,11 +46,12 @@ function _oivRender(){
   const host=document.getElementById('page-offline-inventory');
   if(!host)return;
   const right=`<span class="of-bar-r">${_oivIsAdmin()?'<button type="button" class="btn-cancel up-btn" onclick="_oivOpenSettings()">⚙ 경보 기준 설정</button>':''}<button type="button" class="btn-cancel up-btn" onclick="_oivLoad(true)">새로고침</button></span>`;
-  const bar=_ofFilterBarHtml({category:true},right);
+  const bar=_ofFilterBarHtml({category:true,chCat:true},right);
   if(_OIV.err&&!_OIV.inv){host.innerHTML=bar+_ofErrorHtml(_OIV.err);return;}
   if(!_OIV.inv){host.innerHTML=bar+_ofLoadingHtml();return;}
   const S=_OIV.inv.settings||{};
-  const um=(_OIV.inv.channels||[]).reduce((s,c)=>s+(c.unmatchedStock||0),0),umQ=(_OIV.inv.channels||[]).reduce((s,c)=>s+(c.unmatchedQty||0),0);
+  const sc=(_OIV.inv.channels||[]).filter(c=>_ofInScope(c.channelId));
+  const um=sc.reduce((s,c)=>s+(c.unmatchedStock||0),0),umQ=sc.reduce((s,c)=>s+(c.unmatchedQty||0),0);
   host.innerHTML=bar+_ofFreshnessHtml(_OIV.inv)+
     `<div class="of-note">재고일수 = 정상재고 ÷ 최근 <b>${S['재고일수_판매기준일수']}</b>일 일평균 판매(채널별 판매 최신 기준일에서 거꾸로) · 과다 &gt; <b>${S['재고경보_과다일수']}</b>일 · 결품 위험 &lt; <b>${S['재고경보_결품위험일수']}</b>일 · 데이터 지연 경고 &gt; <b>${S['데이터지연_경고일수']}</b>일</div>`+
     (OFFLINE_FILTER.category?'':_ofUnmatchedNote(um,umQ))+
@@ -63,7 +65,8 @@ function _oivRender(){
 function _oivQty(g){if(!g)return null;return _OIV.type==='all'?g.total:g.stock[_OIV.type];}
 function _oivMatrixHtml(){
   const inv=_OIV.inv,cat=OFFLINE_FILTER.category;
-  const chans=(inv.channels||[]).filter(c=>c.hasStock);
+  // 열 = 재고가 있는 채널(채널 대분류 필터 범위), 채널대분류 묶음 순서 — 머리 위 줄(_oivHeadHtml)과 같은 순서
+  const chans=_offlineGroupChannels((inv.channels||[]).filter(c=>c.hasStock&&_ofInScope(c.channelId))).reduce((a,g)=>a.concat(g.channels),[]);
   if(!chans.length)return '<div class="card"><div class="card-hd">SKU × 채널 재고</div><div class="mp-empty">재고 업로드 데이터가 없습니다. <a class="of-link" onclick="_ofGo(\'admin-upload\')">데이터 업로드 →</a></div></div>';
   const G=(ch,lv,k)=>_ofGroup(inv,ch,lv,k);
   const cell=(ch,g,skuId)=>{
@@ -73,13 +76,14 @@ function _oivMatrixHtml(){
     const click=skuId&&ch!=='*'?` clickable" onclick="_ocdOpenFocus('${_escAttr(ch)}',{skuId:'${_escAttr(skuId)}'})" title="채널 상세에서 보기`:'';
     return `<td><span class="of-mx-cell${cls}${click}"><span class="of-mx-main">${_ofNum(q)}</span><span class="of-mx-sub">${_ofDays(g)}${g.storeOuts?' · 결품 '+g.storeOuts:''}</span></span></td>`;
   };
-  const skus=(inv.groups||[]).filter(g=>g.channelId==='*'&&g.level==='sku'&&(!cat||g.category===cat));
+  // 채널 대분류 필터가 걸리면 그 대분류 채널에 재고·판매가 있는 SKU만
+  const skus=(inv.groups||[]).filter(g=>g.channelId==='*'&&g.level==='sku'&&(!cat||g.category===cat)).filter(g=>{if(!OFFLINE_FILTER.chCat)return true;const x=G('*','sku',g.key);return x&&(x.total||x.windowQty);});
   // 대분류 필터가 없으면 본품 → 미매칭 → 합계(본품) → 구분선 → 본품 외(필터·기타)
   const catRows=c=>{
     const list=skus.filter(g=>g.category===c);
     if(!list.length)return '';
     return `<tr class="of-lv-cat"><td>${_escHtml(c)}</td>${chans.map(ch=>cell(ch.channelId,G(ch.channelId,'category',c))).join('')}${cell('*',G('*','category',c))}</tr>`+
-      list.map(s=>`<tr class="of-lv-sku"><td>${_escHtml(s.name)} <span class="of-sub">${_escHtml(s.skuId)}${s.active==='N'?' · 비활성':''}</span></td>${chans.map(ch=>cell(ch.channelId,G(ch.channelId,'sku',s.key),s.skuId)).join('')}${cell('*',s)}</tr>`).join('');
+      list.map(s=>`<tr class="of-lv-sku"><td>${_escHtml(s.name)} <span class="of-sub">${_escHtml(s.skuId)}${s.active==='N'?' · 비활성':''}</span></td>${chans.map(ch=>cell(ch.channelId,G(ch.channelId,'sku',s.key),s.skuId)).join('')}${cell('*',G('*','sku',s.key))}</tr>`).join('');
   };
   let body=(cat?[cat]:PRODUCT_MAIN_CATEGORIES).map(catRows).join('');
   // 미매칭 — 재고구분을 몰라서 [전체]에서만 수량을 보여 준다
@@ -95,17 +99,24 @@ function _oivMatrixHtml(){
   }
   return `<div class="card"><div class="card-hd"><span>SKU × 채널 재고 <span class="axis-toggle">${_OIV_TYPES.map(([v,l])=>`<button type="button" class="${_OIV.type===v?'on':''}" onclick="_oivSetType('${v}')">${l}</button>`).join('')}</span></span>
       <span class="card-hd-r">셀 = 재고수량 · 아래 = 재고일수(정상 기준) · <span class="of-badge of-b-over">과다</span> <span class="of-badge of-b-risk">결품 위험</span> · 셀을 누르면 채널 상세</span></div>
-    <div class="tbl-wrap"><table class="of-tbl of-mx"><thead><tr><th>SKU</th>${chans.map(c=>`<th>${_escHtml(c.name)}<div class="of-sub">${_escHtml(_ofMD(c.stockDate))}</div></th>`).join('')}<th>전체</th></tr></thead><tbody>${body||`<tr><td colspan="${chans.length+2}"><div class="mp-empty">재고가 있는 SKU가 없습니다.</div></td></tr>`}</tbody></table></div></div>`;
+    <div class="tbl-wrap"><table class="of-tbl of-mx"><thead>${_oivHeadHtml(chans)}</thead><tbody>${body||`<tr><td colspan="${chans.length+2}"><div class="mp-empty">재고가 있는 SKU가 없습니다.</div></td></tr>`}</tbody></table></div></div>`;
+}
+
+// 매트릭스 머리 — 위 줄 = 채널대분류 묶음, 아래 줄 = 채널(재고 기준일). chans는 묶음 순서로 정렬된 것
+function _oivHeadHtml(chans){
+  const groups=_offlineGroupChannels(chans);
+  return `<tr><th rowspan="2">SKU</th>${groups.map(g=>`<th class="of-mx-grp" colspan="${g.channels.length}">${_escHtml(g.cat)}</th>`).join('')}<th rowspan="2">전체${OFFLINE_FILTER.chCat?`<div class="of-sub">${_escHtml(OFFLINE_FILTER.chCat)}</div>`:''}</th></tr>`+
+    `<tr>${chans.map(c=>`<th>${_escHtml(c.name)}<div class="of-sub">${_escHtml(_ofMD(c.stockDate))}</div></th>`).join('')}</tr>`;
 }
 
 // ── 경보 목록 ──
 function _oivAlertsHtml(){
   const inv=_OIV.inv,cat=OFFLINE_FILTER.category,N=inv.windowDays;
-  const chName=id=>{const c=_ofChannelInv(inv,id);return c?c.name:id;};
-  const skuG=(inv.groups||[]).filter(g=>g.level==='sku'&&g.channelId!=='*'&&(!cat||g.category===cat));
+  const chName=id=>{const c=_ofChannelInv(inv,id);return c?_ofChLabel(c.channelCategory,c.name):id;};
+  const skuG=(inv.groups||[]).filter(g=>g.level==='sku'&&g.channelId!=='*'&&_ofInScope(g.channelId)&&(!cat||g.category===cat));
   const over=skuG.filter(g=>g.alert==='over').sort((a,b)=>b.days-a.days),risk=skuG.filter(g=>g.alert==='risk').sort((a,b)=>a.days-b.days);
   const skuCat={};(inv.groups||[]).forEach(g=>{if(g.level==='sku')skuCat[g.skuId]=g.category;});
-  const outs=(inv.storeOuts||[]).filter(s=>!cat||skuCat[s.skuId]===cat);
+  const outs=(inv.storeOuts||[]).filter(s=>_ofInScope(s.channelId)&&(!cat||skuCat[s.skuId]===cat));
   const t=_OIV.atab;
   const tabs=`<span class="of-atabs"><button type="button" class="${t==='over'?'on':''}" onclick="_oivSetTab('over')">과다 ${over.length}</button><button type="button" class="${t==='risk'?'on':''}" onclick="_oivSetTab('risk')">결품 위험 ${risk.length}</button><button type="button" class="${t==='storeOut'?'on':''}" onclick="_oivSetTab('storeOut')">점포 결품 ${outs.length}</button></span>`;
   let tbl;
@@ -170,17 +181,18 @@ function _oivDrawTrend(){
   if(!tr.sel){body.innerHTML='<div class="of-chart-empty">재고가 있는 모델이 없습니다.</div>';return;}
   const d=tr.data;
   if(!d){body.innerHTML='<div class="mp-empty">불러오는 중…</div>';return;}
-  if(!d.series.length){body.innerHTML='<div class="of-chart-empty">이 기간에 재고 기록이 없습니다.</div>';if(_oivTrendChart){_oivTrendChart.destroy();_oivTrendChart=null;}return;}
+  const series=d.series.filter(x=>_ofInScope(x.channelId)); // 채널 대분류 필터 범위의 채널만
+  if(!series.length){body.innerHTML='<div class="of-chart-empty">이 기간에 재고 기록이 없습니다.</div>';if(_oivTrendChart){_oivTrendChart.destroy();_oivTrendChart=null;}return;}
   body.innerHTML='<div class="of-chart"><canvas id="oivTrendCanvas"></canvas></div><div class="of-sub" style="margin-top:6px">점 = 재고 파일 기준일. 업로드가 없는 날은 선으로 이어 그립니다.</div>';
   const el=document.getElementById('oivTrendCanvas');
   if(!el||typeof Chart==='undefined')return;
   const f=_OIV.type==='all'?'total':_OIV.type;
   if(_oivTrendChart)_oivTrendChart.destroy();
   _oivTrendChart=new Chart(el.getContext('2d'),{type:'line',
-    data:{labels:d.dates.map(_ofMD),datasets:d.series.map((s,i)=>{
+    data:{labels:d.dates.map(_ofMD),datasets:series.map((s,i)=>{
       const by={};s.points.forEach(p=>{by[p.date]=p[f];});
       const c=_OIV_LINE_COLORS[i%_OIV_LINE_COLORS.length];
-      return {label:s.name,data:d.dates.map(x=>x in by?by[x]:null),borderColor:c,backgroundColor:c,spanGaps:true,tension:.2,pointRadius:3};
+      return {label:_ofChLabel(_offlineChannelCatOf(s.channelId),s.name),data:d.dates.map(x=>x in by?by[x]:null),borderColor:c,backgroundColor:c,spanGaps:true,tension:.2,pointRadius:3};
     })},
     options:{responsive:true,maintainAspectRatio:false,interaction:{mode:'index',intersect:false},
       plugins:{tooltip:{callbacks:{label:c=>c.dataset.label+' '+_ofNum(c.raw)}}},scales:{y:{beginAtZero:true}}}});

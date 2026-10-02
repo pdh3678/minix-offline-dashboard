@@ -23,9 +23,10 @@ const settle = async () => { for (let i = 0; i < 8; i++) await new Promise(r => 
 const SHIM = 'get TG(){return _TG;}, get PAGE_MOUNTS(){return PAGE_MOUNTS;}';
 
 const MASTERS = { success: true, skus: [], mappings: [], stores: [], channels: [
-  { channelId: 'himart', name: '하이마트', active: 'Y', order: 1, uploadStartMonth: '2026-09' },
-  { channelId: 'traders', name: '트레이더스', active: 'N', order: 4, uploadStartMonth: '' },
-  { channelId: 'shinsegae', name: '신세계', active: 'N', order: 5, uploadStartMonth: '' }] };
+  { channelId: 'himart', name: '하이마트', channelCategory: '양판점', active: 'Y', order: 1, uploadStartMonth: '2026-09' },
+  { channelId: 'traders', name: '트레이더스', channelCategory: '할인점', active: 'N', order: 4, uploadStartMonth: '' },
+  { channelId: 'shinsegae', name: '신세계백화점', channelCategory: '백화점', active: 'N', order: 5, uploadStartMonth: '' }],
+  channelCategories: ['양판점', '할인점', '백화점', '폐쇄몰', '렌탈', '특판'] };
 const R = (ch, line, model, inT, inA, outT, outA, src, byType) => ({ ym: '2026-09', channelId: ch, line, model,
   in: { target: inT, actual: inA }, out: { target: outT, actual: outA, source: src, byType: byType || null } });
 const MONTHLY = { success: true, months: ['2026-09'], rows: [

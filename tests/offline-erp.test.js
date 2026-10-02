@@ -94,7 +94,7 @@ async function main() {
     const g = env(), T = g.ctx.OFF_TABS;
     // ERP 전 운영 모양: 채널마스터 10열·7채널(신세계·디에이블앤 비활성·자기 코드체계), 거래처매핑 탭 없음, 점포마스터에 ERP 점포 없음
     const ch = g.tab('채널마스터');
-    ch._grid.length = 1; ch._grid[0].length = 10;
+    ch._grid.length = 1; ch._grid[0].length = 10; ch._grid[0][2] = '유형'; // C열 머리글도 운영 그대로 옛 '유형'
     g.ctx._offWriteBlock(ch, { headers: T.channel.headers.slice(0, 10), text: [0, 1, 2, 3, 5, 6, 7, 8] }, 2, [
       ['himart', '하이마트', '전문점', 'Y', 1, '2026-09', '', '', 'himart', 0], ['etland', '전자랜드', '전문점', 'Y', 2, '2026-09', '', '', 'etland', -1],
       ['emart', '이마트', '할인점', 'Y', 3, '2026-09', '이마트', 'EM', 'emart', -1], ['traders', '트레이더스', '창고형', 'N', 4, '2026-09', '트레이더스', 'TR', 'emart', -1],
@@ -104,7 +104,9 @@ async function main() {
     g.tab('점포마스터')._grid.length = 1;
     g.ctx._offWriteBlock(g.tab('점포마스터'), T.store, 2, [['himart', 'S1', '강남점', '강남', '2026-09-01', '2026-09-01', '오프라인']]);
     const rep = g.ctx.offline_setupSheets();
-    check('채널마스터 IN실적원천 열만 덧붙임 · 거래처매핑 탭 생성', J(rep.extended) === J([{ tab: '채널마스터', added: ['IN실적원천'] }]) && J(rep.created) === J(['거래처매핑']), rep);
+    check('채널마스터 IN실적원천·채널별칭 열만 덧붙임 · 거래처매핑 탭 생성', J(rep.extended) === J([{ tab: '채널마스터', added: ['IN실적원천', '채널별칭'] }]) && J(rep.created) === J(['거래처매핑']), rep);
+    check('  ↳ 유형 → 채널대분류(전문점 → 양판점 · 창고형 → 할인점), 신세계 → 신세계백화점(별칭 신세계)', J(rep.channelCategory.map(x => x.channelId + ':' + x.to)) === J(['himart:양판점', 'etland:양판점', 'emart:할인점', 'traders:할인점', 'shinsegae:백화점', 'theablen:폐쇄몰', 'special:특판']) &&
+      J(rep.channelRenamed) === J([{ channelId: 'shinsegae', from: '신세계', to: '신세계백화점' }]) && g.rows('채널마스터').find(r => r[0] === 'shinsegae')[11] === '신세계', rep.channelCategory);
     const rows = g.rows('채널마스터'), by = id => rows.find(r => r[0] === id);
     check('신세계·디에이블앤 = 활성 Y · 업로드시작월 2026-09 · 코드체계 erp · IN실적원천 upload (채널명 등 다른 값은 그대로)',
       ['shinsegae', 'theablen'].every(id => by(id)[3] === 'Y' && by(id)[5] === '2026-09' && by(id)[8] === 'erp' && by(id)[10] === 'upload') && by('theablen')[1] === '디에이블앤(수정)', rows);
@@ -276,12 +278,13 @@ async function main() {
 
 /* ── 화면 — 데이터 업로드 카드(실코드, 서버 호출·SheetJS만 가짜) ── */
 const UI_SHIM = 'get UP(){return _UP;}, get MASTERS(){return OFFLINE_MASTERS;}, get CM(){return _CM;}, get TG(){return _TG;}';
-const ERP_CH_OBJ = [['shinsegae', '신세계', '백화점', 5], ['theablen', '디에이블앤', '폐쇄몰', 6], ['lotte_dept', '롯데백화점', '백화점', 8], ['workshop8', '워크숍에이트', '폐쇄몰', 9], ['dapara', '다파라솔루션', '렌탈', 10]]
-  .map(([id, name, type, order]) => ({ channelId: id, name, type, active: 'Y', order, uploadStartMonth: '2026-09', codeSystem: 'erp', inSource: 'upload' }));
+const ERP_CH_OBJ = [['shinsegae', '신세계백화점', '백화점', 5], ['theablen', '디에이블앤', '폐쇄몰', 6], ['lotte_dept', '롯데백화점', '백화점', 8], ['workshop8', '워크숍에이트', '폐쇄몰', 9], ['dapara', '다파라솔루션', '렌탈', 10]]
+  .map(([id, name, channelCategory, order]) => ({ channelId: id, name, channelCategory, active: 'Y', order, uploadStartMonth: '2026-09', codeSystem: 'erp', inSource: 'upload' }));
 const UI_MASTERS = () => ({
   success: true,
   skus: [{ skuId: 'SKU-0001', name: '더 플렌더 MAX 그레이지', line: '더플렌더', model: '더 플렌더 MAX', option: '그레이지', active: 'Y', order: 1 }],
-  channels: [{ channelId: 'himart', name: '하이마트', type: '전문점', active: 'Y', order: 1, uploadStartMonth: '2026-09', codeSystem: 'himart', inSource: 'input' }].concat(ERP_CH_OBJ.map(c => Object.assign({}, c))),
+  channels: [{ channelId: 'himart', name: '하이마트', channelCategory: '양판점', active: 'Y', order: 1, uploadStartMonth: '2026-09', codeSystem: 'himart', inSource: 'input' }].concat(ERP_CH_OBJ.map(c => Object.assign({}, c))),
+  channelCategories: ['양판점', '할인점', '백화점', '폐쇄몰', '렌탈', '특판'],
   codeSystems: [{ id: 'erp', name: 'ERP (백화점·폐쇄몰·렌탈 공통)', channels: ERP_CHS }],
   customers: [{ code: '00476', name: '신세계(센텀시티점)', channelId: 'shinsegae' }, { code: '00474', name: '디에이블앤', channelId: 'theablen' }, { code: '00261', name: '다파라솔루션', channelId: 'dapara' }],
   mappings: [{ channelId: 'erp', code: CODE.MAX, skuId: 'SKU-0001', stockType: '정상', name: NAME[CODE.MAX] }],
@@ -323,18 +326,19 @@ async function uploadUi() {
     h.indexOf('<option value="dapara">다파라솔루션</option>') >= 0 && h.indexOf('<option value="himart"') < 0 && h.indexOf('이번엔 반영 안 함') >= 0 && h.indexOf('거래처매핑에 없음') >= 0);
   check('  ↳ 매핑된 거래처 이름은 거래처매핑 이름(다파라솔루션), 금액·제외 수량', h.indexOf('<td>다파라솔루션</td>') >= 0 && h.indexOf('₩660,000') >= 0);
   check('무상 동봉 제외 2행 · 파일 금액 합계', /무상 동봉 제외[^<]*<b>2<\/b>행/.test(h) && h.indexOf('₩2,409,000') >= 0);
-  check('채널별 표 — ERP 5채널(판매 없는 채널 포함)', h.indexOf('채널별') >= 0 && ['신세계', '디에이블앤', '롯데백화점', '워크숍에이트', '다파라솔루션'].every(n => h.indexOf('<td>' + n + ' <span') >= 0));
+  check('채널별 표 — ERP 5채널(판매 없는 채널 포함), 채널대분류 · 채널명 · 채널대분류 순서', h.indexOf('채널별') >= 0 && ['백화점 · 신세계백화점', '백화점 · 롯데백화점', '폐쇄몰 · 디에이블앤', '폐쇄몰 · 워크숍에이트', '렌탈 · 다파라솔루션'].map(n => h.indexOf('<td>' + n + '</td><td class="num-col">')).every((i, k, a) => i >= 0 && (!k || i > a[k - 1])));
+  check('  ↳ 거래처 채널 선택지 = 채널대분류 묶음', h.indexOf('<optgroup label="백화점"><option value="shinsegae">신세계백화점</option><option value="lotte_dept">롯데백화점</option></optgroup>') >= 0);
   check('브랜드별 — 미닉스 외(톰 디바이스) 강조', /up-other"><td>톰 디바이스 <span class="up-chip applying">미닉스 외<\/span>/.test(h));
   check('미매칭 코드 = 제외 뒤 코드 중 매핑 없는 것(4개), 브랜드·카테고리를 같이 넘김', ctx._upUnmatched(f).length === 4 && ctx._upUnmatched(f).find(x => x.code === CODE.TOM).brand === '톰 디바이스' &&
     ctx._upUnmatched(f).find(x => x.code === CODE.LOCK).cat === '구성품', ctx._upUnmatched(f));
   check('채널을 안 고른 거래처가 있으면 반영하지 않고 안내', /채널을 정하지 않은 거래처 1곳/.test(h) && !(await ctx._upApply(f.id)) && !calls.some(c => c.action === 'offline_upload'), f.error);
   ctx._upSetCust(f.id, '00999', 'dapara');
-  check('고르면 준비 — 채널별 다파라솔루션 거래처 2', page().indexOf('채널을 정하지 않은') < 0 && /<td>다파라솔루션 <span[^>]*>렌탈<\/span><\/td><td class="num-col">2<\/td>/.test(page()));
+  check('고르면 준비 — 채널별 다파라솔루션 거래처 2', page().indexOf('채널을 정하지 않은') < 0 && /<td>렌탈 · 다파라솔루션<\/td><td class="num-col">2<\/td>/.test(page()));
   await ctx._upApply(f.id);
   const call = calls.find(c => c.action === 'offline_upload');
   check('반영 요청 — 교체 기간·새 거래처(고른 것만), 개인정보 없음', call && call.data.meta.replaceStart === '2026-09-01' && J(call.data.meta.customers) === J([{ code: '00999', name: '가상상사', channelId: 'dapara' }]) &&
     call.data.records.sales.length === 7 && !hasPII(J(call.data)).length, call && call.data.meta);
-  check('결과 — 채널별 금액·거래처매핑 추가', page().indexOf('신세계 1행·판매 2·금액 ₩660,000') >= 0 && page().indexOf('거래처매핑에 추가 1') >= 0);
+  check('결과 — 채널별 금액·거래처매핑 추가', page().indexOf('백화점 · 신세계백화점 1행·판매 2·금액 ₩660,000') >= 0 && page().indexOf('거래처매핑에 추가 1') >= 0);
   ctx._upSetCust(f.id, '00999', '-');
   calls.length = 0;
   await ctx._upApply(f.id);
@@ -396,7 +400,7 @@ function mappingUi() {
   const cm = box['page-admin-code-mapping'].innerHTML;
   const opts = [...cm.matchAll(/onchange="_cmSetFilter\('ch',this.value\)">([\s\S]*?)<\/select>/g)][0][1];
   check('코드 매핑 채널 필터 — ERP 공통 그룹 하나(ERP 채널 5개는 따로 없음)', opts.indexOf('<option value="erp">ERP (백화점·폐쇄몰·렌탈 공통)</option>') >= 0 && opts.indexOf('신세계') < 0 && opts.indexOf('하이마트') >= 0, opts);
-  check('안내 — ERP 채널 5개가 ERP 공통 매핑을 같이 쓴다', cm.indexOf('<b>신세계·디에이블앤·롯데백화점·워크숍에이트·다파라솔루션</b>는 <b>ERP (백화점·폐쇄몰·렌탈 공통)</b> 코드 매핑을 그대로 씁니다') >= 0, cm.slice(0, 400));
+  check('안내 — ERP 채널 5개가 ERP 공통 매핑을 같이 쓴다', cm.indexOf('<b>신세계백화점·디에이블앤·롯데백화점·워크숍에이트·다파라솔루션</b>는 <b>ERP (백화점·폐쇄몰·렌탈 공통)</b> 코드 매핑을 그대로 씁니다') >= 0, cm.slice(0, 400));
   require('vm').runInContext("_CM.filter.ch = 'erp';", ctx);
   ctx._cmRenderTable();
   const tbl = box.cmTable.innerHTML;
@@ -469,7 +473,7 @@ async function inUploadAll() {
   const home = g.call('home_getSummary', { ym: '2026-09', mode: 'month', category: '' });
   const himartIn = m2.totals.byChannelMonth.find(x => x.ym === '2026-09' && x.channelId === 'himart').in.actualAmount;
   check('파트 홈 — 오프라인 = 하이마트 + 신세계(백화점) · 특수 = 디에이블앤 + 다파라솔루션(폐쇄몰·렌탈)', home.series.offline['2026-09'].actual === himartIn + 660000 &&
-    home.series.closed['2026-09'].actual === 460000 + 760000 && home.groups[1].label === '특수(폐쇄몰·특판·렌탈)', [home.series.offline['2026-09'], home.series.closed['2026-09'], himartIn]);
+    home.series.closed['2026-09'].actual === 460000 + 760000 && home.groups[1].label === '특수(폐쇄몰·렌탈·특판)', [home.series.offline['2026-09'], home.series.closed['2026-09'], himartIn]);
   check('  ↳ 필터 IN 금액에 ERP 필터(29,000) 포함 · 대분류별 판매의 특수 = 디에이블앤·다파라 OUT', home.filter.amount === 29000 &&
     home.categorySales.find(c => c.category === '음식물처리기').closed.qty === 3 && home.categorySales.find(c => c.category === '청소기').closed.qty === 2, [home.filter, home.categorySales]);
   check('  ↳ ERP 채널은 재고 경보에 안 잡힘(오늘 챙길 것 경보 = ERP 반영 전 경보 수 그대로)', home.today.alerts.over + home.today.alerts.risk === invBefore.groups.filter(x => x.level === 'sku' && x.channelId !== '*' && x.alert).length);
@@ -486,8 +490,8 @@ async function inUploadAll() {
   ctx.navPage('offline-channels', null); await settle();
   const chh = box['page-offline-channels'].innerHTML;
   const card = name => (chh.split('class="of-card"').find(x => x.indexOf('of-card-name">' + name + '<') >= 0) || '');
-  check('채널 현황 — ERP 채널 카드(백화점·폐쇄몰·렌탈)에 "재고 데이터 없음", 경보 배지 없음', ['신세계', '디에이블앤', '다파라솔루션'].every(n => card(n).indexOf('재고 데이터 없음') >= 0 && card(n).indexOf('class="of-badge ') < 0) &&
-    card('하이마트').indexOf('재고 데이터 없음') < 0 && card('신세계').indexOf('백화점') >= 0 && card('다파라솔루션').indexOf('렌탈') >= 0, card('신세계').slice(0, 600));
+  check('채널 현황 — ERP 채널 카드(백화점·폐쇄몰·렌탈)에 "재고 데이터 없음", 경보 배지 없음', ['신세계백화점', '디에이블앤', '다파라솔루션'].every(n => card(n).indexOf('재고 데이터 없음') >= 0 && card(n).indexOf('class="of-badge ') < 0) &&
+    card('하이마트').indexOf('재고 데이터 없음') < 0 && card('신세계백화점').indexOf('백화점') >= 0 && card('다파라솔루션').indexOf('렌탈') >= 0, card('신세계백화점').slice(0, 600));
   ctx.navPage('offline-channel', null, 'shinsegae'); await settle();
   const cd = box['page-offline-channel'].innerHTML;
   check('채널 상세(신세계) — 점포 카드 "재고 데이터 없음", 모델 표 헤더 안내', cd.indexOf('재고 데이터 없음 — 이 채널은 재고 파일이 없습니다') >= 0 && cd.indexOf('▸ 누르면 펼침 · 재고 데이터 없음') >= 0, cd.slice(0, 300));
@@ -510,6 +514,10 @@ async function inUploadAll() {
   };
   const lg = loadOfflineGas({ setup: true, today: TODAY, legacy: { '26년 진행현황': lgGrid() } });
   ['sku', 'mapping', 'sales'].forEach(k => { const T = lg.ctx.OFF_TABS[k]; lg.ctx._offWriteBlock(lg.tab(T.name), T, 2, g.ctx._offReadRows(g.tab(T.name), T)); });
+  // 채널명이 '신세계백화점'으로 바뀐 뒤에도 원본 '신세계'는 별칭(채널마스터 채널별칭)으로 shinsegae에 연결된다(매핑을 주지 않은 첫 미리보기 = 제안값)
+  const pv0 = lg.ctx._offMigrateProgress({ mode: 'preview', mapping: null }, AUTH);
+  check('이관 미리보기 — 원본 "신세계" → shinsegae(신세계백화점) 제안·연결, 하이마트 → himart', J(pv0.channels.map(c => c.legacy + '→' + c.suggest + '/' + c.channelId)) === J(['신세계→shinsegae/shinsegae', '하이마트→himart/himart']) &&
+    lg.ctx._offReadRows(lg.tab('채널마스터'), lg.ctx.OFF_TABS.channel).find(r => r[0] === 'shinsegae')[1] === '신세계백화점', pv0.channels);
   const map = { channels: { '신세계': 'shinsegae', '하이마트': 'himart' }, products: { '더플렌더 MAX': { line: '더플렌더', model: '더 플렌더 MAX' } } };
   const pv = lg.ctx._offMigrateProgress({ mode: 'preview', mapping: map }, AUTH);
   const cmp = pv.compare.filter(x => x.total).map(x => [x.channelId, x.side, x.legacy, x.ledger].join(':'));

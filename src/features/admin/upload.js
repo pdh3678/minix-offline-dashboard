@@ -128,7 +128,7 @@ function _upUnmatched(f){
 
 /* ERP 매출이익리스트(split 'customer') — 거래처 → 채널. 거래처매핑(마스터 customers)에 ERP 채널로 있으면 그 채널, 없으면 미리보기에서 고른다
    (f.edits.cust{거래처코드: channel_id | '-'(이번엔 반영 안 함)}). 고른 채널은 반영 때 GAS가 거래처매핑에 저장한다. 반영 때는 서버가 같은 규칙으로 정한다 */
-function _upErpChannels(p){return ((OFFLINE_MASTERS&&OFFLINE_MASTERS.channels)||[]).filter(c=>c.codeSystem===p.channelId).sort((a,b)=>(Number(a.order)||99)-(Number(b.order)||99));}
+function _upErpChannels(p){return _offlineSortChannels(((OFFLINE_MASTERS&&OFFLINE_MASTERS.channels)||[]).filter(c=>c.codeSystem===p.channelId));}
 function _upErpCusts(f){
   const p=f.parse,erp=_upErpChannels(p).map(c=>c.channelId),picks=f.edits.cust||{};
   const known={};((OFFLINE_MASTERS&&OFFLINE_MASTERS.customers)||[]).forEach(c=>{known[c.code]=c;});
@@ -148,13 +148,13 @@ function _upErpHtml(f,p){
   const s=p.summary,ex=s.excluded||{rows:0,qty:0};
   const gub=Object.keys(s.gubun||{}).map(g=>_escHtml(g)+' <b>'+n(s.gubun[g])+'</b>').join(' · ');
   const custRows=custs.map(c=>{
-    const sel=c.mapped?`<span class="up-chip ready">${_escHtml(_offlineChannelName(c.channelId))}</span>`
-      :`<select class="f-sel${c.channelId?'':' up-need'}" ${busy?'disabled':''} onchange="_upSetCust(${f.id},'${_escAttr(c.code)}',this.value)"><option value="">— 채널 선택 —</option>${chs.map(ch=>`<option value="${_escAttr(ch.channelId)}"${c.channelId===ch.channelId?' selected':''}>${_escHtml(ch.name)}</option>`).join('')}<option value="-"${c.channelId==='-'?' selected':''}>이번엔 반영 안 함</option></select> <span class="off-miss">거래처매핑에 없음</span>`;
+    const sel=c.mapped?`<span class="up-chip ready">${_escHtml(_offlineChannelLabel(c.channelId))}</span>`
+      :`<select class="f-sel${c.channelId?'':' up-need'}" ${busy?'disabled':''} onchange="_upSetCust(${f.id},'${_escAttr(c.code)}',this.value)"><option value="">— 채널 선택 —</option>${_offlineGroupChannels(chs).map(g=>`<optgroup label="${_escAttr(g.cat)}">${g.channels.map(ch=>`<option value="${_escAttr(ch.channelId)}"${c.channelId===ch.channelId?' selected':''}>${_escHtml(ch.name)}</option>`).join('')}</optgroup>`).join('')}<option value="-"${c.channelId==='-'?' selected':''}>이번엔 반영 안 함</option></select> <span class="off-miss">거래처매핑에 없음</span>`;
     return `<tr><td class="mp-code">${_escHtml(c.code)}</td><td>${_escHtml(c.name)}</td><td>${sel}</td><td class="num-col">${n(c.rows)}</td><td class="num-col">${n(c.qty)}</td><td class="num-col">${won(c.amount)}</td><td class="num-col">${c.excludedQty?n(c.excludedQty):'—'}</td></tr>`;
   }).join('');
   const byCh={};custs.forEach(c=>{if(!c.channelId||c.channelId==='-')return;const o=byCh[c.channelId]||(byCh[c.channelId]={custs:0,qty:0,amount:0,ex:0});o.custs++;o.qty+=c.qty;o.amount+=c.amount;o.ex+=c.excludedQty;});
   const chRows=chs.map(ch=>{const o=byCh[ch.channelId]||{custs:0,qty:0,amount:0,ex:0};
-    return `<tr><td>${_escHtml(ch.name)} <span class="off-muted">${_escHtml(ch.type||'')}</span></td><td class="num-col">${o.custs}</td><td class="num-col">${n(o.qty)}</td><td class="num-col">${won(o.amount)}</td><td class="num-col">${o.ex?n(o.ex):'—'}</td></tr>`;}).join('');
+    return `<tr><td>${_escHtml(_ofChLabel(ch.channelCategory,ch.name))}</td><td class="num-col">${o.custs}</td><td class="num-col">${n(o.qty)}</td><td class="num-col">${won(o.amount)}</td><td class="num-col">${o.ex?n(o.ex):'—'}</td></tr>`;}).join('');
   const brRows=(s.brands||[]).map(b=>`<tr${b.minix?'':' class="up-other"'}><td>${_escHtml(b.brand)}${b.minix?'':' <span class="up-chip applying">미닉스 외</span>'}</td><td class="num-col">${n(b.qty)}</td><td class="num-col">${won(b.amount)}</td></tr>`).join('');
   return `<div class="up-stats">파일 금액 합계 <b>${won(s.fileAmount)}</b> · 수불구분 ${gub}${s.dataPeriod?` · 파일 안 날짜 ${_escHtml(s.dataPeriod.start)} ~ ${_escHtml(s.dataPeriod.end)}`:''}<br>
       무상 동봉 제외(카테고리 구성품 · 금액 0 — 판매로 저장하지 않음) <b>${n(ex.rows)}</b>행 · 수량 <b>${n(ex.qty)}</b></div>
@@ -225,13 +225,13 @@ function _upStoreSplit(p){
 function _upSplitHtml(p){
   if(p.split==='store'){
     const {byCh,via}=_upStoreSplit(p);
-    const rows=Object.keys(byCh).map(c=>`<span class="up-chip ready">${_escHtml(_offlineChannelName(c))}</span> 점포 <b>${byCh[c].stores}</b> · 재고 <b>${byCh[c].stock}</b>`);
+    const rows=Object.keys(byCh).map(c=>`<span class="up-chip ready">${_escHtml(_offlineChannelLabel(c))}</span> 점포 <b>${byCh[c].stores}</b> · 재고 <b>${byCh[c].stock}</b>`);
     return `<div class="up-stats">${rows.join('<br>')}<br><span class="off-muted">점포 채널 판별: 점포마스터 ${via.master}곳 · 점포명접두어 ${via.prefix}곳${via.fallback?` · <b class="off-miss">못 정해 ${_escHtml(_offlineChannelName(p.channelId))}로 ${via.fallback}곳</b> — 점포별 일별 매출 파일을 먼저 올리면 점포마스터로 정해집니다`:''}</span></div>`;
   }
   if(p.split!=='biz'||!p.summary.byBiz)return '';
   const parts=p.summary.byBiz.map(b=>{
     const c=_upBizChannel(b.biz);
-    return c?`<span class="up-chip ready">${_escHtml(c.name)}</span> 업태명 "${_escHtml(b.biz)}" · 레코드 <b>${b.rows}</b> · 점포 <b>${b.stores}</b> · 판매 <b>${b.qty}</b>`
+    return c?`<span class="up-chip ready">${_escHtml(_offlineChannelLabel(c.channelId))}</span> 업태명 "${_escHtml(b.biz)}" · 레코드 <b>${b.rows}</b> · 점포 <b>${b.stores}</b> · 판매 <b>${b.qty}</b>`
       :`<span class="up-chip error">채널 없음</span> 업태명 "${_escHtml(b.biz)}" · 레코드 <b>${b.rows}</b> · 판매 <b>${b.qty}</b> — 채널마스터 원천업태명에 없어 반영을 보류합니다`;
   });
   return `<div class="up-stats">${parts.join('<br>')}</div>`;
@@ -283,12 +283,14 @@ function _upRender(){
 function _upStatusHtml(){
   if(_UP.statusErr)return `<div class="up-err">${_escHtml(_UP.statusErr)}</div>`;
   if(!_UP.status)return '<div class="mp-empty">불러오는 중…</div>';
-  const rows=_UP.status.channels.map(c=>`<tr>
+  // 채널대분류 묶음 머리 줄 + 채널(서버가 채널대분류 → 정렬순서로 준다)
+  let prev=null;
+  const rows=_UP.status.channels.map(c=>{const cat=c.channelCategory||OFFLINE_UNCATEGORIZED,hd=cat!==prev?`<tr class="off-grp"><td colspan="4">${_escHtml(cat)}</td></tr>`:'';prev=cat;return hd+`<tr>
     <td>${_escHtml(c.name)}</td>
     <td>${c.salesLast?_escHtml(c.salesLast):'<span class="off-muted">없음</span>'}</td>
     <td>${c.stockLast?_escHtml(c.stockLast):'<span class="off-muted">없음</span>'}</td>
     <td>${c.missingDays.length?`<span class="off-miss">${_escHtml(_upDayRanges(c.missingDays))} (${c.missingDays.length}일)</span>`:'<span class="off-ok">없음</span>'}</td>
-  </tr>`).join('');
+  </tr>`;}).join('');
   return `<div class="tbl-wrap"><table class="off-status"><thead><tr><th>채널</th><th>판매 마지막 기준일</th><th>재고 마지막 기준일</th><th>이번 달 빈 날짜 (${_escHtml(_UP.status.month)})</th></tr></thead><tbody>${rows}</tbody></table></div>`;
 }
 
@@ -331,7 +333,7 @@ function _upCardHtml(f){
     :um.length?`<button type="button" class="up-unm" onclick="_upTogglePanel(${f.id})">미매칭 코드 ${um.length}개 ${f.panelOpen?'▴ 닫기':'▾ 여기서 매핑'}</button> <span class="off-muted">매핑 없이 반영해도 원장에는 원본코드로 저장됩니다</span>`
     :'<span class="up-unm none">모든 코드 매핑됨</span>';
   return `<div class="up-card ${f.status==='done'?'done':''}">
-    <div class="up-card-hd"><span class="up-fname">${_escHtml(f.name)}</span>${chip}<span class="off-muted">${_escHtml(_offlineChannelName(p.channelId))}</span>${acts}</div>
+    <div class="up-card-hd"><span class="up-fname">${_escHtml(f.name)}</span>${chip}<span class="off-muted">${_escHtml(_offlineChannelLabel(p.channelId))}</span>${acts}</div>
     <div class="up-row">${typeSel}${dateCtl}</div>
     <div class="up-stats">헤더 <b>${p.headerRow}</b>행 · 원본 <b>${p.rawRowCount}</b>행 · 반영 예정 ${planned} · 점포 <b>${p.summary.storeCount}</b> · 원본코드 <b>${p.summary.codeCount}</b>종${gubun}</div>
     ${_upSplitHtml(p)}${_upErpHtml(f,p)}
@@ -353,7 +355,7 @@ function _upResultHtml(r){
   if(a.storesMoved)parts.push('채널 옮긴 점포 '+a.storesMoved);
   if(a.customersAdded)parts.push('거래처매핑에 추가 '+a.customersAdded);
   // 채널별(한 파일에 여러 채널 — 이마트·트레이더스, ERP 매출이익리스트는 금액도)
-  if(a.byChannel)parts.push(Object.keys(a.byChannel).map(c=>{const b=a.byChannel[c];return _offlineChannelName(c)+(b.rows!=null?' '+b.rows+'행·판매 '+b.qty+(b.amount!=null?'·금액 ₩'+Math.round(b.amount).toLocaleString('ko-KR'):''):' 점포 '+b.stores+'·재고 '+b.stock);}).join(' / '));
+  if(a.byChannel)parts.push(Object.keys(a.byChannel).map(c=>{const b=a.byChannel[c];return _offlineChannelLabel(c)+(b.rows!=null?' '+b.rows+'행·판매 '+b.qty+(b.amount!=null?'·금액 ₩'+Math.round(b.amount).toLocaleString('ko-KR'):''):' 점포 '+b.stores+'·재고 '+b.stock);}).join(' / '));
   let range=rr.start?rr.start+' ~ '+rr.end:(rr.baseDate||'');
   if(rr.himart)range+=' · 판매 재계산: '+rr.himart.recomputed.map(x=>x.date+'('+(x.unit==='day'?'day':x.start+'~ period')+')').join(', ');
   return `<div class="up-result">✓ 반영 완료 — ${_escHtml(parts.join(' · '))}<br>교체 범위: ${_escHtml(range)} · 미매칭 ${r.unmatched?r.unmatched.length:0}개</div>`+
@@ -365,9 +367,9 @@ function _upLogHtml(){
   if(!_UP.log)return '<div class="mp-empty">불러오는 중…</div>';
   if(!_UP.log.length)return '<div class="mp-empty">아직 업로드 기록이 없습니다.</div>';
   const label=t=>OfflineParsers.TYPES[t]?OfflineParsers.TYPES[t].label:t;
-  return `<div class="tbl-wrap"><table class="up-log"><thead><tr><th>시각</th><th>파일명</th><th>유형</th><th>기준일/기간</th>
+  return `<div class="tbl-wrap"><table class="up-log"><thead><tr><th>시각</th><th>파일명</th><th>유형</th><th>채널</th><th>기준일/기간</th>
     <th class="num-col">원본</th><th class="num-col">반영</th><th class="num-col">미매칭</th><th>상태</th><th>업로더</th><th>경고</th></tr></thead><tbody>${
-    _UP.log.map(x=>`<tr><td>${_escHtml(x.at)}</td><td>${_escHtml(x.fileName)}</td><td>${_escHtml(label(x.fileType))}</td><td>${_escHtml(x.range)}</td>
+    _UP.log.map(x=>`<tr><td>${_escHtml(x.at)}</td><td>${_escHtml(x.fileName)}</td><td>${_escHtml(label(x.fileType))}</td><td>${_escHtml(_offlineChannelsLabel(x.channelId))}</td><td>${_escHtml(x.range)}</td>
       <td class="num-col">${x.rawRows}</td><td class="num-col">${x.appliedRows}</td><td class="num-col">${x.unmatched}</td>
       <td>${x.status==='성공'?'<span class="off-ok">성공</span>':'<span class="off-miss">'+_escHtml(x.status)+'</span>'}</td>
       <td>${_escHtml(x.uploader)}</td><td class="up-log-warn">${_escHtml(x.warnings)}</td></tr>`).join('')}</tbody></table></div>`;
