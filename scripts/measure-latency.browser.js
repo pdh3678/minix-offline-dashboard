@@ -8,7 +8,9 @@
    파일은 운영에 이미 반영한 "같은 파일"(이마트 '기간별매출(상품별)_일별상세' 한 달분)이어야 한다 — 기간 교체형이라 같은 파일을 다시
    넣으면 원장은 그대로다(멱등: 회차마다 지운 행 = 넣은 행인지 표에 나온다). 업로드로그에서 그 기간을 덮은 더 최근 업로드가 있으면 멈춘다
    (옛 파일로 새 데이터를 덮지 않게). 남는 흔적: 업로드로그 ROUNDS행, 그 파일 미매칭 코드의 발견횟수 +ROUNDS.
-   결과: 콘솔 표 두 개(회차별 · 액션별 평균) + window.__latency */
+   지문 = 조회 응답의 SHA-256 앞 12자리(실행 시간·버전·캐시 여부·세션 토큰·updatedAt은 빼고) — 배포 전후로 같으면 결과가 같다
+   (그 사이 누가 업로드·저장했으면 달라진다).
+   결과: 콘솔 표 두 개(회차별 · 액션별 평균·지문) + window.__latency */
 (async () => {
   const ROUNDS = 3, YM = '2026-09', CH = 'himart';
   const file = await new Promise(resolve => {
@@ -43,12 +45,19 @@
     ['offline_getSalesBreakdown', () => _offlineCall('offline_getSalesBreakdown', { channelId: CH, from: YM, to: YM })],
     ['공구 분석 데이터 조회', () => _gasFetch(_gasUrl(_getGasUrl()) + '&nocache=1', {})]
   ];
+  const digest = async j => {
+    const c = Object.assign({}, j);
+    ['execMs', 'version', 'cached', 'sessionToken', 'updatedAt'].forEach(k => { delete c[k]; });
+    const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(JSON.stringify(c)));
+    return Array.from(new Uint8Array(buf)).slice(0, 6).map(b => b.toString(16).padStart(2, '0')).join('');
+  };
   const timed = async (round, name, fn) => {
     const t = performance.now();
     let j, err = '';
     try { j = await fn(); } catch (e) { err = String(e.message || e); }
     const row = { 회차: round, 액션: name, 왕복ms: Math.round(performance.now() - t), 서버ms: j ? j.execMs : null, 캐시: !!(j && j.cached), 버전: j ? j.version : '', 오류: err || (j && j.error) || '' };
     if (name === 'offline_upload' && j && j.applied) row.멱등 = '지운 ' + j.applied.salesRemoved + ' / 넣은 ' + j.applied.sales;
+    else if (j && !row.오류) row.지문 = await digest(j);
     return row;
   };
   const out = [];
@@ -58,8 +67,12 @@
   }
   console.table(out);
   const avg = {};
-  out.forEach(x => { const a = avg[x.액션] || (avg[x.액션] = { 액션: x.액션, n: 0, 왕복: 0, 서버: 0, 캐시히트: 0 }); a.n++; a.왕복 += x.왕복ms; a.서버 += x.서버ms || 0; if (x.캐시) a.캐시히트++; });
-  const summary = Object.values(avg).map(a => ({ 액션: a.액션, '왕복 평균ms': Math.round(a.왕복 / a.n), '서버 평균ms': Math.round(a.서버 / a.n), 캐시히트: a.캐시히트 + '/' + a.n }));
+  out.forEach(x => {
+    const a = avg[x.액션] || (avg[x.액션] = { 액션: x.액션, n: 0, 왕복: 0, 서버: 0, 캐시히트: 0, 지문: [] });
+    a.n++; a.왕복 += x.왕복ms; a.서버 += x.서버ms || 0; if (x.캐시) a.캐시히트++;
+    if (x.지문 && a.지문.indexOf(x.지문) < 0) a.지문.push(x.지문);
+  });
+  const summary = Object.values(avg).map(a => ({ 액션: a.액션, '왕복 평균ms': Math.round(a.왕복 / a.n), '서버 평균ms': Math.round(a.서버 / a.n), 캐시히트: a.캐시히트 + '/' + a.n, 지문: a.지문.join(' · ') }));
   console.table(summary);
   console.log('[측정] 서버 버전 ' + out[0].버전 + ' · 멱등 ' + out.filter(x => x.멱등).map(x => x.멱등).join(' · '));
   window.__latency = { file: file.name, range, version: out[0].버전, rows: out, summary };
