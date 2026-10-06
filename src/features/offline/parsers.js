@@ -165,15 +165,32 @@
     if (t.needDateCols && !(row || []).some(h => monthDayHeader(h))) return false;
     return true;
   }
-  // 상위 15행에서 시그니처가 맞는 첫 행 → { type, headerIndex(0-based) } | null. type을 주면 그 유형만 찾는다.
+  const isBlankCell = v => v === '' || v == null || (typeof v === 'string' && !v.trim());
+  /* 2줄 헤더(병합 셀) — 열마다 아래 행 값, 비어 있으면 윗행 값. ERP 매출이익리스트(2026-10)는 L1:L2·AP1:AP2(수불구분)·AQ1:AQ2(수량)처럼
+     세로로 병합된 열 이름이 1행에만 있고 2행은 비어 있다(병합 셀 값은 좌상단 칸에만 있다) */
+  function mergedHeader(upper, lower) {
+    const n = Math.max((upper || []).length, (lower || []).length), out = [];
+    for (let i = 0; i < n; i++) out.push(isBlankCell((lower || [])[i]) ? ((upper || [])[i] == null ? '' : upper[i]) : lower[i]);
+    return out;
+  }
+  /* 상위 15행에서 시그니처가 맞는 첫 헤더 → { type, headerIndex(0-based, 헤더의 마지막 행), header(열 이름 배열) } | null.
+     행마다 그 행 하나로 먼저 맞춰 보고, 안 맞으면 바로 윗행과 합친 2줄 헤더로 맞춰 본다. type을 주면 그 유형만.
+     파싱·개인정보 열 차단도 이 header를 그대로 쓴다(판별과 파싱이 같은 헤더) */
   function detect(rows, onlyType) {
     const n = Math.min(HEADER_SCAN_ROWS, (rows || []).length);
+    const types = onlyType ? (TYPES[onlyType] ? [onlyType] : []) : TYPE_ORDER;
     for (let r = 0; r < n; r++) {
-      for (const type of (onlyType ? (TYPES[onlyType] ? [onlyType] : []) : TYPE_ORDER)) {
-        if (rowMatches(type, rows[r])) return { type, headerIndex: r };
-      }
+      for (const type of types) if (rowMatches(type, rows[r])) return { type, headerIndex: r, header: (rows[r] || []).slice(), twoLine: false };
+      if (!r) continue;
+      const merged = mergedHeader(rows[r - 1], rows[r]);
+      for (const type of types) if (rowMatches(type, merged)) return { type, headerIndex: r, header: merged, twoLine: true };
     }
     return null;
+  }
+  // 행 길이 맞추기 — 모든 행을 가장 긴 행 길이로('' 채움). 끝 빈칸을 잘라 주는 읽기(구글 Sheets API 등)와 SheetJS(defval '')가 같은 모양이 되게
+  function padRows(rows) {
+    const w = (rows || []).reduce((m, r) => Math.max(m, (r || []).length), 0);
+    return (rows || []).map(r => { const o = (r || []).slice(); while (o.length < w) o.push(''); return o; });
   }
 
   const isBlankRow = r => !r || r.every(v => v === '' || v == null);
@@ -190,12 +207,13 @@
        오프셋을 적용하지 않는다. stockOffsets를 주지 않으면(채널마스터를 아직 못 받음) stockOffset = null, 기준일 = 파일명 날짜 */
   function parseRows(rows, opts) {
     opts = opts || {};
+    rows = padRows(rows);
     const found = detect(rows, opts.type || null);
     if (!found) {
       return { ok: false, error: opts.type ? (TYPES[opts.type] ? TYPES[opts.type].label : opts.type) + ' 헤더를 상위 ' + HEADER_SCAN_ROWS + '행에서 찾지 못했습니다.' : '알 수 없는 파일 형식입니다 — 상위 ' + HEADER_SCAN_ROWS + '행에서 아는 헤더 조합을 찾지 못했습니다.' };
     }
     const t = TYPES[found.type];
-    const hdr = rows[found.headerIndex];
+    const hdr = found.header;
     const idx = headerIndex(hdr);
     const col = {};
     const missing = [];
@@ -355,13 +373,15 @@
     const agg = {}, order = [], custs = {}, custOrder = [], brands = {}, brandOrder = [], gubun = {};
     const ex = { rows: 0, qty: 0 };
     const txt = (r, k) => String(cell(r, k) == null ? '' : cell(r, k)).trim();
-    let min = '', max = '', fileAmount = 0;
+    let min = '', max = '', fileAmount = 0, totals = 0;
     res.summary.products = {};
     data.forEach(r => {
       const date = toDate(cell(r, 'date')), code = toCode(cell(r, 'code')), cust = toCode(cell(r, 'cust'));
+      // 합계·소계 행 — 날짜가 비었거나 날짜가 아닌 행(2026-10 파일 끝 합계 행: A:AP 병합, 수량·금액 숫자만)은 판매가 아니다
+      if (!date) { totals++; return; }
       const g = txt(r, 'gubun') || '(빈칸)';
       gubun[g] = (gubun[g] || 0) + 1;
-      if (!date || !code || !cust) { bad.skipped++; return; }
+      if (!code || !cust) { bad.skipped++; return; }
       const qty = num(cell(r, 'qty')), amt = num(cell(r, 'amt')), fee = num(cell(r, 'fee'));
       const cat = txt(r, 'cat'), brand = txt(r, 'brand');
       fileAmount += amt;
@@ -392,6 +412,11 @@
     res.periodFrom = fp ? 'file' : 'data';
     Object.assign(res.summary, { gubun, excluded: ex, fileAmount, dataPeriod: min ? { start: min, end: max } : null,
       byCust: custOrder.map(k => custs[k]), brands: brandOrder.map(k => brands[k]) });
+    if (totals) {
+      res.summary.totalRows = totals;
+      res.rawRowCount -= totals; // 원본 행 = 데이터 행만
+      res.warnings.push('합계·소계 행 제외 ' + totals + '행 — 날짜가 없는 행(파일 끝 합계 등)은 판매로 집계하지 않습니다.');
+    }
     if (fp && min && (min < fp.start || max > fp.end)) res.warnings.push('파일 안 날짜(' + min + '~' + max + ')가 파일명의 기간(' + fp.start + '~' + fp.end + ')을 벗어납니다 — 교체 기간 밖의 행은 반영되지 않습니다.');
   }
 
@@ -475,6 +500,8 @@
     }
     // ERP 매출이익리스트 — 미리보기에서 채널을 고른 새 거래처({code, name, channelId}) → GAS가 거래처매핑에 저장하고 그 채널로 반영
     if (res.split === 'customer') meta.customers = edits.customers || [];
+    // 합계·소계 행을 뺐다는 사실 — 서버가 업로드로그 경고에 남긴다
+    if (res.summary && res.summary.totalRows) meta.totalRowsExcluded = res.summary.totalRows;
     const r = res.records;
     return {
       meta,
@@ -489,9 +516,9 @@
      새 2차원 배열 [헤더, ...데이터 행]을 돌려준다(헤더 위 그룹명 행도 버린다). 파일을 읽자마자 부르면 원본 행은 남지 않고
      판별·파싱·미리보기·전송은 이 배열만 본다. 판별되지 않거나 다른 유형이면 rows 그대로 */
   function dropUnusedColumns(rows) {
-    const found = detect(rows);
+    const found = detect(padRows(rows));
     if (!found || !TYPES[found.type].onlyUsedCols) return rows;
-    const t = TYPES[found.type], idx = headerIndex(rows[found.headerIndex]);
+    const t = TYPES[found.type], idx = headerIndex(found.header); // 2줄 헤더면 합친 헤더(판별과 같은 것)
     const keep = Object.keys(t.cols).map(k => t.cols[k]).filter(h => h in idx), at = keep.map(h => idx[h]);
     return [keep].concat(rows.slice(found.headerIndex + 1).map(r => at.map(c => (r && r[c] !== undefined ? r[c] : ''))));
   }

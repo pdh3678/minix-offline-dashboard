@@ -228,7 +228,8 @@ function _offInboxRun(by) {
       var settings = _offInboxSettings();
       var doneId = _offInboxSubfolder(folder, OFF_INBOX_DONE), errId = _offInboxSubfolder(folder, OFF_INBOX_ERROR);
       var all = _offDriveList(folder, "mimeType != '" + OFF_FOLDER_MIME + "'");
-      var files = _offInboxOrder(all.filter(function (f) { return /\.(xlsx|xls)$/i.test(f.name || ''); }));
+      // 엑셀만 — '~$'로 시작하는 파일은 엑셀이 열어 둔 파일의 잠금 파일(드라이브 데스크톱 동기화로 올라올 수 있다)이라 손대지 않는다
+      var files = _offInboxOrder(all.filter(function (f) { var nm = String(f.name || ''); return /\.(xlsx|xls)$/i.test(nm) && nm.indexOf('~$') !== 0; }));
       status.ignored = all.length - files.length;
       if (files.length) {
         try { _offXlsx(); } catch (e) { // 라이브러리를 못 받으면 파일은 그대로 두고 다음 실행으로

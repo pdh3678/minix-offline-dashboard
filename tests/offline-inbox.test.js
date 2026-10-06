@@ -55,9 +55,10 @@ const ERP_HEAD = ['날짜', '주문일', '매장', '매출구분', '주문번호
 const ERP_GROUP = ERP_HEAD.map((h, i) => ({ 0: '주문정보', 6: '거래처정보', 11: '주문자명', 12: '주문자정보', 15: '수령자정보', 20: '상품정보', 39: '배송정보', 41: '수불구분', 42: '수량', 43: '총액' })[i] || '');
 const PII = { '주문자명': '홍길동가짜', '주문자ID': 'fakeuser01', '주문자 전화번호': '02-333-4444', '주문자 휴대폰': '010-1111-2222', '수취인명': '김수취가짜',
   '수취인 전화번호': '02-555-6666', '수취인 휴대폰': '010-5555-6666', '우편번호': '06236', '주소': '서울 가상구 가상로 1', '송장번호': '555566667777' };
-function erpFile(lines) { // [날짜, 거래처코드, 상품코드, 수량, 금액, 수수료]
+function erpFile(lines) { // [날짜, 거래처코드, 상품코드, 수량, 금액, 수수료] — 파일 끝에 합계 행(날짜 없음, 숫자만 — 2026-10 실파일 배치)
+  const total = ERP_HEAD.map(h => ({ 수량: lines.reduce((s, l) => s + l[3], 0), 금액: lines.reduce((s, l) => s + l[4], 0) })[h] ?? '');
   return [ERP_GROUP, ERP_HEAD].concat(lines.map(l => ERP_HEAD.map(h => (PII[h] || ({ 날짜: l[0], 주문일: l[0], 매출구분: '앳홈', 거래처코드: l[1], 거래처명: '거래처 ' + l[1], 브랜드: '미닉스 더 플렌더',
-    상품코드: l[2], 카테고리: '본품', 창고구분: '토마스', 기본상품명: '미닉스 더 플렌더 MAX (MNFD-200G)', 수불구분: '매출출고', 수량: l[3], 금액: l[4], 수수료: l[5], 매출단가: l[4] / l[3] })[h]) ?? '')));
+    상품코드: l[2], 카테고리: '본품', 창고구분: '토마스', 기본상품명: '미닉스 더 플렌더 MAX (MNFD-200G)', 수불구분: '매출출고', 수량: l[3], 금액: l[4], 수수료: l[5], 매출단가: l[4] / l[3] })[h]) ?? '')), [total]);
 }
 const ERP_NAME = '백화점, 폐쇄몰, 렌탈 매출이익리스트(2026-10-01~2026-10-31).xlsx';
 const FILES = () => [
@@ -134,6 +135,9 @@ function setSetting(g, key, val) { const st = g.tab('설정'), r = st._grid.find
   const same = (r, m) => J(r.slice(3, 12)) === J(m.slice(3, 12)) && m[12] === '수동';
   check('  ↳ 업로드로그도 파일명·유형·채널·기간·행 수·미매칭·경고·상태가 같다(반영방식만 수동/자동)', log.every((r, i) => same(r, mlog[i])), log.map((r, i) => [r.slice(3, 12), mlog[i].slice(3, 12)]));
   check('미매칭 상품코드는 실패가 아니다 — 성공하고 미매칭 목록에 쌓임', autoRes.some(f => /미매칭 \d+개/.test(f.detail)) && dataRows(gm.tab('미매칭코드')).length > 0);
+  const erpLog = log.find(r => r[3] === ERP_NAME), erpManual = mlog.find(r => r[3] === ERP_NAME);
+  check('ERP 파일 끝 합계 행 — 판매로 집계하지 않고 업로드로그 경고에 "합계·소계 행 제외 1행"(자동·수동 같음), 원본 행 = 데이터 2행',
+    /합계·소계 행 제외 1행/.test(erpLog[10]) && erpLog[10] === erpManual[10] && erpLog[7] === 2 && autoTabs['판매원장'].filter(r => r[3] === 'shinsegae' || r[3] === 'theablen').length === 2, [erpLog[7], erpLog[10]]);
 
   console.log('\n[2] 같은 파일 재투입 → 건너뜀 · 실패 파일 → 오류 폴더 · 고쳐서 다시 넣으면 처리');
   {
@@ -178,8 +182,12 @@ function setSetting(g, key, val) { const st = g.tab('설정'), r = st._grid.find
     // 시간 예산: 첫 파일 뒤 예산을 넘기면 남은 파일은 다음 실행
     const g2 = inboxEnv();
     FILES().forEach(([nm, rows]) => g2.put(nm, rows));
-    g2.ctx.OFF_INBOX_TIME_BUDGET_MS = 1;
-    const t = g2.run();
+    // 가상 시계 — 첫 파일을 처리하는 데 6분이 걸린 것처럼(5분 예산을 넘김). 실제 시간에 기대면 준비 과정이 길 때 흔들린다
+    const realNow = Date.now, origFile = g2.ctx._offInboxFile;
+    let shift = 0, t;
+    Date.now = () => realNow() + shift;
+    g2.ctx._offInboxFile = (f, run) => { const r = origFile(f, run); shift += 6 * 60 * 1000; return r; };
+    try { t = g2.run(); } finally { Date.now = realNow; g2.ctx._offInboxFile = origFile; }
     check('5분 예산을 넘기면 첫 파일만 하고 나머지 6개는 다음 실행으로', t.counts.success === 1 && t.counts.deferred === 6 && /실행 시간/.test(t.note), t);
     // 락: 다른 반영이 진행 중
     const g3 = inboxEnv();

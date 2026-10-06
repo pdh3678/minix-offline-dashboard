@@ -904,6 +904,9 @@ function _offUpload(data, auth, opts) {
       channels: null, storeChannel: null,
       strict: !!(opts && opts.strict), auto: (opts && opts.auto) || null
     };
+    // 파서가 뺀 합계·소계 행(ERP 매출이익리스트 파일 끝 합계 — 날짜 없는 행) — 업로드로그 경고에 남긴다
+    var totalRows = Math.floor(Number(meta.totalRowsExcluded) || 0);
+    if (totalRows > 0) ctx.warnings.push('합계·소계 행 제외 ' + totalRows + '행(날짜 없는 행 — 판매로 집계하지 않음)');
     // 이 반영이 읽는 탭을 batchGet 한 번에 — 아래 함수들은 요청 범위에 기억된 사본을 받는다.
     // 미리 읽기일 뿐이라 실패(탭 없음 등)는 넘긴다 — 아래 각 읽기가 원래 자리에서 같은 오류를 낸다(실패 로그도 원래대로)
     var tabs = ['channel', 'store', 'mapping', 'unmatched', 'uploadLog'];

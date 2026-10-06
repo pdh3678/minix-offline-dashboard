@@ -182,7 +182,8 @@ async function main() {
   console.log('\n[3] ERP 매출이익리스트 파서 — 판별·쓰는 열만·무상 동봉 제외·합산·기간');
   {
     const grid = erpGrid();
-    check('2줄 헤더 판별 — 2행이 헤더(ERP_SALES_PROFIT)', J(P.detect(grid)) === J({ type: 'ERP_SALES_PROFIT', headerIndex: 1 }));
+    const dt = P.detect(grid);
+    check('2줄 헤더 판별 — 2행이 헤더(ERP_SALES_PROFIT, 2행 하나로 맞음)', dt.type === 'ERP_SALES_PROFIT' && dt.headerIndex === 1 && dt.twoLine === false && J(dt.header) === J(grid[1]), dt && [dt.type, dt.headerIndex, dt.twoLine]);
     const rows = P.dropUnusedColumns(grid);
     check('쓰는 열 11개만 남긴다(그룹명 행·개인정보 열 버림)', J(rows[0]) === J(['날짜', '거래처코드', '거래처명', '브랜드', '상품코드', '기본상품명', '카테고리', '수불구분', '수량', '금액', '수수료']) &&
       rows.length === ERP_ROWS.length + 1 && rows.every(r => r.length === 11), rows[0]);

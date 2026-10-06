@@ -87,7 +87,8 @@ if (!XLSX_DIR) {
     const x = g.ctx._offXlsx();
     check('실제 SheetJS ' + x.version + ' — 저장소의 SRI 값으로 무결성 확인 통과(= 브라우저가 쓰는 그 파일)', x.version === '0.20.3' && x !== XN);
     const SAMPLES = path.join(PROJ, 'samples');
-    const files = fs.existsSync(SAMPLES) ? fs.readdirSync(SAMPLES).filter(f => /\.(xlsx|xls)$/i.test(f)) : [];
+    // '~$'로 시작하는 파일 = 엑셀이 열어 둔 파일의 잠금 파일(실파일 아님)
+    const files = fs.existsSync(SAMPLES) ? fs.readdirSync(SAMPLES).filter(f => /\.(xlsx|xls)$/i.test(f) && f.indexOf('~$') !== 0) : [];
     if (!files.length) console.log('  SKIP  samples/ 에 파일이 없음');
     const opts = f => ({ fileName: f, today: '2026-10-06', stockOffsets: { etland: -1, emart: -1, traders: -1 } });
     const PII = ['주문자명', '주문자ID', '주문자 전화번호', '주문자 휴대폰', '수취인명', '수취인 전화번호', '수취인 휴대폰', '우편번호', '주소', '송장번호'];

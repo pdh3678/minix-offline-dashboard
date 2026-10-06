@@ -272,6 +272,66 @@ console.log('\n[11] 워크북 읽기(SheetJS) — 범위 보정·HTML raw');
   }
 }
 
+console.log('\n[12] 병합 셀 2줄 헤더(필수 열 이름이 1행에만) + 파일 끝 합계 행 — ERP 매출이익리스트 2026-10 배치 (2026-10-06)');
+{
+  // 실파일 배치 그대로(값은 가짜): 1행 = 그룹명 + 세로 병합 열 이름(L 주문자명·AP 수불구분·AQ 수량·AW 물류비·AZ·BA·BF 스타일코드),
+  // 2행 = 나머지 열 이름(세로 병합 칸은 비어 있음 — 병합 셀 값은 좌상단에만). 마지막 행 = 합계(A:AP 병합, 숫자만)
+  const H = ['날짜', '주문일', '매장', '매출구분', '주문번호', '전표번호', '거래처코드', '거래처명', '담당자', '자체(연계)코드', '회계(연계)코드', '주문자명', '주문자ID', '주문자 전화번호', '주문자 휴대폰',
+    '수취인명', '수취인 전화번호', '수취인 휴대폰', '우편번호', '주소', '브랜드', '브랜드코드', '상품코드', '상품상태', '마켓상품코드', '자체코드', '판매자코드', '카테고리', '로케이션', '창고구분', '창고코드',
+    '기본상품명', '기본상품 규격', '주문상품명', '주문상품 규격', '상품명 별칭', '상품비고', '관리비고', '관리코드', '송장번호', '택배사', '수불구분', '수량', '매출단가', '금액', '수수료', '수수료율', '공급액', '물류비',
+    '인터넷단가', '인터넷총액', '원가', '원가총액', '이익액', '이익율', '이익액', '이익율', '스타일코드'];
+  const VMERGE = [11, 41, 42, 48, 51, 52, 57];
+  const GROUP = { 0: '주문정보', 6: '거래처정보', 12: '주문자정보', 15: '수령자정보', 20: '상품정보', 39: '배송정보', 43: '총액' };
+  const row1 = H.map((h, i) => (VMERGE.indexOf(i) >= 0 ? h : (GROUP[i] || '')));
+  const row2 = H.map((h, i) => (VMERGE.indexOf(i) >= 0 ? '' : h));
+  const PIIV = { 11: '홍길동가짜', 12: 'fakeid01', 13: '02-111-2222', 14: '010-3333-4444', 15: '김수취가짜', 16: '02-555-6666', 17: '010-7777-8888', 18: '06236', 19: '서울 가상로 1', 39: '123412341234' };
+  const line = (d, cust, code, cat, gubun, qty, amt, fee) => H.map((h, i) => (PIIV[i] || ({ 0: d, 6: cust, 7: '(주)가상거래처' + cust, 20: '미닉스 더 플렌더', 22: code, 27: cat, 31: '미닉스 더 플렌더 MAX (MNFD-200G)', 41: gubun, 42: qty, 43: qty ? amt / qty : 0, 44: amt, 45: fee })[i]) ?? '');
+  const data = [line('2026-10-01', '00476', '9812365001397', '본품', '매출출고', 2, 660000, 0), line('2026-10-01', '00476', '9812365001397', '본품', '매출출고', 1, 330000, 0),
+    line('2026-10-02', '00474', '9812365001556', '구성품', '매출출고', 3, 0, 0), line('2026-10-03', '00474', '9812365001397', '본품', '매출반품', -1, -330000, -10000)];
+  const totalQty = data.reduce((s, r) => s + r[42], 0), totalAmt = data.reduce((s, r) => s + r[44], 0);
+  const total = H.map((h, i) => ({ 42: totalQty, 44: totalAmt, 45: -10000, 47: totalAmt })[i] ?? '');
+  const grid = [row1, row2].concat(data, [total]);
+  const FN = '백화점, 폐쇄몰, 렌탈 매출이익리스트(2026-10-01~2026-10-06).xlsx';
+  const sumOf = (rs, k) => rs.reduce((s, r) => s + (Number(r[k]) || 0), 0);
+
+  check('2행 하나로는 시그니처가 안 맞는다(수불구분·수량은 1행에만) — 예전 판별은 실패하던 모양', !['ERP_SALES_PROFIT'].some(t => P.TYPES[t].sig.every(h => row2.map(P.normHeader).indexOf(h) >= 0)));
+  const dt = P.detect(grid);
+  check('판별 — 1행과 2행을 합친 2줄 헤더로 ERP_SALES_PROFIT(헤더 끝 = 2행)', dt && dt.type === 'ERP_SALES_PROFIT' && dt.headerIndex === 1 && dt.twoLine === true &&
+    dt.header[41] === '수불구분' && dt.header[42] === '수량' && dt.header[0] === '날짜', dt && [dt.type, dt.headerIndex, dt.twoLine]);
+  const kept = P.dropUnusedColumns(grid);
+  check('개인정보 열 차단 — 합친 헤더로 쓰는 열 11개만(수불구분·수량 포함, 병합된 주문자명은 버림), 개인정보 값 없음',
+    kept[0].length === 11 && kept[0].indexOf('수불구분') >= 0 && kept[0].indexOf('수량') >= 0 && kept[0].indexOf('주문자명') < 0 && !Object.values(PIIV).some(v => JSON.stringify(kept).indexOf(v) >= 0), kept[0]);
+  const r = P.parseRows(kept, { fileName: FN, today: '2026-10-06' });
+  const ex = r.summary.excluded;
+  check('파싱 — 데이터 4행(합계 행 1개 제외), 경고 "합계·소계 행 제외 1행"', r.ok && r.rawRowCount === 4 && r.summary.totalRows === 1 && r.warnings.some(w => /^합계·소계 행 제외 1행/.test(w)), [r.rawRowCount, r.summary.totalRows, r.warnings]);
+  check('  ↳ 합계 행은 수불구분 집계에도 안 들어간다((빈칸) 없음)', JSON.stringify(r.summary.gubun) === JSON.stringify({ 매출출고: 3, 매출반품: 1 }), r.summary.gubun);
+  check('반영 대상 수량·금액 = 합계 행 값(수량 ' + totalQty + ' · 금액 ' + totalAmt + ') − 무상 동봉 제외분(수량 ' + ex.qty + ')',
+    sumOf(r.records.sales, 'qty') === totalQty - ex.qty && sumOf(r.records.sales, 'amt') === totalAmt && ex.rows === 1, [sumOf(r.records.sales, 'qty'), sumOf(r.records.sales, 'amt'), ex]);
+  const pl = P.toUploadPayload(r, { fileName: FN });
+  check('업로드 페이로드에 합계 행 제외 수(서버가 업로드로그 경고에 남김)', pl.meta.totalRowsExcluded === 1);
+  // 끝 빈칸이 잘린 행(구글 Sheets API 값 모양 — 병합 셀 값은 좌상단에만, 행마다 길이가 다름)
+  const ragged = grid.map(row => { const o = row.slice(); while (o.length && o[o.length - 1] === '') o.pop(); return o; });
+  check('(잘린 행 픽스처 — 행 길이가 제각각임을 확인)', new Set(ragged.map(x => x.length)).size > 1);
+  const r2 = P.parseRows(P.dropUnusedColumns(ragged), { fileName: FN, today: '2026-10-06' });
+  check('끝 빈칸이 잘린 행(Sheets API 모양)도 판별·파싱 결과가 완전히 같다', JSON.stringify(r2) === JSON.stringify(r));
+  // 실제 병합 셀이 든 xlsx를 SheetJS로 만들어 읽기(SheetJS가 있을 때)
+  let XLSX = null;
+  try { XLSX = require(process.env.XLSX_PATH || 'xlsx'); } catch (e) { XLSX = null; }
+  if (!XLSX) console.log('  SKIP  SheetJS가 없어 실제 병합 셀 xlsx 읽기는 건너뜀');
+  else {
+    const ws = XLSX.utils.aoa_to_sheet(grid);
+    ws['!merges'] = VMERGE.map(c => ({ s: { r: 0, c }, e: { r: 1, c } })).concat([{ s: { r: 0, c: 12 }, e: { r: 0, c: 14 } }, { s: { r: grid.length - 1, c: 0 }, e: { r: grid.length - 1, c: 41 } }]);
+    const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, 'Sheet');
+    const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+    const rows = P.readWorkbookRows(XLSX, new Uint8Array(buf)).rows;
+    const r3 = P.parseRows(P.dropUnusedColumns(rows), { fileName: FN, today: '2026-10-06' });
+    check('실제 병합 셀 xlsx(SheetJS로 쓰고 읽음) — 같은 판별·파싱 결과', JSON.stringify(r3) === JSON.stringify(r), r3.ok ? '' : r3.error);
+  }
+  // 다른 양식의 판별은 그대로(2줄 헤더 규칙이 앞서 끼어들지 않음)
+  check('다른 양식 판별 그대로 — 이마트 재고(5행)·전자랜드(2행)·이마트 일별(1행)', P.detect(EMART_STOCK).headerIndex === 4 && P.detect(EMART_STOCK).twoLine === false &&
+    P.detect(ETLAND_SALES).headerIndex === 1 && P.detect(ETLAND_SALES).twoLine === false && P.detect(EMART_DAILY).type === 'EMART_DAILY_SALES' && P.detect(EMART_DAILY).headerIndex === 0);
+}
+
 console.log('\n' + '─'.repeat(50));
 console.log('통과 ' + pass + ' / 실패 ' + fail);
 process.exit(fail ? 1 : 0);

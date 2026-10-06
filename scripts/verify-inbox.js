@@ -15,7 +15,8 @@ try { XLSX_DIR = path.dirname(require.resolve(path.join(process.env.XLSX_PATH ||
 const XN = require(XLSX_DIR);
 const SAMPLES = process.argv[2] || path.join(PROJ, 'samples');
 const TODAY = '2026-10-06', J = JSON.stringify, ok = b => (b ? 'OK' : '불일치');
-const files = fs.readdirSync(SAMPLES).filter(f => /\.(xlsx|xls)$/i.test(f)).map(f => ({ name: f, bytes: fs.readFileSync(path.join(SAMPLES, f)) }));
+// '~$'로 시작하는 파일 = 엑셀이 열어 둔 파일의 잠금 파일 — 수신함도 손대지 않는다(실파일로만 대조)
+const files = fs.readdirSync(SAMPLES).filter(f => /\.(xlsx|xls)$/i.test(f) && f.indexOf('~$') !== 0).map(f => ({ name: f, bytes: fs.readFileSync(path.join(SAMPLES, f)) }));
 const libSrc = fs.readFileSync(path.join(XLSX_DIR, 'dist', 'xlsx.full.min.js'), 'utf8');
 
 // 개인정보 값 모음 — ERP 실파일의 개인정보 열(브라우저처럼 읽되 열을 버리기 전)
