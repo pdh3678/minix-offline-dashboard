@@ -630,9 +630,13 @@ function _offWithIo(fn) {
   try { return fn(); } finally { _offIo = null; }
 }
 function _offApiReady() { return !(_offIo && _offIo.apiDown) && typeof Sheets !== 'undefined' && !!Sheets && !!Sheets.Spreadsheets; }
+// 이 실행이 부른 Sheets API 호출 시각·실패(대체) 횟수 — 수신함 자동 반영이 분당 호출을 조절하고 상태 패널에 보여 준다
+var _offApiTimes = [], _offApiFallbacks = 0;
+function _offApiCall() { _offApiTimes.push(Date.now()); }
 // API 호출 실패(한도 초과 등) — 기록하고, 요청 범위 안이면 나머지는 SpreadsheetApp으로(같은 요청에서 실패할 호출을 되풀이하지 않게)
 function _offApiFailed(what, e) {
   Logger.log('[Sheets API] ' + what + ' 실패 → SpreadsheetApp으로 처리합니다: ' + e);
+  _offApiFallbacks++;
   if (_offIo) _offIo.apiDown = true;
 }
 function _offA1(def) { return "'" + def.name.replace(/'/g, "''") + "'!A2:" + _colLetter(def.headers.length - 1); }
@@ -663,6 +667,7 @@ function _offRead(key) { return _offReadTabs([key])[key]; }
 function _offBatchGet(keys) {
   var res;
   try {
+    _offApiCall();
     res = Sheets.Spreadsheets.Values.batchGet(_offSheetId(), { ranges: keys.map(function (k) { return _offA1(OFF_TABS[k]); }),
       valueRenderOption: 'UNFORMATTED_VALUE', dateTimeRenderOption: 'SERIAL_NUMBER' });
   } catch (e) {
@@ -703,6 +708,7 @@ function _offTabMeta(key) {
   var meta = _offIo && _offIo.meta;
   if (!meta) {
     meta = {};
+    _offApiCall();
     (Sheets.Spreadsheets.get(_offSheetId(), { fields: 'sheets.properties' }).sheets || []).forEach(function (s) {
       var p = s.properties || {};
       meta[p.title] = { sheetId: p.sheetId || 0, rows: (p.gridProperties || {}).rowCount || 0 }; // 첫 탭의 sheetId는 0
@@ -761,6 +767,7 @@ function _offWriteRowsApi(key, startRow, rows, clear) {
     var req = i === 0 ? reqs : [];
     req.push({ updateCells: { range: { sheetId: m.sheetId, startRowIndex: r0 + i, endRowIndex: r0 + i + part.length + (end ? clear : 0), startColumnIndex: 0, endColumnIndex: W },
       rows: part.map(cells), fields: 'userEnteredValue' } });
+    _offApiCall();
     Sheets.Spreadsheets.batchUpdate({ requests: req }, _offSheetId());
     if (i === 0 && need > m.rows) m.rows = need;
     i += step;
@@ -923,7 +930,7 @@ function _offUpload(data, auth, opts) {
         channels: ctx.channels || [meta.channelId] };
     } catch (e) {
       // 실패도 로그에 남긴다(다음 업로드가 같은 범위를 교체하므로 재시도하면 복구된다)
-      try { _offAppendLog(ctx, meta, auth, '실패: ' + String((e && e.message) || e).slice(0, 300), 0); if (e && typeof e === 'object') e.offLogged = true; } catch (e2) {}
+      try { _offAppendLog(ctx, meta, auth, '실패: ' + String((e && e.message) || e).slice(0, 300), 0); if (e && typeof e === 'object') { e.offLogged = true; e.offUploadId = ctx.uploadId; } } catch (e2) {}
       throw e;
     }
   }); });

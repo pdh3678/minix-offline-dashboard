@@ -175,6 +175,82 @@ function installSheetsApi(off, id, failEvery) {
     failNext: (op, n, skip) => { fails[op === 'batchGet' ? 'values.batchGet' : op] = { n: n || 1, skip: skip || 0 }; } };
 }
 
+/* Drive v3 고급 서비스 + DriveApp 목 — 회사 공유 드라이브 하나(driveId) 안의 폴더·파일. 실제 API와 맞추는 것:
+   · 공유 드라이브 파일은 supportsAllDrives 없이 get·create·update하면 실패, list는 includeItemsFromAllDrives·corpora 'drive'·driveId가 있어야 한다
+   · list q — "'폴더' in parents and trashed = false" + mimeType =/!= · name = 만 흉내 낸다. pageSize보다 많으면 nextPageToken
+   · update — addParents/removeParents(이동), trashed, appProperties. deny.move·deny.trash = 콘텐츠 관리자 권한이 없는 계정(이동·휴지통 거절)
+   · DriveApp.getFileById(id).getBlob().getBytes() = 부호 있는 바이트(-128~127)
+   files[id].bytes = 내용(Buffer). calls = 호출 기록 */
+function installDrive() {
+  const files = {}, calls = [], deny = { move: false, trash: false };
+  const DRIVE_ID = 'SHARED-DRIVE-1', FOLDER = 'application/vnd.google-apps.folder';
+  let seq = 0;
+  const view = f => { const o = Object.assign({}, f); delete o.bytes; delete o.trashed; delete o.parents; return JSON.parse(JSON.stringify(o)); };
+  const need = (opt, what) => { if (!opt || opt.supportsAllDrives !== true) throw new Error('File not found (공유 드라이브 파일 — ' + what + '에 supportsAllDrives가 없음)'); };
+  const add = meta => {
+    const id = meta.id || 'F' + String(++seq).padStart(3, '0');
+    files[id] = Object.assign({ trashed: false, parents: [], driveId: DRIVE_ID, modifiedTime: '2026-10-06T00:00:00.000Z' }, meta, { id });
+    return files[id];
+  };
+  global.Drive = { Files: {
+    get(id, opt) {
+      calls.push({ op: 'get', id, opt }); need(opt, 'get');
+      const f = files[id];
+      if (!f || f.trashed) throw new Error('File not found: ' + id);
+      return view(f);
+    },
+    list(opt) {
+      calls.push({ op: 'list', opt });
+      if (!opt.supportsAllDrives || !opt.includeItemsFromAllDrives || opt.corpora !== 'drive' || opt.driveId !== DRIVE_ID) throw new Error('공유 드라이브 목록은 supportsAllDrives·includeItemsFromAllDrives·corpora drive·driveId가 필요: ' + JSON.stringify(opt));
+      const q = opt.q, parent = (/'([^']+)' in parents/.exec(q) || [])[1];
+      const mimeEq = (/mimeType = '([^']+)'/.exec(q) || [])[1], mimeNe = (/mimeType != '([^']+)'/.exec(q) || [])[1], name = (/name = '([^']+)'/.exec(q) || [])[1];
+      const hit = Object.values(files).filter(f => !f.trashed && f.parents.indexOf(parent) >= 0 && (!mimeEq || f.mimeType === mimeEq) && (!mimeNe || f.mimeType !== mimeNe) && (!name || f.name === name));
+      const start = Number(opt.pageToken || 0), size = opt.pageSize || 100, page = hit.slice(start, start + size);
+      return Object.assign({ files: page.map(view) }, start + size < hit.length ? { nextPageToken: String(start + size) } : {});
+    },
+    create(res, media, opt) {
+      calls.push({ op: 'create', res, opt }); need(opt, 'create');
+      return view(add({ name: res.name, mimeType: res.mimeType, parents: (res.parents || []).slice() }));
+    },
+    update(res, id, media, opt) {
+      calls.push({ op: 'update', id, res, opt }); need(opt, 'update');
+      const f = files[id];
+      if (!f || f.trashed) throw new Error('File not found: ' + id);
+      if (res.trashed) { if (deny.trash) throw new Error('The user does not have sufficient permissions for this file.'); f.trashed = true; }
+      if (opt.addParents || opt.removeParents) {
+        if (deny.move) throw new Error('The user does not have sufficient permissions for this file.');
+        f.parents = f.parents.filter(p => p !== opt.removeParents).concat(opt.addParents ? [opt.addParents] : []);
+      }
+      if (res.appProperties) f.appProperties = Object.assign({}, f.appProperties || {}, res.appProperties);
+      return view(f);
+    }
+  } };
+  global.DriveApp = { getFileById(id) {
+    const f = files[id];
+    if (!f || f.trashed) throw new Error('파일 없음: ' + id);
+    calls.push({ op: 'download', id });
+    return { getBlob: () => ({ getBytes: () => Array.from(f.bytes, b => (b > 127 ? b - 256 : b)) }) };
+  } };
+  return { files, calls, deny, add, DRIVE_ID, FOLDER, in: parent => Object.values(files).filter(f => !f.trashed && f.parents.indexOf(parent) >= 0) };
+}
+
+/* ScriptApp 트리거 목 — newTrigger(handler).timeBased().everyHours(n).create(), getProjectTriggers(), deleteTrigger(t) */
+function installScriptApp() {
+  const triggers = [];
+  let seq = 0;
+  global.ScriptApp = {
+    getService: () => ({ getUrl: () => 'mock' }),
+    getProjectTriggers: () => triggers.slice(),
+    deleteTrigger: t => { const i = triggers.indexOf(t); if (i >= 0) triggers.splice(i, 1); },
+    newTrigger: handler => {
+      const t = { id: 'T' + (++seq), handler, hours: null, getHandlerFunction: () => handler, getUniqueId() { return this.id; } };
+      const b = { timeBased: () => b, everyHours: n => { t.hours = n; return b; }, create: () => { triggers.push(t); return t; } };
+      return b;
+    }
+  };
+  return triggers;
+}
+
 /* opts.today   — _offToday() 고정값('YYYY-MM-DD')
    opts.legacy  — 기존 스프레드시트 탭 목({탭: {grid, merges}}) — 주면 LEGACY_PROGRESS_SHEET_ID로 연결
    opts.noSheetId — OFFLINE_SHEET_ID를 비운 상태
@@ -230,4 +306,4 @@ function dataRows(sheet) {
   return sheet._grid.slice(1, last).map(r => r.slice());
 }
 
-module.exports = { loadOfflineGas, dataRows, OFFLINE_ID, PROJ, STATS, resetStats };
+module.exports = { loadOfflineGas, dataRows, OFFLINE_ID, PROJ, STATS, resetStats, installDrive, installScriptApp };

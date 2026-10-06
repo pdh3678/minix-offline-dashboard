@@ -48,6 +48,7 @@ const SUITES = [
   ['offline-channel-category.test.js', '채널 대분류 — 채널 현황 묶음·묶음 합계·매트릭스 소계, 채널 대분류 필터(KPI·재고·기준일·경보), 채널 상세 탭 묶음·이동, 재고 현황 머리 묶음, 목표 관리 월별·연간 소계·필터·변경 보호, 업로드 현황·로그·코드 매핑 표시, 파트 홈 펼침 표'],
   ['offline-sheets-api.test.js', 'Sheets API 입출력 — API 경로 = SpreadsheetApp 경로(시트·서식·응답), 조회 batchGet 1번·반영 탭마다 batchUpdate 1번, 끝부분만 쓰기·남는 행 비우기, 날짜 셀·없는 탭 대체, 요청 범위 기억, appsscript.json'],
   ['offline-inbox-parsers.test.js', '수신함 파서 공유 — GAS가 브라우저 파서 파일 그대로, SheetJS 같은 주소·SRI·캐시·변조 거부, samples 브라우저 경로 = GAS 경로(XLSX_PATH 있을 때)'],
+  ['offline-inbox.test.js', '수신함 자동 반영 — 수동 업로드와 같은 결과·순서, 처리완료·오류 폴더, 재투입 건너뜀, 회당 최대·시간 예산·락 이월, ERP 개인정보·임시 파일 없음, 공유 드라이브 인자, 권한 부족, 보관일수, Sheets API 분당 상한'],
   ['review-html-embed.test.js', '회고 HTML 임베드 — review_* 세션·첨부 폴더 제한·5MB/20MB, sandbox allow-scripts만·blob 없음, 높이 메시지 출처 검증, 원문 캐시']
 ];
 
