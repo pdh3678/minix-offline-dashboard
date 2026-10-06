@@ -206,14 +206,17 @@ function textColsFromFormats(sheet) {
     const { ctx, off, tab } = loadOfflineGas({ setup: true });
     const st = tab('설정');
     const rows = () => dataRows(st).map(r => r[0] + '=' + r[1]).join();
-    check('기본값 4행', rows() === '재고일수_판매기준일수=28,재고경보_과다일수=90,재고경보_결품위험일수=14,데이터지연_경고일수=3', rows());
+    check('기본값 9행(재고 지표 4 + 자동 반영 5 — 2026-10-06)', rows() === '재고일수_판매기준일수=28,재고경보_과다일수=90,재고경보_결품위험일수=14,데이터지연_경고일수=3,자동반영_사용=Y,자동반영_시작시각=7,자동반영_종료시각=22,처리완료_보관일수=30,자동반영_회당최대파일수=10', rows());
     check('설명 열 채움', dataRows(st).every(r => r[2]));
     st._grid[2][1] = 120;                // 사람이 과다일수를 120으로
     st._grid.splice(3, 1);               // 결품위험일수 행을 지움
     const rep = ctx.offline_setupSheets();
     check('재실행 — 빠진 키만 보고', JSON.stringify(rep.settingsAdded) === '["재고경보_결품위험일수"]', rep.settingsAdded);
-    check('  ↳ 고친 값은 그대로, 지운 키는 기본값으로 다시', rows() === '재고일수_판매기준일수=28,재고경보_과다일수=120,데이터지연_경고일수=3,재고경보_결품위험일수=14', rows());
-    check('다시 실행하면 추가 없음', ctx.offline_setupSheets().settingsAdded.length === 0 && dataRows(st).length === 4);
+    check('  ↳ 고친 값은 그대로, 지운 키는 기본값으로 다시', rows() === '재고일수_판매기준일수=28,재고경보_과다일수=120,데이터지연_경고일수=3,자동반영_사용=Y,자동반영_시작시각=7,자동반영_종료시각=22,처리완료_보관일수=30,자동반영_회당최대파일수=10,재고경보_결품위험일수=14', rows());
+    check('다시 실행하면 추가 없음', ctx.offline_setupSheets().settingsAdded.length === 0 && dataRows(st).length === 9);
+    const vals = rows => JSON.stringify(rows.slice(2, 4).map(r => r[1]));
+    check('값 열은 그대로 읽는 열 — 숫자는 숫자, Y/N은 글자(숫자 열로 읽으면 0이 된다) · SpreadsheetApp = Sheets API', vals(ctx._offReadRows(st, ctx.OFF_TABS.settings)) === JSON.stringify([3, 'Y']) &&
+      vals(ctx._offRead('settings')) === JSON.stringify([3, 'Y']), [vals(ctx._offReadRows(st, ctx.OFF_TABS.settings)), vals(ctx._offRead('settings'))]);
     const s = ctx._offReadSettings(off);
     check('읽기 — 탭 값 우선', s['재고경보_과다일수'] === 120 && s['재고일수_판매기준일수'] === 28, s);
     st._grid[1][1] = ''; st._grid[3][1] = -5;

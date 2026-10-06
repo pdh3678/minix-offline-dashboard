@@ -67,15 +67,19 @@ var OFF_TABS = {
   stockDaily: { name: '재고_채널일별', headers: ['기준일', 'channel_id', '원본코드', '재고수량', '이동중수량', '예약수량', 'upload_id'], text: [0, 1, 2, 6] },
   stockStore: { name: '재고_점포최신', headers: ['기준일', 'channel_id', '점포코드', '원본코드', '재고수량', '이동중수량', '예약수량', '당월입고', '당월판매', 'upload_id'], text: [0, 1, 2, 3, 9] },
   himartSnap: { name: '하이마트_누적스냅샷', headers: ['기준일', '점포코드', '원본코드', '당월실판매', '당월판매', '금주판매', '당일판매', '잔여재고', 'upload_id'], text: [0, 1, 2, 8] },
-  uploadLog:  { name: '업로드로그', headers: ['upload_id', '업로드시각', '업로더', '파일명', '파일유형', 'channel_id', '기준일/기간', '원본행수', '반영행수', '미매칭코드수', '경고', '상태'], text: [0, 1, 2, 3, 4, 5, 6, 10, 11] },
+  // 반영방식~수신함처리(12~16)는 드라이브 수신함 자동 반영(2026-10-06)에서 덧붙인 열 — 반영방식 = '자동 반영' | '수동'(빈칸도 수동),
+  // 원본파일ID·원본수정시각·원본MD5 = 자동 반영한 드라이브 파일(같은 파일을 다시 반영하지 않으려고), 수신함처리 = 파일 이동·휴지통 실패 사유
+  uploadLog:  { name: '업로드로그', headers: ['upload_id', '업로드시각', '업로더', '파일명', '파일유형', 'channel_id', '기준일/기간', '원본행수', '반영행수', '미매칭코드수', '경고', '상태',
+    '반영방식', '원본파일ID', '원본수정시각', '원본MD5', '수신함처리'], text: [0, 1, 2, 3, 4, 5, 6, 10, 11, 12, 13, 14, 15, 16] },
   unmatched:  { name: '미매칭코드', headers: ['channel_id', '원본코드', '원본상품명', '최초발견일', '최근발견일', '발견횟수'], text: [0, 1, 2, 3, 4] },
   // 2-A단계(2026-09-27) — 목표·Sell-in 입력, 단가, 과거 실적 이관 (로직은 apps-script-offline-targets.js)
   // 대분류(11)는 뒤에 덧붙인 열 — 모델 단위 행은 대분류·품목군·모델 모두, 대분류 단위 행(이관 전용)은 대분류만 채운다
   targets:    { name: '목표실적_월', headers: ['연월', 'channel_id', '품목군', '모델', '구분', '목표수량', '실적수량', '출처', '수정일', '수정자', '비고', '대분류'], text: [0, 1, 2, 3, 4, 7, 8, 9, 10, 11] },
   prices:     { name: '단가마스터', headers: ['channel_id', '품목군', '모델', '공급가', '적용시작일', '비고', '수정일', '수정자'], text: [0, 1, 2, 4, 5, 6, 7] },
   migrationLog: { name: '이관로그', headers: ['실행시각', '실행자', '대상', '월 범위', '반영 행수', '미매핑 항목', '상태'], text: [0, 1, 2, 3, 5, 6] },
-  // 2-B단계(2026-09-27) — 재고일수·경보 기준값(키-값). 값은 숫자 열
-  settings:   { name: '설정', headers: ['키', '값', '설명'], text: [0, 2] },
+  // 2-B단계(2026-09-27) — 재고일수·경보 기준값(키-값). raw = 읽은 값을 그대로 두는 열(숫자는 숫자, 글자는 글자) — 값 열에 숫자 설정과
+  // 자동반영_사용(Y/N)이 같이 있다(2026-10-06). 숫자 열로 읽으면 'Y'가 0이 되고, 재고 설정 저장이 탭을 다시 쓸 때 0으로 덮인다
+  settings:   { name: '설정', headers: ['키', '값', '설명'], text: [0, 2], raw: [1] },
   // 파트 홈(2026-09-29) — 공동구매 월 목표. 키 (연월, 벤더, 품목군, 모델). 로직은 apps-script-home.js
   gonguTargets: { name: '공구목표_월', headers: ['연월', '벤더', '대분류', '품목군', '모델', '목표수량', '목표금액', '출처', '수정일', '수정자'], text: [0, 1, 2, 3, 4, 7, 8, 9] },
   // ERP 매출이익리스트(2026-09-30) — ERP 거래처 → 채널. 거래처가 곧 그 채널의 점포(점포코드 = 거래처코드)
@@ -91,6 +95,14 @@ var OFF_SETTINGS_DEFAULT = [
   ['재고경보_과다일수', 90, '재고일수가 이 값보다 크면 과다 경보'],
   ['재고경보_결품위험일수', 14, '재고일수가 이 값보다 작으면 결품 위험 경보'],
   ['데이터지연_경고일수', 3, '채널의 판매·재고 최신 기준일이 오늘보다 이 일수보다 더 오래되면 경고 배지']
+];
+/* 드라이브 수신함 자동 반영(2026-10-06, apps-script-offline-inbox.js) — setup이 없는 키만 덧붙인다. 읽기는 _offInboxSettings(잘못된 값은 기본값) */
+var OFF_INBOX_SETTINGS_DEFAULT = [
+  ['자동반영_사용', 'Y', '드라이브 수신함 자동 반영 — Y = 1시간마다 확인, N = 끔(데이터 업로드 화면의 [지금 확인]은 그대로 된다)'],
+  ['자동반영_시작시각', 7, '자동 반영을 확인하는 시각 범위의 시작(0~23시, 한국 시각) — 이 시각부터'],
+  ['자동반영_종료시각', 22, '자동 반영을 확인하는 시각 범위의 끝(1~24시) — 이 시각 전까지'],
+  ['처리완료_보관일수', 30, '수신함 처리완료 폴더에서 자동 반영한 파일을 이 일수가 지나면 휴지통으로'],
+  ['자동반영_회당최대파일수', 10, '한 번 실행에서 반영하는 파일 수 상한(1~50) — 남은 파일은 다음 실행에서']
 ];
 
 // 업로드시작월 = 포털 업로드로 판매(OUT)를 집계하기 시작한 달. 비어 있으면 업로드 없는 채널(OUT 실적은 입력·이관 값).
@@ -219,7 +231,7 @@ function offline_setupSheets() {
     if (key === 'settings' && ok(key)) {
       var srows = _offReadRows(sheet, def), have = {};
       srows.forEach(function (r) { if (r[0]) have[r[0]] = true; });
-      var add = OFF_SETTINGS_DEFAULT.filter(function (d) { return !have[d[0]]; });
+      var add = OFF_SETTINGS_DEFAULT.concat(OFF_INBOX_SETTINGS_DEFAULT).filter(function (d) { return !have[d[0]]; });
       if (add.length) _offWriteBlock(sheet, def, sheet.getLastRow() + 1, add);
       report.settingsAdded = add.map(function (d) { return d[0]; });
     }
@@ -437,12 +449,12 @@ function _offReadmeRows() {
     ['재고_채널일별', '채널 전체 합계 재고, 기준일마다 누적(이력).'],
     ['재고_점포최신', '채널별 최신 기준일 1벌만 유지(0 재고 포함). 당월입고·당월판매는 파일에 있을 때만.'],
     ['하이마트_누적스냅샷', '하이마트 당월 누적 판매 스냅샷(판매 값이 있는 행만). 일별 판매 = 이웃 스냅샷의 차이. 최근 45일만 보관.'],
-    ['업로드로그', '업로드 1건 = 1행. 반영 행수·미매칭 코드 수·경고.'],
+    ['업로드로그', '업로드 1건 = 1행. 반영 행수·미매칭 코드 수·경고. 반영방식 = 수동(데이터 업로드 화면) | 자동 반영(드라이브 수신함 — 업로더 = 파일을 마지막으로 고친 사람). 원본파일ID·원본수정시각·원본MD5 = 자동 반영한 드라이브 파일(같은 파일은 다시 반영하지 않는다). 수신함처리 = 파일을 처리완료·오류 폴더로 옮기거나 휴지통으로 보내지 못한 사유.'],
     ['미매칭코드', '코드매핑이 없는 원본코드. 매핑하면 목록에서 빠진다.'],
     ['목표실적_월', '채널×품목군×모델×월 목표·실적(구분 IN=Sell-in, OUT=Sell-out). 출처 input = 대시보드 목표 관리에서 입력(이관이 덮어쓰지 않음), migration = 기존 진행현황에서 이관. OUT 실적은 업로드시작월 이전 달·업로드 없는 채널만 쓰고, 그 뒤로는 판매원장에서 집계한다. 대분류 열: 모델 단위 행은 대분류·품목군·모델 모두, 대분류 단위 행(모델 구분이 없는 과거 수치 — 예: 진행현황의 "건조기" 행)은 대분류만 채운다.'],
     ['단가마스터', '채널×품목군×모델 공급가 이력. 금액 = 수량 × 그 달 1일 기준 가장 최근 적용시작일의 공급가.'],
     ['이관로그', '기존 스프레드시트(진행현황·납품가 수수료) 이관 1회 = 1행. 대시보드에서 단가 행을 삭제한 기록(대상 "단가 삭제")도 여기에 남는다.'],
-    ['설정', '재고 지표 기준값(키-값). 재고일수_판매기준일수·재고경보_과다일수·재고경보_결품위험일수·데이터지연_경고일수. 대시보드 재고 현황의 설정(관리자)에서 고친다 — 키 이름은 바꾸지 말 것.'],
+    ['설정', '기준값(키-값). 재고 지표: 재고일수_판매기준일수·재고경보_과다일수·재고경보_결품위험일수·데이터지연_경고일수 — 대시보드 재고 현황의 설정(관리자)에서 고친다. 드라이브 수신함 자동 반영: 자동반영_사용(Y/N)·자동반영_시작시각·자동반영_종료시각(한국 시각, 시작 이상 종료 미만에만 1시간마다 확인)·처리완료_보관일수·자동반영_회당최대파일수 — 이 탭에서 직접 고친다. 키 이름은 바꾸지 말 것.'],
     ['공구목표_월', '공동구매 월 목표(벤더×품목군×모델, 목표수량·목표금액 — 원, VAT 포함). 출처 input = 대시보드 목표 관리 [공구 목표]에서 입력(이관이 덮어쓰지 않음), migration = 기존 \'공동구매 26년 목표\' 탭에서 이관. 파트 홈의 파트 목표 = 오프라인 IN 목표 금액 + 이 탭의 목표금액.'],
     ['거래처매핑', 'ERP 매출이익리스트의 거래처코드 → channel_id(코드체계 erp 채널만). 거래처 = 그 채널의 점포(점포마스터 점포코드 = 거래처코드, 점포명 = 이 탭의 거래처명). 업로드 미리보기에서 채널을 고른 새 거래처는 반영 때 여기에 덧붙는다. 채널을 바꾸면 다음 업로드부터 그 채널로 들어간다.']
   ];
@@ -510,22 +522,30 @@ function _offStr(v) {
   if (v instanceof Date && !isNaN(v.getTime())) return Utilities.formatDate(v, 'Asia/Seoul', 'yyyy-MM-dd');
   return v == null ? '' : String(v).trim();
 }
+// def.raw 열(설정 탭 값) — 숫자는 숫자, 글자는 앞뒤 공백만 뺀 글자, 빈칸은 ''
+function _offRawVal(v) { return v === '' || v == null ? '' : (typeof v === 'string' || v instanceof Date ? _offStr(v) : v); }
 
-// 데이터 행 전체 → 2차원 배열. 텍스트 열은 문자열로, 숫자 열은 숫자(빈칸은 '' 유지 — '없음'과 0을 구분)
+// 데이터 행 전체 → 2차원 배열. 텍스트 열은 문자열로, 숫자 열은 숫자(빈칸은 '' 유지 — '없음'과 0을 구분), raw 열은 그대로
 function _offReadRows(sheet, def) {
   var last = sheet.getLastRow();
   if (last < 2) return [];
   var W = def.headers.length;
-  var isText = _offIsTextCol(def);
+  var isText = _offIsTextCol(def), isRaw = _offIsRawCol(def);
   return sheet.getRange(2, 1, last - 1, W).getValues().map(function (r) {
     var o = [];
     for (var c = 0; c < W; c++) {
       var v = r[c];
       if (isText[c]) o.push(_offStr(v));
+      else if (isRaw[c]) o.push(_offRawVal(v));
       else o.push(v === '' || v == null ? '' : (Number(v) || 0));
     }
     return o;
   });
+}
+function _offIsRawCol(def) {
+  var t = {};
+  (def.raw || []).forEach(function (c) { t[c] = true; });
+  return t;
 }
 
 function _offBlankRow(r) {
@@ -656,7 +676,7 @@ function _offBatchGet(keys) {
 
 // API 값 → _offReadRows와 같은 행. 텍스트 열에 숫자가 있으면(날짜 셀일 수 있다) undefined
 function _offApiRows(def, values) {
-  var W = def.headers.length, isText = _offIsTextCol(def), out = [];
+  var W = def.headers.length, isText = _offIsTextCol(def), isRaw = _offIsRawCol(def), out = [];
   for (var i = 0; i < values.length; i++) {
     var r = values[i] || [], o = [];
     for (var c = 0; c < W; c++) {
@@ -664,7 +684,8 @@ function _offApiRows(def, values) {
       if (isText[c]) {
         if (typeof v === 'number') { Logger.log('[Sheets API] ' + def.name + ' ' + (i + 2) + '행 ' + (c + 1) + '열 텍스트 열에 숫자 → 이 탭은 SpreadsheetApp으로 읽습니다'); return undefined; }
         o.push(_offStr(v));
-      } else o.push(v === '' || v == null ? '' : (Number(v) || 0));
+      } else if (isRaw[c]) o.push(_offRawVal(v));
+      else o.push(v === '' || v == null ? '' : (Number(v) || 0));
     }
     out.push(o);
   }
@@ -849,8 +870,11 @@ function _offMappedKeys(mappingRows, codeSys) {
 /* 파일 1개 단위.
    data.meta    = { fileName, fileType, channelId, baseDate(스냅샷형) | replaceStart·replaceEnd(기간 교체형), rawRowCount }
    data.records = { sales[], storeStock[], channelStock[], himart[], stores[], names{code: 상품명} }
-                  (파서 출력 그대로 — src/features/offline/parsers.js 의 toUploadPayload) */
-function _offUpload(data, auth) {
+                  (파서 출력 그대로 — src/features/offline/parsers.js 의 toUploadPayload)
+   opts         = 서버 안에서만(드라이브 수신함 자동 반영 — doPost는 넘기지 않는다):
+                  { strict: 모르는 업태명·매핑 안 된 거래처가 있으면 쓰기 전에 실패, auto: { fileId, modifiedTime, md5 } 업로드로그에 남길 원본 파일 }
+   반영 중(락 안) 실패는 업로드로그에 '실패' 행을 남기고 e.offLogged = true로 다시 던진다 */
+function _offUpload(data, auth, opts) {
   var meta = data.meta || {}, rec = data.records || {};
   var ft = OFF_FILE_TYPES[meta.fileType];
   if (!ft) throw new Error('알 수 없는 파일 유형입니다: ' + meta.fileType);
@@ -870,7 +894,8 @@ function _offUpload(data, auth) {
       today: _offToday(), warnings: [], applied: {}, email: (auth && auth.email) || '',
       uploadId: 'U' + Utilities.formatDate(new Date(), 'Asia/Seoul', 'yyyyMMdd-HHmmss') + '-' + Utilities.getUuid().slice(0, 4),
       // split 파일 — 반영한 채널 목록(업로드로그 channel_id = 'emart,traders')과 점포코드 → 채널(점포마스터 기록용)
-      channels: null, storeChannel: null
+      channels: null, storeChannel: null,
+      strict: !!(opts && opts.strict), auto: (opts && opts.auto) || null
     };
     // 이 반영이 읽는 탭을 batchGet 한 번에 — 아래 함수들은 요청 범위에 기억된 사본을 받는다.
     // 미리 읽기일 뿐이라 실패(탭 없음 등)는 넘긴다 — 아래 각 읽기가 원래 자리에서 같은 오류를 낸다(실패 로그도 원래대로)
@@ -898,7 +923,7 @@ function _offUpload(data, auth) {
         channels: ctx.channels || [meta.channelId] };
     } catch (e) {
       // 실패도 로그에 남긴다(다음 업로드가 같은 범위를 교체하므로 재시도하면 복구된다)
-      try { _offAppendLog(ctx, meta, auth, '실패: ' + String((e && e.message) || e).slice(0, 300), 0); } catch (e2) {}
+      try { _offAppendLog(ctx, meta, auth, '실패: ' + String((e && e.message) || e).slice(0, 300), 0); if (e && typeof e === 'object') e.offLogged = true; } catch (e2) {}
       throw e;
     }
   }); });
@@ -953,6 +978,7 @@ function _offApplyPeriodSales(ctx, meta, rec, ft) {
   });
   if (outside) ctx.warnings.push('교체 기간(' + s + '~' + e + ') 밖의 레코드 ' + outside + '건은 반영하지 않았습니다');
   var unk = Object.keys(unknown);
+  if (unk.length && ctx.strict) throw new Error('채널마스터 원천업태명에 없는 업태명 ' + unk.map(function (b) { return '"' + b + '" ' + unknown[b] + '건'; }).join(', ') + ' — 자동 반영은 파일 전체를 반영하지 않았습니다. 채널마스터 원천업태명을 고친 뒤 파일을 수신함에 다시 넣으세요');
   if (unk.length) ctx.warnings.push('채널마스터 원천업태명에 없는 업태명 ' + unk.map(function (b) { return '"' + b + '" ' + unknown[b] + '건'; }).join(', ') + '은 반영을 보류했습니다 — 채널마스터 원천업태명을 확인하세요');
   var replace = {};
   if (split) Object.keys(byCh).forEach(function (c) { replace[c] = true; });
@@ -997,6 +1023,8 @@ function _offApplyErpSales(ctx, meta, rec) {
   });
   if (outside) ctx.warnings.push('교체 기간(' + s + '~' + e + ') 밖의 레코드 ' + outside + '건은 반영하지 않았습니다');
   var hk = Object.keys(held);
+  if (hk.length && ctx.strict) throw new Error('거래처매핑에 없는(또는 ERP 채널이 아닌 채널로 매핑된) 거래처 ' + hk.map(function (k) { return k + ' ' + held[k] + '건'; }).join(', ') +
+    ' — 자동 반영은 파일 전체를 반영하지 않았습니다. 데이터 업로드 화면에서 직접 올려 채널을 고르거나 거래처매핑 탭을 고친 뒤 다시 넣으세요');
   if (hk.length) ctx.warnings.push('거래처매핑에 없는(또는 ERP 채널이 아닌 채널로 매핑된) 거래처 ' + hk.map(function (k) { return k + ' ' + held[k] + '건'; }).join(', ') + '은 반영을 보류했습니다 — 업로드 미리보기에서 채널을 고르거나 거래처매핑 탭을 확인하세요');
   var res = _offReplace('sales', _offRead('sales'), function (r) {
     return !(erp[r[3]] && r[0] >= s && r[1] <= e);
@@ -1333,8 +1361,10 @@ function _offAppendLog(ctx, meta, auth, status, unmatchedCount) {
     ctx.uploadId, Utilities.formatDate(new Date(), 'Asia/Seoul', 'yyyy-MM-dd HH:mm:ss'), (auth && auth.email) || '',
     String(meta.fileName || '').slice(0, 200), meta.fileType, (ctx.channels && ctx.channels.length ? ctx.channels.join(',') : meta.channelId), range,
     Number(meta.rawRowCount) || 0, appliedRows, unmatchedCount, ctx.warnings.join(' / ').slice(0, 2000), status
-  ]]);
+  ].concat(_offLogSource(ctx.auto))]);
 }
+// 업로드로그 반영방식~수신함처리 열 — auto = { fileId, modifiedTime, md5 } (드라이브 수신함 자동 반영) | null(수동)
+function _offLogSource(auto) { return auto ? ['자동 반영', auto.fileId || '', auto.modifiedTime || '', auto.md5 || '', ''] : ['수동', '', '', '', '']; }
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // ── API 라우팅 (doPost → 여기) ──
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -1441,7 +1471,8 @@ function _offGetUploadLog() {
       uploadId: _offStr(r[0]), at: _offStr(r[1]), uploader: _offStr(r[2]), fileName: _offStr(r[3]),
       fileType: _offStr(r[4]), channelId: _offStr(r[5]), range: _offStr(r[6]),
       rawRows: Number(r[7]) || 0, appliedRows: Number(r[8]) || 0, unmatched: Number(r[9]) || 0,
-      warnings: _offStr(r[10]), status: _offStr(r[11])
+      warnings: _offStr(r[10]), status: _offStr(r[11]),
+      mode: _offStr(r[12]) === '자동 반영' ? 'auto' : 'manual', inboxNote: _offStr(r[16])
     };
   }).filter(function (x) { return x.uploadId; });
   items.reverse();

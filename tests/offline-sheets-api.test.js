@@ -328,16 +328,18 @@ function scenario(g) {
     check('Sheets 고급 서비스가 꺼져 있으면 첫 줄에 안내하고 이전 방식만 잰다', b2.sheetsApi === false && /꺼져 있다/.test(b2.log[0]) && b2.tabs.every(t => t.apiMs === null && t.oldMs != null), b2.log[0]);
   }
 
-  console.log('\n[7] appsscript.json — Sheets v4 고급 서비스만 더하고 나머지 그대로');
+  console.log('\n[7] appsscript.json — Sheets v4 고급 서비스를 더하고 기존 설정·스코프는 그대로(뒤 단계는 덧붙이기만)');
   {
     const now = JSON.parse(fs.readFileSync(path.join(PROJ, 'appsscript.json'), 'utf8'));
     let base = null;
     try { base = JSON.parse(cp.execFileSync('git', ['show', '39f94f1:appsscript.json'], { cwd: PROJ, encoding: 'utf8' })); } catch (e) {}
-    check('enabledAdvancedServices = Sheets(v4, sheets)', J(now.dependencies.enabledAdvancedServices) === J([{ userSymbol: 'Sheets', version: 'v4', serviceId: 'sheets' }]));
-    check('oauthScopes 그대로 — spreadsheets(Sheets API가 쓰는 스코프)·drive·external_request', J(now.oauthScopes) === J(['https://www.googleapis.com/auth/spreadsheets', 'https://www.googleapis.com/auth/drive', 'https://www.googleapis.com/auth/script.external_request']));
+    check('enabledAdvancedServices에 Sheets(v4, sheets)', now.dependencies.enabledAdvancedServices.some(s => J(s) === J({ userSymbol: 'Sheets', version: 'v4', serviceId: 'sheets' })));
+    const BASE_SCOPES = ['https://www.googleapis.com/auth/spreadsheets', 'https://www.googleapis.com/auth/drive', 'https://www.googleapis.com/auth/script.external_request'];
+    check('oauthScopes — 기존 3개(spreadsheets: Sheets API가 쓰는 스코프·drive·external_request)가 그대로 앞에', J(now.oauthScopes.slice(0, 3)) === J(BASE_SCOPES));
     if (base) {
-      const strip = o => { const c = JSON.parse(J(o)); delete c.dependencies; return c; };
-      check('timeZone·webapp·exceptionLogging·runtimeVersion·oauthScopes가 바꾸기 전(39f94f1)과 같다', J(strip(now)) === J(strip(base)) && J(base.dependencies) === '{}');
+      const strip = o => { const c = JSON.parse(J(o)); delete c.dependencies; delete c.oauthScopes; return c; };
+      check('timeZone·webapp·exceptionLogging·runtimeVersion이 바꾸기 전(39f94f1)과 같고, 그때 스코프는 전부 남아 있다', J(strip(now)) === J(strip(base)) && J(base.dependencies) === '{}' &&
+        base.oauthScopes.every(s => now.oauthScopes.indexOf(s) >= 0));
     } else check('git 기록에서 바꾸기 전 appsscript.json을 읽지 못함(얕은 클론?) — 건너뜀', true);
   }
 
