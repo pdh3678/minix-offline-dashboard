@@ -98,6 +98,8 @@ function inboxEnv(opts) {
   g.namesIn = id => g.d.in(id).filter(f => f.mimeType !== g.d.FOLDER).map(f => f.name).sort();
   return g;
 }
+// upload_id(반영 시각 초 + 일련번호)는 실행마다 다르다 — 그 업로드의 파일명으로 바꿔 놓고 비교(같은 초에 돌지 않아도 같게)
+const normTab = (rows, log) => { const ids = {}; log.forEach(r => { ids[r[0]] = 'ID:' + r[3]; }); return J(rows.map(r => r.map(v => ids[v] || v))); };
 function setSetting(g, key, val) { const st = g.tab('설정'), r = st._grid.find(x => x[0] === key); r[1] = val; }
 
 (function main() {
@@ -113,6 +115,7 @@ function setSetting(g, key, val) { const st = g.tab('설정'), r = st._grid.find
   const log = ga.rows('업로드로그');
   check('업로드로그 7행 — 반영방식 자동 반영, 업로더 = 파일을 마지막으로 고친 사람, 원본파일ID·수정시각·MD5', log.length === 7 && log.every(r => r[12] === '자동 반영' && r[2] === PARTNER.emailAddress && r[13] && r[14] && r[15] && r[11] === '성공'), log.map(r => r.slice(11)));
   const autoTabs = {}; ga.off._order.forEach(n => { autoTabs[n] = ga.rows(n); });
+  const autoNorm = nm => normTab(autoTabs[nm], autoTabs['업로드로그']);
   const autoRes = st.files;
   // 같은 파일들을 같은 순서로 수동 업로드(브라우저 경로: 파서 → toUploadPayload → offline_upload)
   const gm = loadOfflineGas({ setup: true, today: TODAY });
@@ -125,7 +128,7 @@ function setSetting(g, key, val) { const st = g.tab('설정'), r = st._grid.find
     const p = P.parseRows(P.dropUnusedColumns(byName[nm]), { fileName: nm, today: TODAY, stockOffsets: offsets });
     gm.ctx._offUpload(P.toUploadPayload(p, { fileName: nm }), { email: 'tester@athomecorp.com' });
   });
-  const diff = gm.off._order.filter(nm => nm !== '업로드로그' && J(dataRows(gm.tab(nm))) !== J(autoTabs[nm]));
+  const diff = gm.off._order.filter(nm => nm !== '업로드로그' && normTab(dataRows(gm.tab(nm)), dataRows(gm.tab('업로드로그'))) !== autoNorm(nm));
   check('업로드로그 밖 모든 탭이 수동 업로드와 칸 단위로 같다(판매원장·재고·스냅샷·점포·미매칭…)', !diff.length, diff.map(nm => [nm, autoTabs[nm], dataRows(gm.tab(nm))]));
   const mlog = dataRows(gm.tab('업로드로그'));
   const same = (r, m) => J(r.slice(3, 12)) === J(m.slice(3, 12)) && m[12] === '수동';
@@ -274,7 +277,7 @@ function setSetting(g, key, val) { const st = g.tab('설정'), r = st._grid.find
     const q = gq.run();
     check('한도 초과가 섞이면 SpreadsheetApp 대체 횟수를 상태에 — 결과는 성공', q.counts.success === 7 && q.apiFallbacks > 0, [q.counts, q.apiFallbacks]);
     check('  ↳ 대체가 생긴 파일의 업로드로그 수신함처리 열에 횟수', gq.rows('업로드로그').some(r => /한도 초과로 SpreadsheetApp 대체 \d+회/.test(r[16])));
-    const diff = gq.off._order.filter(nm => nm !== '업로드로그' && J(gq.rows(nm)) !== J(autoTabs[nm]));
+    const diff = gq.off._order.filter(nm => nm !== '업로드로그' && normTab(gq.rows(nm), gq.rows('업로드로그')) !== autoNorm(nm));
     check('  ↳ 대체가 섞여도 시트 결과는 [1]과 같다', !diff.length, diff);
   }
 
