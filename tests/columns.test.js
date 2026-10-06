@@ -260,8 +260,60 @@ console.log('\n[12] 취소선 감지 — 서식은 브랜드 열만 읽고, 브�
   // 편집기 점검 함수 — 단계 10개, 이전(전체 범위)·지금(브랜드 열) 취소선 결과 같음, 시트에 쓰지 않음
   sh._calls.length = 0;
   const b = cx.gongu_benchmarkRead();
-  check('gongu_benchmarkRead — 단계 10개 시간, 취소선으로 빠지는 행 이전 = 지금(4행), 쓰기 없음', b.steps.length === 10 && b.steps.every(s => !s.error && s.ms >= 0) &&
-    b.strikeSame === true && b.steps[5].result === '4' && sh._calls.every(c => !/^set|clear|insert|delete|append/.test(c.op)), [b.log, sh._calls]);
+  check('gongu_benchmarkRead — 단계 11개 시간, 마지막 데이터 행·취소선으로 빠지는 행 이전 = 지금(5행·4행), 쓰기 없음', b.steps.length === 11 && b.steps.every(s => !s.error && s.ms >= 0) &&
+    b.lastRowSame === true && b.strikeSame === true && b.steps[6].result === '4' && sh._calls.every(c => !/^set|clear|insert|delete|append/.test(c.op)), [b.log, sh._calls]);
+}
+
+console.log('\n[13] 마지막 데이터 행 — 조회(parseMainSheet)는 Sheets API 한 번, 답은 _getLastDataRow와 같다(2026-10-06)');
+{
+  // Sheets 고급 서비스 목 — Values.get('실적통합'!E3:E, UNFORMATTED_VALUE): 값이 있는 마지막 칸까지, 행 끝 빈 칸은 뺀다(가운데 빈 행은 [])
+  const apiCalls = [];
+  const installApi = grid => {
+    global.Sheets = { Spreadsheets: { Values: { get(id, a1, o) {
+      apiCalls.push(a1);
+      const m = /^'(.+)'!([A-Z]+)(\d+):([A-Z]+)$/.exec(a1);
+      const col = m[2].split('').reduce((n, ch) => n * 26 + ch.charCodeAt(0) - 64, 0) - 1;
+      const out = grid.slice(+m[3] - 1).map(r => (r[col] === '' || r[col] == null ? [] : [r[col]]));
+      while (out.length && !out[out.length - 1].length) out.pop();
+      return out.length ? { values: out } : {};
+    } } } };
+  };
+  const cases = {
+    '보통(뒤쪽 빈 행 많음)': ['채널A', '채널B', '', '채널C', '', '', ''],
+    '공백만 있는 칸·0·false는 빈 칸': ['채널A', '채널B', '   ', 0, false, ''],
+    '빈 시트(데이터 행 없음)': ['', '', ''],
+    '마지막 행까지 꽉 참': ['채널A', '채널B', '채널C']
+  };
+  Object.keys(cases).forEach(name => {
+    const g = buildGrid();
+    cases[name].forEach(v => g.push(mkRow({ [C.channel]: v })));
+    const sh = makeSheet('실적통합', g);
+    const cx = loadGas({ '실적통합': sh });
+    cx._resolveCols(sh);
+    sh.getParent = () => ({ getId: () => 'MAIN-ID' });
+    delete global.Sheets;
+    const old = cx._getLastDataRow(sh, C.channel + 1), noApi = cx._getLastDataRowFast(sh, C.channel + 1);
+    installApi(g); apiCalls.length = 0;
+    const fast = cx._getLastDataRowFast(sh, C.channel + 1);
+    check(name + ' — 이전 ' + old + ' = Sheets API ' + fast + ' (Sheets 없으면 이전 방식 ' + noApi + ')', old === fast && old === noApi && apiCalls.length === 1 && apiCalls[0] === "'실적통합'!E3:E", [old, fast, noApi, apiCalls]);
+  });
+  // parseMainSheet — API가 한도 초과로 실패해도 이전 방식으로 같은 결과
+  const g = buildGrid();
+  g.push(mkRow({ [C.brand]: '미닉스', [C.product]: '더 플렌더', [C.channel]: '채널A', [C.dealId]: 'P1', [C.codeSeq]: 1, [C.startMD]: '2026-01-10' }));
+  g.push(mkRow({ [C.brand]: '미닉스', [C.product]: '더 시프트', [C.channel]: '채널B', [C.dealId]: 'P2', [C.codeSeq]: 1, [C.startMD]: '2026-01-11' }));
+  g.push(mkRow({}), mkRow({}));
+  const sh = makeSheet('실적통합', g);
+  const cx = loadGas({ '실적통합': sh });
+  cx._resolveCols(sh);
+  sh.getParent = () => ({ getId: () => 'MAIN-ID' });
+  delete global.Sheets;
+  const before = JSON.stringify(cx.parseMainSheet(sh).deals);
+  installApi(g);
+  const withApi = JSON.stringify(cx.parseMainSheet(sh).deals);
+  global.Sheets.Spreadsheets.Values.get = () => { throw new Error("Quota exceeded for quota metric 'Read requests'"); };
+  const quota = JSON.stringify(cx.parseMainSheet(sh).deals);
+  check('parseMainSheet 결과 — Sheets 없음 = Sheets API = 한도 초과(이전 방식으로 대체)', before === withApi && before === quota && JSON.parse(before).length === 2);
+  delete global.Sheets;
 }
 console.log('\n--------------------------------\n통과 ' + pass + ' / 실패 ' + fail);
 process.exit(fail ? 1 : 0);

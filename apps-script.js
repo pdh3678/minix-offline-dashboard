@@ -1938,7 +1938,7 @@ function parseMainSheet(sheet) {
   // (_getLastDataRow 주석 참고). 매 doGet 캐시 미스마다 이 큰 범위를 두 번(getValues+getTextStyles)
   // 읽는 게 "느리고 재연결 중" 증상의 실제 병목이었음 — _getLastDataRow로 실제 마지막 행까지만,
   // Range 객체 하나를 재사용해서 값/스타일을 각각 그 범위에서만 가져오도록 수정.
-  var lastDataRow = _getLastDataRow(sheet, COL.channel + 1);
+  var lastDataRow = _getLastDataRowFast(sheet, COL.channel + 1);
   var mainRange = sheet.getRange(1, 1, lastDataRow, sheet.getLastColumn());
   var data = mainRange.getValues();
 
@@ -2876,6 +2876,28 @@ function _getLastDataRow(sheet, keyCol) {
     if (String(vals[i][0] || '').trim() !== '') return DATA_START_ROW + 1 + i;
   }
   return DATA_START_ROW; // 값이 있는 행이 하나도 없음 → 헤더 마지막 행(2행)
+}
+
+/* 조회(parseMainSheet) 전용 — _getLastDataRow와 같은 답을 Sheets API(고급 서비스) 한 번으로(2026-10-06).
+   위 함수는 getMaxRows(서식이 미리 깔린 수천 행)까지 한 열을 통째로 읽어 운영에서 1.5초가 걸렸다(gongu_benchmarkRead).
+   API는 값이 있는 마지막 칸까지만 주고, 같은 식(String(v || '').trim())으로 아래에서부터 찾으므로 공백·0·빈 문자열 칸 처리가 같다.
+   ⚠ 쓰기 경로에는 쓰지 말 것 — SpreadsheetApp이 모아 둔(아직 시트에 반영 안 된) 쓰기를 API는 보지 못해 행 위치가 틀어진다.
+   Sheets가 없거나 호출이 실패하면(사용자당 분당 한도 등) 위 함수 그대로 */
+function _getLastDataRowFast(sheet, keyCol) {
+  if (typeof Sheets === 'undefined' || !Sheets || !Sheets.Spreadsheets) return _getLastDataRow(sheet, keyCol);
+  try {
+    var col = _colLetter(keyCol - 1);
+    var res = Sheets.Spreadsheets.Values.get(sheet.getParent().getId(), "'" + sheet.getName().replace(/'/g, "''") + "'!" + col + (DATA_START_ROW + 1) + ':' + col,
+      { valueRenderOption: 'UNFORMATTED_VALUE' });
+    var vals = res.values || [];
+    for (var i = vals.length - 1; i >= 0; i--) {
+      if (String((vals[i] && vals[i][0]) || '').trim() !== '') return DATA_START_ROW + 1 + i;
+    }
+    return DATA_START_ROW;
+  } catch (e) {
+    Logger.log('[Sheets API] 마지막 데이터 행 읽기 실패 → SpreadsheetApp으로: ' + e);
+    return _getLastDataRow(sheet, keyCol);
+  }
 }
 
 // 새 공구건 등록 — 상품코드 개수만큼(1~10) 같은 dealId를 공유하는 행을 만듦.
@@ -4452,7 +4474,7 @@ function _normalizeSheetDates(dryRun) {
 // ── 공구 조회 점검 (편집기에서 직접 실행 — 시트·캐시에 쓰지 않는다, 2026-10-02) ──
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 /* gongu_benchmarkRead — 공구 분석 데이터 조회(doGet 캐시 없음)가 시간을 어디에 쓰는지 단계별로 잰다(3번 평균).
-   취소선 서식을 메인 범위 전체로 읽던 이전 방식과 브랜드 열만 읽는 지금 방식(parseMainSheet)의 시간과 결과(빠지는 행)가 같은지도 본다.
+   이전·지금 방식의 시간과 결과가 같은지도 본다 — 마지막 데이터 행(한 열 통째로 → Sheets API), 취소선 서식(메인 범위 전체 → 브랜드 열).
    doGet 중 쓰기가 생길 수 있는 단계(_ensureExtraHeaders·_autoFillMissingDealIds)와 캐시 저장은 하지 않는다. 결과는 실행 로그와 반환값. */
 function gongu_benchmarkRead() {
   var REPS = 3, ss = SpreadsheetApp.getActiveSpreadsheet(), sheet = ss.getSheetByName(MAIN_SHEET), out = { steps: [], log: [] };
@@ -4467,7 +4489,8 @@ function gongu_benchmarkRead() {
   var steps = [
     ['세션 확인(_sessions 전체 읽기 — 모든 요청)', function () { var s = ss.getSheetByName(SESSION_SHEET); return s ? _findSessionRow(s, '-') : null; }],
     ['열 해석(_resolveCols)', function () { _resolveCols(sheet); }],
-    ['마지막 데이터 행(_getLastDataRow)', function () { return _getLastDataRow(sheet, COL.channel + 1); }],
+    ['마지막 데이터 행 이전 — _getLastDataRow(getMaxRows까지 한 열)', function () { return _getLastDataRow(sheet, COL.channel + 1); }],
+    ['마지막 데이터 행 지금 — _getLastDataRowFast(Sheets API)', function () { return _getLastDataRowFast(sheet, COL.channel + 1); }],
     ['값 getValues(' + lastDataRow + '행 × ' + lastCol + '열)', function () { return sheet.getRange(1, 1, lastDataRow, lastCol).getValues().length; }],
     ['취소선 이전 — getTextStyles(' + lastDataRow + '행 × ' + lastCol + '열)', function () { return strike(sheet.getRange(1, 1, lastDataRow, lastCol).getTextStyles(), COL.brand); }],
     ['취소선 지금 — getTextStyles(브랜드 열 ' + lastDataRow + '행)', function () { return strike(sheet.getRange(1, COL.brand + 1, lastDataRow, 1).getTextStyles(), 0); }],
@@ -4487,7 +4510,11 @@ function gongu_benchmarkRead() {
     out.steps.push(row);
     say('[공구] ' + row.step + ' · 평균 ' + row.ms + 'ms' + (err ? ' · 오류 ' + err : ''));
   });
-  var before = out.steps[4], now = out.steps[5];
+  var byName = function (prefix) { return out.steps.filter(function (s) { return s.step.indexOf(prefix) === 0; })[0]; };
+  var lrOld = byName('마지막 데이터 행 이전'), lrNew = byName('마지막 데이터 행 지금');
+  out.lastRowSame = !lrOld.error && !lrNew.error && lrOld.result === lrNew.result;
+  say('마지막 데이터 행 — 이전 = 지금: ' + (out.lastRowSame ? '같음' : '⚠ 다름') + ' (' + lrOld.result + ' / ' + lrNew.result + (typeof Sheets === 'undefined' ? ' — Sheets 고급 서비스 꺼짐: 지금도 이전 방식' : '') + ')');
+  var before = byName('취소선 이전'), now = byName('취소선 지금');
   out.strikeSame = !before.error && !now.error && before.result === now.result;
   say('취소선으로 빠지는 행 — 이전 = 지금: ' + (out.strikeSame ? '같음' : '⚠ 다름') + ' (' + (now.result ? String(now.result).split(',').length : 0) + '행' + (now.result ? ': ' + now.result : '') + ')');
   return out;
