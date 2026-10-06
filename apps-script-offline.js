@@ -1409,6 +1409,9 @@ function _offlineRoute(action, data, auth) {
     else if (action === 'offline_saveGonguTargets') out = _gtSave(data || {}, auth);
     else if (action === 'offline_migrateGonguTargets') out = _gtMigrate(data || {}, auth);
     else if (action === 'home_getSummary') out = _homeGetSummary(data || {});
+    // 드라이브 수신함 자동 반영 (apps-script-offline-inbox.js) — [지금 확인]은 사용 여부·시각 범위와 관계없이 바로
+    else if (action === 'offline_getInboxStatus') out = _offInboxStatus();
+    else if (action === 'offline_processInbox') out = _offInboxRun('manual:' + ((auth && auth.email) || ''));
     else throw new Error('알 수 없는 오프라인 액션: ' + action);
     return _json(out);
   } catch (err) {

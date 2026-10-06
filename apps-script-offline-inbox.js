@@ -311,3 +311,45 @@ function offline_processInbox() {
   Logger.log('[offline_processInbox] ' + JSON.stringify(st));
   return st;
 }
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// ── 트리거 · 상태 ──
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+var OFF_INBOX_HANDLER = 'offline_inboxTick';
+
+/* 편집기에서 1회 실행 — 1시간마다 offline_inboxTick을 부르는 시간 트리거. 이미 있으면 지우고 하나만 다시 만든다(중복 설치 방지).
+   트리거는 실행한 계정으로 돈다 — 그 계정에 수신함 공유 드라이브 콘텐츠 관리자 이상 권한이 있어야 파일을 옮기고 휴지통으로 보낼 수 있다 */
+function offline_installInboxTrigger() {
+  var removed = _offInboxRemoveTriggers();
+  ScriptApp.newTrigger(OFF_INBOX_HANDLER).timeBased().everyHours(1).create();
+  var out = { installed: true, removedBefore: removed, handler: OFF_INBOX_HANDLER, everyHours: 1, folderSet: !!_offInboxFolderId() };
+  Logger.log('[offline_installInboxTrigger] ' + JSON.stringify(out) + (out.folderSet ? '' : ' — ⚠ Script Properties에 ' + OFF_INBOX_FOLDER_PROP + '를 등록하세요'));
+  return out;
+}
+function offline_removeInboxTrigger() {
+  var out = { removed: _offInboxRemoveTriggers() };
+  Logger.log('[offline_removeInboxTrigger] ' + JSON.stringify(out));
+  return out;
+}
+function _offInboxRemoveTriggers() {
+  var n = 0;
+  ScriptApp.getProjectTriggers().forEach(function (t) { if (t.getHandlerFunction() === OFF_INBOX_HANDLER) { ScriptApp.deleteTrigger(t); n++; } });
+  return n;
+}
+
+/* 트리거가 1시간마다 부른다 — 설정 탭 자동반영_사용이 N이거나 시각 범위(시작 이상 종료 미만, 한국 시각) 밖이면 아무것도 하지 않는다 */
+function offline_inboxTick() {
+  var s = _offInboxSettings(), hour = Number(Utilities.formatDate(new Date(), 'Asia/Seoul', 'HH'));
+  if (!s.enabled) return { skipped: '자동반영_사용 = N' };
+  if (hour < s.startHour || hour >= s.endHour) return { skipped: '시각 범위 밖(' + s.startHour + '~' + s.endHour + '시, 지금 ' + hour + '시)' };
+  return _offInboxRun('trigger');
+}
+
+/* offline_getInboxStatus — 데이터 업로드 화면 상단 "자동 반영" 패널 */
+function _offInboxStatus() {
+  var id = _offInboxFolderId(), triggers = null, last = null;
+  try { triggers = ScriptApp.getProjectTriggers().filter(function (t) { return t.getHandlerFunction() === OFF_INBOX_HANDLER; }).length; } catch (e) { triggers = null; }
+  try { last = JSON.parse(PropertiesService.getScriptProperties().getProperty(OFF_INBOX_STATUS_PROP) || 'null'); } catch (e) { last = null; }
+  return { success: true, folderId: id, folderUrl: id ? 'https://drive.google.com/drive/folders/' + id : '', settings: _offInboxSettings(),
+    triggerInstalled: triggers == null ? null : triggers > 0, last: last, apiPerMin: OFF_INBOX_API_PER_MIN };
+}

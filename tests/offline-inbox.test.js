@@ -278,6 +278,51 @@ function setSetting(g, key, val) { const st = g.tab('설정'), r = st._grid.find
     check('  ↳ 대체가 섞여도 시트 결과는 [1]과 같다', !diff.length, diff);
   }
 
+  console.log('\n[8] 트리거 · 사용 여부 · 시각 범위 · 상태 · doPost · 폴더 미등록 · SheetJS를 못 받을 때');
+  {
+    const g = inboxEnv();
+    const a = g.ctx.offline_installInboxTrigger(), b = g.ctx.offline_installInboxTrigger();
+    check('트리거 설치 — 1시간마다 offline_inboxTick, 두 번 실행해도 하나(중복 설치 방지)', g.triggers.length === 1 && g.triggers[0].handler === 'offline_inboxTick' && g.triggers[0].hours === 1 &&
+      a.removedBefore === 0 && b.removedBefore === 1 && b.folderSet === true, [a, b]);
+    g.put(FILES()[6][0], FILES()[6][1]);
+    const fmt = g.ctx.Utilities.formatDate;
+    const at = h => { g.ctx.Utilities.formatDate = (d, tz, f) => (f === 'HH' ? String(h).padStart(2, '0') : fmt(d, tz, f)); };
+    setSetting(g, '자동반영_사용', 'N'); at(10);
+    check('자동반영_사용 = N이면 트리거는 아무것도 하지 않는다', /N/.test(g.ctx.offline_inboxTick().skipped) && g.namesIn('INBOX').length === 1);
+    setSetting(g, '자동반영_사용', 'Y'); at(22);
+    check('시각 범위(7~22시) 밖 — 22시는 하지 않는다', /시각 범위 밖/.test(g.ctx.offline_inboxTick().skipped) && g.namesIn('INBOX').length === 1);
+    at(6);
+    check('  ↳ 6시도 하지 않는다', /시각 범위 밖/.test(g.ctx.offline_inboxTick().skipped));
+    at(7);
+    const t = g.ctx.offline_inboxTick();
+    check('7시 — 반영(트리거 실행 표시)', t.counts.success === 1 && t.by === 'trigger');
+    g.ctx.Utilities.formatDate = fmt;
+    setSetting(g, '자동반영_시작시각', 'abc'); setSetting(g, '자동반영_종료시각', 3); setSetting(g, '자동반영_회당최대파일수', 0);
+    const s = g.ctx._offInboxSettings();
+    check('잘못된 설정값은 기본값(시작 7·종료 22·최대 10)', s.startHour === 7 && s.endHour === 22 && s.maxFiles === 10 && s.enabled === true, s);
+    const AUTH = { email: 'tester@athomecorp.com' };
+    const call = (action, data) => JSON.parse(g.ctx._offlineHandle(action, data || {}, AUTH));
+    g.put(FILES()[5][0], FILES()[5][1]);
+    const m = call('offline_processInbox');
+    check('doPost offline_processInbox = [지금 확인] — 사용 여부·시각과 관계없이 바로, 실행한 사람 표시', m.success && m.counts.success === 1 && m.by === 'manual:tester@athomecorp.com', m);
+    const st = call('offline_getInboxStatus');
+    check('doPost offline_getInboxStatus — 폴더 링크·설정·트리거·마지막 실행', st.success && st.folderUrl === 'https://drive.google.com/drive/folders/INBOX' && st.triggerInstalled === true &&
+      st.last.by === 'manual:tester@athomecorp.com' && st.last.counts.success === 1 && st.last.files[0].name === FILES()[5][0] && st.apiPerMin === 30, st);
+    g.ctx.offline_removeInboxTrigger();
+    check('트리거 제거 → 상태에 설치 안 됨', g.triggers.length === 0 && call('offline_getInboxStatus').triggerInstalled === false);
+    delete g.scriptProps.OFFLINE_INBOX_FOLDER_ID;
+    const nf = g.run();
+    check('수신함 폴더 ID가 없으면 아무것도 하지 않고 안내', /OFFLINE_INBOX_FOLDER_ID/.test(nf.note) && call('offline_getInboxStatus').folderUrl === '');
+    g.scriptProps.OFFLINE_INBOX_FOLDER_ID = 'INBOX';
+    // SheetJS를 못 받으면 파일은 그대로(오류로 보내지 않음)
+    g.put('판매내역_2026-10-05_101010.xls', etlandSales([['2026-10-04', '302001', 'MNFD-200G', 1]]));
+    g.ctx._offXlsxLib = null;
+    global.UrlFetchApp.fetch = () => ({ getResponseCode: () => 503, getContentText: () => '' });
+    const x = g.run();
+    check('SheetJS를 못 받으면 파일은 수신함에 그대로(다음 실행으로) · 오류 폴더로 보내지 않음', x.counts.deferred === 1 && x.counts.error === 0 && /HTTP 503/.test(x.note) &&
+      g.namesIn('INBOX').indexOf('판매내역_2026-10-05_101010.xls') >= 0, x);
+  }
+
   console.log('\n' + '─'.repeat(50));
   console.log('통과 ' + pass + ' / 실패 ' + fail);
   process.exit(fail ? 1 : 0);

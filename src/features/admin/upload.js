@@ -5,7 +5,7 @@
    파일은 브라우저에서 파싱하고(src/features/offline/parsers.js) 정규화 레코드만 서버로 보낸다. 반영은 파일
    1개 = 요청 1개이고, 서버가 락으로 직렬화한다. 하이마트는 누적 차이 계산이라 기준일 오름차순으로 보낸다. */
 
-const _UP={files:[],seq:0,status:null,statusErr:'',log:null,logErr:'',mastersErr:'',busyAll:false,progress:''};
+const _UP={files:[],seq:0,status:null,statusErr:'',log:null,logErr:'',mastersErr:'',busyAll:false,progress:'',inbox:null,inboxErr:'',inboxBusy:false};
 
 function mountUploadPage(){
   _upRender();
@@ -18,6 +18,7 @@ async function _upRefreshSide(){
   await Promise.all([
     _offlineCall('offline_getStatus').then(j=>{_UP.status=j;_UP.statusErr='';}).catch(e=>{_UP.statusErr=e.message;}),
     _offlineCall('offline_getUploadLog').then(j=>{_UP.log=j.items;_UP.logErr='';}).catch(e=>{_UP.logErr=e.message;}),
+    _offlineCall('offline_getInboxStatus').then(j=>{_UP.inbox=j;_UP.inboxErr='';}).catch(e=>{_UP.inboxErr=e.message;}),
     _offlineLoadMasters(true).then(()=>{_UP.mastersErr='';}).catch(e=>{_UP.mastersErr=e.message;})
   ]);
   // 채널마스터(재고기준일오프셋)가 오기 전에 판별한 파일은 오프셋을 넣어 다시 판별한다(반영 중·반영한 파일은 그대로)
@@ -258,6 +259,7 @@ function _upRender(){
   if(!host)return;
   const nReady=_upApplyOrder().length;
   host.innerHTML=`
+  <div class="card"><div class="card-hd">자동 반영<span class="card-hd-r">드라이브 수신함 폴더에 넣은 엑셀을 1시간마다 이 화면과 같은 규칙으로 반영</span></div>${_upInboxHtml()}</div>
   <div class="card"><div class="card-hd">데이터 현황<span class="card-hd-r">채널별 마지막 기준일 · 이번 달 빈 날짜(1일~어제, 업로드로그 기준)</span></div>${_upStatusHtml()}</div>
   <div class="card"><div class="card-hd">파일 업로드<span class="card-hd-r">하이마트·전자랜드·이마트 협력사 포털 엑셀 · ERP 매출이익리스트(백화점·폐쇄몰·렌탈)를 받은 그대로</span></div>
     <label class="up-drop" id="upDrop" ondragover="_upDragOver(event)" ondragleave="_upDragLeave()" ondrop="_upDrop(event)">
@@ -278,6 +280,46 @@ function _upRender(){
     const items=_upUnmatched(f)||[];
     renderMappingPanel('upMap-'+f.id,items,{onSaved:()=>_upRender()});
   });
+}
+
+/* 드라이브 수신함 자동 반영(apps-script-offline-inbox.js) — 사용 여부·폴더·트리거·마지막 실행 결과, [지금 확인] = offline_processInbox
+   (사용 여부·시각 범위와 관계없이 바로. 파일 수에 따라 몇 분 걸릴 수 있다 — 긴 요청 타임아웃) */
+const _UP_INBOX_RESULT={success:['done','반영'],error:['error','오류'],skipped:['ready','건너뜀'],deferred:['applying','다음 실행']};
+function _upInboxBy(by){return by==='trigger'?'자동(1시간마다)':by==='editor'?'편집기에서 실행':/^manual:/.test(by||'')?'지금 확인 · '+by.slice(7):(by||'');}
+function _upInboxHtml(){
+  if(_UP.inboxErr)return `<div class="up-err">자동 반영 상태를 불러오지 못했습니다: ${_escHtml(_UP.inboxErr)}</div>`;
+  const s=_UP.inbox;
+  if(!s)return '<div class="mp-empty">불러오는 중…</div>';
+  const st=s.settings||{},last=s.last,busy=_UP.inboxBusy;
+  const use=st.enabled?`<span class="off-ok">켜짐</span> · ${st.startHour}~${st.endHour}시 1시간마다 · 회당 최대 ${st.maxFiles}개 · 처리완료 보관 ${st.keepDays}일`
+    :'<span class="off-miss">꺼짐</span> — 설정 탭 자동반영_사용 = N ([지금 확인]은 된다)';
+  const trig=s.triggerInstalled===false?' · <span class="off-miss">트리거 없음 — 편집기에서 offline_installInboxTrigger 실행</span>':s.triggerInstalled?' · 트리거 설치됨':'';
+  const folder=s.folderUrl?`<a href="${_escAttr(s.folderUrl)}" target="_blank" rel="noopener">수신함 폴더 열기</a>`:'<span class="off-miss">수신함 폴더 미등록 — Script Properties OFFLINE_INBOX_FOLDER_ID</span>';
+  let lastHtml='<span class="off-muted">아직 실행 기록이 없습니다.</span>';
+  if(last){
+    const c=last.counts||{};
+    lastHtml=`마지막 실행 <b>${_escHtml(last.at)}</b> (${_escHtml(_upInboxBy(last.by))}) · 반영 <b>${c.success||0}</b> · 오류 <b${c.error?' class="off-miss"':''}>${c.error||0}</b> · 건너뜀 <b>${c.skipped||0}</b> · 다음 실행으로 <b>${c.deferred||0}</b>`+
+      `${last.trashed?` · 보관일수 지나 휴지통 <b>${last.trashed}</b>`:''} · Sheets API <b>${last.apiCalls||0}</b>회${last.apiFallbacks?` · <span class="off-miss">한도 초과로 이전 방식 대체 ${last.apiFallbacks}회</span>`:''}`+
+      (last.note?`<br><span class="off-miss">${_escHtml(last.note)}</span>`:'')+
+      ((last.warnings||[]).length?`<ul class="up-warn">${last.warnings.map(w=>'<li>'+_escHtml(w)+'</li>').join('')}</ul>`:'');
+  }
+  const files=last&&(last.files||[]).length?`<div class="tbl-wrap"><table class="cm-tbl"><thead><tr><th>파일</th><th>결과</th><th>내용</th></tr></thead><tbody>${last.files.map(f=>{
+    const r=_UP_INBOX_RESULT[f.result]||['ready',f.result];
+    return `<tr><td>${_escHtml(f.name)}</td><td><span class="up-chip ${r[0]}">${r[1]}</span></td><td>${_escHtml(f.detail||'')}</td></tr>`;}).join('')}</tbody></table></div>`:'';
+  return `<div class="up-stats">${use}${trig}<br>${folder}<br>${lastHtml}</div>${files}
+    <div class="up-bar"><button type="button" class="btn-primary up-btn" ${busy||!s.folderUrl?'disabled':''} onclick="_upInboxRun()">${busy?'확인 중… (몇 분 걸릴 수 있음)':'지금 확인'}</button>
+    <span class="off-muted">이동·휴지통은 실행 계정에 공유 드라이브 콘텐츠 관리자 이상 권한이 있어야 합니다</span></div>`;
+}
+async function _upInboxRun(){
+  if(_UP.inboxBusy)return;
+  _UP.inboxBusy=true;_upRender();
+  try{
+    const r=await _offlineCall('offline_processInbox');
+    if(r.busy)showToast(r.message||'다른 수신함 확인이 진행 중입니다.');
+    else{const c=r.counts||{};showToast(`수신함 확인 — 반영 ${c.success||0} · 오류 ${c.error||0} · 건너뜀 ${c.skipped||0} · 다음 실행으로 ${c.deferred||0}`,{type:c.error?'error':'success'});}
+  }catch(e){showToast('수신함 확인 실패: '+e.message,{type:'error'});}
+  _UP.inboxBusy=false;
+  await _upRefreshSide();
 }
 
 function _upStatusHtml(){
@@ -367,10 +409,10 @@ function _upLogHtml(){
   if(!_UP.log)return '<div class="mp-empty">불러오는 중…</div>';
   if(!_UP.log.length)return '<div class="mp-empty">아직 업로드 기록이 없습니다.</div>';
   const label=t=>OfflineParsers.TYPES[t]?OfflineParsers.TYPES[t].label:t;
-  return `<div class="tbl-wrap"><table class="up-log"><thead><tr><th>시각</th><th>파일명</th><th>유형</th><th>채널</th><th>기준일/기간</th>
+  return `<div class="tbl-wrap"><table class="up-log"><thead><tr><th>시각</th><th>방식</th><th>파일명</th><th>유형</th><th>채널</th><th>기준일/기간</th>
     <th class="num-col">원본</th><th class="num-col">반영</th><th class="num-col">미매칭</th><th>상태</th><th>업로더</th><th>경고</th></tr></thead><tbody>${
-    _UP.log.map(x=>`<tr><td>${_escHtml(x.at)}</td><td>${_escHtml(x.fileName)}</td><td>${_escHtml(label(x.fileType))}</td><td>${_escHtml(_offlineChannelsLabel(x.channelId))}</td><td>${_escHtml(x.range)}</td>
+    _UP.log.map(x=>`<tr><td>${_escHtml(x.at)}</td><td>${x.mode==='auto'?'<span class="up-chip done">자동 반영</span>':'<span class="off-muted">수동</span>'}</td><td>${_escHtml(x.fileName)}</td><td>${_escHtml(label(x.fileType))}</td><td>${_escHtml(_offlineChannelsLabel(x.channelId))}</td><td>${_escHtml(x.range)}</td>
       <td class="num-col">${x.rawRows}</td><td class="num-col">${x.appliedRows}</td><td class="num-col">${x.unmatched}</td>
       <td>${x.status==='성공'?'<span class="off-ok">성공</span>':'<span class="off-miss">'+_escHtml(x.status)+'</span>'}</td>
-      <td>${_escHtml(x.uploader)}</td><td class="up-log-warn">${_escHtml(x.warnings)}</td></tr>`).join('')}</tbody></table></div>`;
+      <td>${_escHtml(x.uploader)}</td><td class="up-log-warn">${_escHtml(x.warnings)}${x.inboxNote?`<div class="off-miss">${_escHtml(x.inboxNote)}</div>`:''}</td></tr>`).join('')}</tbody></table></div>`;
 }

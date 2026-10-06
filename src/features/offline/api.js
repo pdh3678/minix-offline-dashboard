@@ -9,7 +9,7 @@
 const OFFLINE_UPLOAD_TIMEOUT_MS=300000; // 하이마트 1개 파일 반영이 수십 초까지 걸릴 수 있다
 const OFFLINE_CALL_TIMEOUT_MS=45000;
 // 원장·원본 스프레드시트를 통째로 읽고 쓰는 액션 — 업로드와 같은 긴 타임아웃
-const OFFLINE_LONG_ACTIONS={offline_upload:true,offline_migrateProgress:true,offline_migratePrices:true};
+const OFFLINE_LONG_ACTIONS={offline_upload:true,offline_migrateProgress:true,offline_migratePrices:true,offline_processInbox:true};
 
 async function _offlineCall(action,data){
   if(!_getToken())throw new Error('로그인이 필요합니다.');
