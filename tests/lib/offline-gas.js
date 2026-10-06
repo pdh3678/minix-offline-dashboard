@@ -84,9 +84,18 @@ function makeLegacySS(tabs) {
    · Spreadsheets.get — sheets[].properties { sheetId(첫 탭 0 — 0이면 키가 빠진다), title, gridProperties.rowCount(= getMaxRows) }
    · Spreadsheets.batchUpdate(resource, id) — appendDimension · repeatCell(numberFormat → _formats에 기록) · updateCells
      (range를 rows가 다 채우지 못하면 남는 칸은 비운다). 요청 하나라도 틀리면 아무것도 바뀌지 않는다(원자적)
-   calls = 호출 기록 [{ op: 'batchGet'|'get'|'batchUpdate', ... }] — 왕복 수 검사용 */
-function installSheetsApi(off, id) {
-  const calls = [];
+   calls = 호출 기록 [{ op: 'batchGet'|'get'|'batchUpdate', ... }] — 왕복 수 검사용
+   한도 초과 흉내 — failEvery = n이면 n번째 호출마다, failNext(op, n, skip)이면 그 op를 skip번 통과시킨 뒤 n번 '사용자당 분당 한도 초과' 오류 */
+function installSheetsApi(off, id, failEvery) {
+  const calls = [], fails = {};
+  let seq = 0;
+  const quota = op => {
+    const f = fails[op];
+    if ((failEvery && ++seq % failEvery === 0) || (f && (f.skip-- <= 0) && f.n-- > 0)) {
+      calls[calls.length - 1].failed = true;
+      throw new Error("GoogleJsonResponseException: API call to sheets.spreadsheets." + op + " failed with error: Quota exceeded for quota metric 'Read requests' and limit 'Read requests per minute per user'");
+    }
+  };
   const ids = new Map();
   let next = 0; // 실제처럼 첫 탭의 sheetId는 0 — 응답에서 0은 빠진다(아래 get)
   const sheetIdOf = name => { if (!ids.has(name)) ids.set(name, next++); return ids.get(name); };
@@ -140,12 +149,12 @@ function installSheetsApi(off, id) {
   global.Sheets = {
     Spreadsheets: {
       get(x, o) {
-        checkId(x); calls.push({ op: 'get', fields: o && o.fields });
+        checkId(x); calls.push({ op: 'get', fields: o && o.fields }); quota('get');
         return { sheets: off._order.filter(n => off._sheets[n]).map((n, i) => ({ properties: Object.assign(sheetIdOf(n) ? { sheetId: sheetIdOf(n) } : {},
           { title: n, index: i, gridProperties: { rowCount: off._sheets[n]._grid.length, columnCount: width(off._sheets[n]._grid) } }) })) };
       },
       batchUpdate(resource, x) {
-        checkId(x); calls.push({ op: 'batchUpdate', requests: resource.requests.map(r => Object.keys(r)[0]) });
+        checkId(x); calls.push({ op: 'batchUpdate', requests: resource.requests.map(r => Object.keys(r)[0]) }); quota('batchUpdate');
         const snap = Object.keys(off._sheets).map(n => [off._sheets[n], off._sheets[n]._grid.map(r => r.slice()), off._sheets[n]._formats.length]);
         try { resource.requests.forEach(apply); }
         catch (e) { snap.forEach(([sh, g, f]) => { sh._grid.splice(0, sh._grid.length, ...g); sh._formats.length = f; }); throw e; }
@@ -153,7 +162,7 @@ function installSheetsApi(off, id) {
       },
       Values: {
         batchGet(x, o) {
-          checkId(x); calls.push({ op: 'batchGet', ranges: o.ranges.slice() });
+          checkId(x); calls.push({ op: 'batchGet', ranges: o.ranges.slice() }); quota('values.batchGet');
           if (o.valueRenderOption !== 'UNFORMATTED_VALUE' || o.dateTimeRenderOption !== 'SERIAL_NUMBER') throw new Error('목은 UNFORMATTED_VALUE + SERIAL_NUMBER만 흉내 낸다');
           return { spreadsheetId: x, valueRanges: o.ranges.map(readRange) };
         }
@@ -162,7 +171,8 @@ function installSheetsApi(off, id) {
   };
   // 시트 생성 순서대로 sheetId를 정해 둔다(get 전에 batchUpdate가 오는 일은 없지만 id가 바뀌지 않게)
   off._order.forEach(sheetIdOf);
-  return { calls, count: op => calls.filter(c => c.op === op).length, reset: () => { calls.length = 0; } };
+  return { calls, count: op => calls.filter(c => c.op === op).length, reset: () => { calls.length = 0; },
+    failNext: (op, n, skip) => { fails[op === 'batchGet' ? 'values.batchGet' : op] = { n: n || 1, skip: skip || 0 }; } };
 }
 
 /* opts.today   — _offToday() 고정값('YYYY-MM-DD')
@@ -170,7 +180,8 @@ function installSheetsApi(off, id) {
    opts.noSheetId — OFFLINE_SHEET_ID를 비운 상태
    opts.setup   — true면 offline_setupSheets까지 실행해 둔다
    opts.dir     — GAS 파일을 읽을 폴더(기본 저장소 루트). 확인 스크립트가 바꾸기 전 코드(git show)를 띄울 때
-   opts.noSheetsApi — Sheets 고급 서비스를 켜지 않은 상태(appsscript.json 미반영 — SpreadsheetApp 대체 경로) */
+   opts.noSheetsApi — Sheets 고급 서비스를 켜지 않은 상태(appsscript.json 미반영 — SpreadsheetApp 대체 경로)
+   opts.sheetsApiFailEvery — Sheets API 호출 n번째마다 한도 초과 오류(대체 경로가 섞여도 결과가 같은지) */
 function loadOfflineGas(opts) {
   opts = opts || {};
   const main = { '실적통합': makeSheet('실적통합', [[], []]) };
@@ -191,7 +202,7 @@ function loadOfflineGas(opts) {
   });
   global.Utilities.formatDate = formatDate;
   delete global.Sheets;
-  const api = opts.noSheetsApi ? null : installSheetsApi(off, OFFLINE_ID);
+  const api = opts.noSheetsApi ? null : installSheetsApi(off, OFFLINE_ID, opts.sheetsApiFailEvery);
   const ctx = vm.createContext(global);
   const dir = opts.dir || PROJ;
   vm.runInContext(fs.readFileSync(path.join(dir, 'apps-script.js'), 'utf8'), ctx, { filename: 'apps-script.js' });

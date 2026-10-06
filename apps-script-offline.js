@@ -598,16 +598,23 @@ function _offReplacePlan(oldRows, keep, newRows) {
      탭은 SpreadsheetApp으로 다시 읽는다(코드가 쓴 텍스트 열은 '@' 서식이라 숫자가 없다 — 사람이 서식 없는 칸에 고쳐 넣었을 때만).
    · 문자열은 stringValue(해석하지 않고 그대로) — '0012'·'2026-09-01'이 숫자·날짜로 바뀌지 않는다. '' = 빈칸.
    · API 응답은 뒤쪽 빈 행을 빼고 준다(getLastRow는 헤더 폭 밖 열의 값까지 센다) — 빈 행은 어느 쪽이든 거르거나 비우므로 결과는 같다.
-   Sheets가 없거나(appsscript.json 미반영) batchGet이 실패하면 SpreadsheetApp 헬퍼로 — 느릴 뿐 결과는 같다. */
-var _offIo = null; // 요청 하나 동안 — { rows: {탭이름: 행[]}, meta: {탭이름: {sheetId, rows}}, ss }
+   Sheets가 없거나(appsscript.json 미반영) API 호출이 실패하면(읽기·쓰기 모두) SpreadsheetApp 헬퍼로 — 느릴 뿐 결과는 같다.
+   ⚠ 한도: Sheets API는 사용자당 분당 읽기 60회·쓰기 60회다(2026-10-06 운영 점검에서 읽기 한도 초과 확인). 웹앱은 배포한 사용자로
+   실행되므로 대시보드 사용자 전원이 이 한도 하나를 같이 쓴다 — 넘으면 그 요청의 나머지는 SpreadsheetApp으로(apiDown) 처리한다. */
+var _offIo = null; // 요청 하나 동안 — { rows: {탭이름: 행[]}, meta: {탭이름: {sheetId, rows}}, ss, apiDown }
 
 // fn을 요청 범위 안에서 실행한다(겹쳐 부르면 바깥 범위를 그대로 쓴다). _offlineHandle·_offUpload가 연다
 function _offWithIo(fn) {
   if (_offIo) return fn();
-  _offIo = { rows: {}, meta: null, ss: null };
+  _offIo = { rows: {}, meta: null, ss: null, apiDown: false };
   try { return fn(); } finally { _offIo = null; }
 }
-function _offApiReady() { return typeof Sheets !== 'undefined' && !!Sheets && !!Sheets.Spreadsheets; }
+function _offApiReady() { return !(_offIo && _offIo.apiDown) && typeof Sheets !== 'undefined' && !!Sheets && !!Sheets.Spreadsheets; }
+// API 호출 실패(한도 초과 등) — 기록하고, 요청 범위 안이면 나머지는 SpreadsheetApp으로(같은 요청에서 실패할 호출을 되풀이하지 않게)
+function _offApiFailed(what, e) {
+  Logger.log('[Sheets API] ' + what + ' 실패 → SpreadsheetApp으로 처리합니다: ' + e);
+  if (_offIo) _offIo.apiDown = true;
+}
 function _offA1(def) { return "'" + def.name.replace(/'/g, "''") + "'!A2:" + _colLetter(def.headers.length - 1); }
 function _offCopyRows(rows) { return rows.map(function (r) { return r.slice(); }); }
 
@@ -639,7 +646,7 @@ function _offBatchGet(keys) {
     res = Sheets.Spreadsheets.Values.batchGet(_offSheetId(), { ranges: keys.map(function (k) { return _offA1(OFF_TABS[k]); }),
       valueRenderOption: 'UNFORMATTED_VALUE', dateTimeRenderOption: 'SERIAL_NUMBER' });
   } catch (e) {
-    Logger.log('[Sheets API] batchGet 실패 → SpreadsheetApp으로 읽습니다 (' + keys.join(',') + '): ' + e);
+    _offApiFailed('batchGet(' + keys.join(',') + ')', e);
     return null;
   }
   var vr = res.valueRanges || [], out = {};
@@ -698,18 +705,23 @@ function _offCell(v, text) {
 var OFF_API_CELLS_PER_CALL = 50000;
 
 /* key 탭의 startRow(1-based)부터 rows를 쓰고 그 바로 아래 clear행을 비운다 — batchUpdate 한 번(칸이 상한을 넘으면 나눠서).
-   _offWriteBlock + clearContent와 같다: 모자란 행은 끝에 덧붙이고, 텍스트 열은 쓴 행 범위에 '@' 서식을 건다. */
+   _offWriteBlock + clearContent와 같다: 모자란 행은 끝에 덧붙이고, 텍스트 열은 쓴 행 범위에 '@' 서식을 건다.
+   API 호출이 실패하면(한도 초과 등) 같은 내용을 SpreadsheetApp으로 다시 쓴다 — 나눠 쓰다 중간에 실패해도 전체를 다시 쓰므로 결과는 같다. */
 function _offWriteRows(key, startRow, rows, clear) {
   clear = clear || 0;
   if (!rows.length && !clear) return;
-  var def = OFF_TABS[key], W = def.headers.length;
+  var def = OFF_TABS[key];
   if (_offIo) delete _offIo.rows[def.name];
-  if (!_offApiReady()) {
-    var sheet = _offSheet(_offSS(), key);
-    _offWriteBlock(sheet, def, startRow, rows);
-    if (clear) sheet.getRange(startRow + rows.length, 1, clear, W).clearContent();
-    return;
+  if (_offApiReady()) {
+    try { _offWriteRowsApi(key, startRow, rows, clear); return; }
+    catch (e) { _offApiFailed('batchUpdate(' + key + ')', e); }
   }
+  var sheet = _offSheet(_offSS(), key);
+  _offWriteBlock(sheet, def, startRow, rows);
+  if (clear) sheet.getRange(startRow + rows.length, 1, clear, def.headers.length).clearContent();
+}
+function _offWriteRowsApi(key, startRow, rows, clear) {
+  var def = OFF_TABS[key], W = def.headers.length;
   var m = _offTabMeta(key), reqs = [], r0 = startRow - 1, need = r0 + rows.length;
   if (need > m.rows) reqs.push({ appendDimension: { sheetId: m.sheetId, dimension: 'ROWS', length: need - m.rows } });
   if (rows.length) _offTextRuns(def).forEach(function (run) {
@@ -1644,18 +1656,17 @@ function offline_benchmarkReads() {
   var keys = [];
   OFF_BENCH_ACTIONS.forEach(function (a) { a[1].forEach(function (g) { g.forEach(function (k) { if (keys.indexOf(k) < 0) keys.push(k); }); }); });
   var ss0 = SpreadsheetApp.openById(id);
+  // Sheets API는 사용자당 분당 읽기 60회 — 탭별 API 읽기는 한 번만(그 결과로 같은지도 본다). 전체 점검의 API 호출 ≈ 탭 수 + 액션별 3회
   keys.forEach(function (k) {
     var o = [], n = [], oldRows = null, apiRows;
-    for (var i = 0; i < REPS; i++) {
-      o.push(ms(function () { oldRows = oldRead(ss0, k); }));
-      if (api) n.push(ms(function () { apiRows = _offBatchGet([k]); }));
-    }
+    for (var i = 0; i < REPS; i++) o.push(ms(function () { oldRows = oldRead(ss0, k); }));
+    if (api) n.push(ms(function () { apiRows = _offBatchGet([k]); }));
     var row = { tab: OFF_TABS[k].name, rows: oldRows.length, oldMs: avg(o), apiMs: avg(n), same: null, note: '' };
     if (api) {
       var got = apiRows && apiRows[k];
-      if (!apiRows) row.note = 'batchGet 실패 → SpreadsheetApp 대체';
+      if (!apiRows) row.note = 'batchGet 실패(한도 초과 등 — 1분 뒤 다시) → 대시보드는 이때 SpreadsheetApp으로 읽는다';
       else if (got === undefined) row.note = '텍스트 열에 숫자(날짜 셀?) → 이 탭은 SpreadsheetApp 대체';
-      var mine = _offReadTabs([k], { optional: ['settings'] })[k];
+      var mine = got || oldRows; // 대체 경로면 SpreadsheetApp으로 읽은 그대로
       row.same = JSON.stringify(mine) === JSON.stringify(oldRows);
       if (!row.same) {
         var trim = function (rows) { rows = rows.slice(); while (rows.length && _offBlankRow(rows[rows.length - 1])) rows.pop(); return JSON.stringify(rows); };
@@ -1666,15 +1677,16 @@ function offline_benchmarkReads() {
     say('[탭] ' + row.tab + ' ' + row.rows + '행 · 이전 ' + row.oldMs + 'ms' + (api ? ' · API ' + row.apiMs + 'ms · 읽은 행 ' + (row.same ? '같음' : '⚠ 다름') : '') + (row.note ? ' · ' + row.note : ''));
   });
   OFF_BENCH_ACTIONS.forEach(function (a) {
-    var o = [], n = [], loaded = {}, calls = 0, reads = 0;
+    var o = [], n = [], loaded = {}, calls = 0, reads = 0, fell = 0;
     a[1].forEach(function (g) { reads += g.length; if (g.some(function (k) { return !loaded[k]; })) calls++; g.forEach(function (k) { loaded[k] = true; }); });
     for (var i = 0; i < REPS; i++) {
       o.push(ms(function () { a[1].forEach(function (g) { var ss = SpreadsheetApp.openById(id); g.forEach(function (k) { oldRead(ss, k); }); }); }));
-      if (api) n.push(ms(function () { _offWithIo(function () { a[1].forEach(function (g) { _offReadTabs(g, { optional: ['settings'] }); }); }); }));
+      if (api) n.push(ms(function () { _offWithIo(function () { a[1].forEach(function (g) { _offReadTabs(g, { optional: ['settings'] }); }); if (_offIo.apiDown) fell++; }); }));
     }
-    var row = { action: a[0], oldMs: avg(o), newMs: avg(n), oldCalls: a[1].length + ' openById · 탭 읽기 ' + reads + '번', newCalls: 'batchGet ' + calls + '번' };
+    var row = { action: a[0], oldMs: avg(o), newMs: avg(n), oldCalls: a[1].length + ' openById · 탭 읽기 ' + reads + '번', newCalls: 'batchGet ' + calls + '번', fellBack: fell };
     out.actions.push(row);
-    say('[액션] ' + row.action + ' · 이전 ' + row.oldMs + 'ms(' + row.oldCalls + ')' + (api ? ' · 지금 ' + row.newMs + 'ms(' + row.newCalls + ') · ' + (row.newMs ? (row.oldMs / row.newMs).toFixed(1) + '배' : '') : ''));
+    say('[액션] ' + row.action + ' · 이전 ' + row.oldMs + 'ms(' + row.oldCalls + ')' + (api ? ' · 지금 ' + row.newMs + 'ms(' + row.newCalls + ') · ' + (row.newMs ? (row.oldMs / row.newMs).toFixed(1) + '배' : '') +
+      (fell ? ' · ⚠ ' + REPS + '번 중 ' + fell + '번은 한도 초과로 SpreadsheetApp이 섞임 — 1분 뒤 다시 재야 정확' : '') : ''));
   });
   var bad = out.tabs.filter(function (t) { return t.same === false; });
   say(api ? (bad.length ? '⚠ 읽은 행이 다른 탭: ' + bad.map(function (t) { return t.tab; }).join(', ') : '모든 탭 — Sheets API로 읽은 행 = 이전 방식으로 읽은 행') : '');

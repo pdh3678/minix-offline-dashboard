@@ -148,6 +148,14 @@ function scenario(g) {
   check('같은 파일 재반영 — 판매원장 행 수 그대로 · 지운 행 = 넣은 행', A.res.upEmartAgain.applied.sales === A.res.upEmartAgain.applied.salesRemoved &&
     A.res.upEmartAgain.applied.sales === A.res.upEmart.applied.sales && salesRowsA === dataRows(gb.tab('판매원장')).length, [A.res.upEmart.applied, A.res.upEmartAgain.applied]);
   check('  ↳ 판매원장에 이마트·트레이더스·전자랜드·하이마트·ERP 행이 다 있다(빈 시나리오가 아님)', ['emart', 'traders', 'etland', 'himart', 'shinsegae', 'theablen'].every(c => B.tabs['판매원장'].some(r => r[3] === c)), B.tabs['판매원장'].map(r => r[3]));
+  // 사용자당 분당 한도(읽기·쓰기 60회)를 넘는 순간이 섞여도 — Sheets API 호출 3번에 1번이 한도 초과
+  const gc = loadOfflineGas({ setup: true, today: TODAY, sheetsApiFailEvery: 3 });
+  const Cq = scenario(gc);
+  const failed = gc.api.calls.filter(c => c.failed);
+  check('한도 초과가 섞여도(API 호출 ' + gc.api.calls.length + '번 중 ' + failed.length + '번 실패 — 읽기·쓰기 모두) 모든 탭·서식·응답이 SpreadsheetApp 경로와 같다',
+    failed.some(c => c.op === 'batchGet') && failed.some(c => c.op === 'batchUpdate') && !Object.keys(Cq.res).some(k => Cq.res[k].error) &&
+    Object.keys(B.tabs).every(n => J(Cq.tabs[n]) === J(B.tabs[n])) && Object.keys(B.formats).every(n => J(Cq.formats[n]) === J(B.formats[n])) &&
+    Object.keys(B.res).every(k => J(Cq.res[k]) === J(B.res[k])), Object.keys(B.res).filter(k => J(Cq.res[k]) !== J(B.res[k])).concat(Object.keys(B.tabs).filter(n => J(Cq.tabs[n]) !== J(B.tabs[n]))));
 
   console.log('\n[2] 왕복 — 조회는 batchGet 한 번, 반영은 batchGet 한 번 + 쓴 탭마다 batchUpdate 한 번, SpreadsheetApp 0');
   {
@@ -210,10 +218,11 @@ function scenario(g) {
     g.ctx._offRewrite('stockDaily', [base[0]], 6);
     check('전체 다시 쓰기가 짧아지면 남는 5행은 비운다(행은 지우지 않음 — clearContent와 같다)', J(dataRows(sh)) === J([base[0]]) && sh._grid.length === before + 2 &&
       sh._grid.slice(2).every(x => x.every(v => v === '')), sh._grid.slice(0, 4));
-    g.api.reset();
-    let threw = '';
-    try { g.ctx._offWriteRows('stockDaily', 2, [['2026-09-01', 'x', 'y', NaN, '', '', 'U']], 99999); } catch (e) { threw = e.message; }
-    check('batchUpdate가 실패하면 아무것도 바뀌지 않는다(원자적)', /exceeds grid limits/.test(threw) && J(dataRows(sh)) === J([base[0]]), threw);
+    g.api.reset(); resetStats();
+    g.api.failNext('batchUpdate', 1);
+    g.ctx._offRewrite('stockDaily', base, 1);
+    check('batchUpdate가 한도 초과로 실패하면 같은 내용을 SpreadsheetApp으로 다시 쓴다(값·텍스트 서식)', J(dataRows(sh)) === J(base) && g.api.calls[g.api.calls.length - 1].failed && STATS.writes > 0 &&
+      sh._formats.slice(-2).every(f => f.r === 2 && f.nr === 4 && f.f === '@'), [dataRows(sh), STATS.writes]);
     check('값 변환 — 텍스트 열은 문자열, 숫자·참거짓은 그대로, NaN·Infinity는 문자열, \'\'·null은 빈칸', J([g.ctx._offCell(12, true), g.ctx._offCell(12, false), g.ctx._offCell(true, false), g.ctx._offCell(NaN, false), g.ctx._offCell('', false), g.ctx._offCell(null, true)]) ===
       J([{ userEnteredValue: { stringValue: '12' } }, { userEnteredValue: { numberValue: 12 } }, { userEnteredValue: { boolValue: true } }, { userEnteredValue: { stringValue: 'NaN' } }, {}, {}]));
     check('범위 이름 — 탭 이름의 작은따옴표는 두 번(A1 표기)', g.ctx._offA1({ name: "가'나", headers: [1, 2, 3] }) === "'가''나'!A2:C" && g.ctx._offA1(T.sales) === "'판매원장'!A2:L");
@@ -226,6 +235,11 @@ function scenario(g) {
     const parts = g.api.calls.filter(c => c.op === 'batchUpdate');
     check('큰 쓰기는 나눠 보낸다 — 9행 → 2행씩 5번, 행 늘리기·서식은 첫 요청에만, 남는 9행 비우기는 마지막 요청에', parts.length === 5 && J(parts[0].requests) === J(['repeatCell', 'repeatCell', 'updateCells']) &&
       parts.slice(1).every(p => J(p.requests) === J(['updateCells'])) && J(dataRows(sh)) === J(big) && sh._grid.slice(11, 20).every(x => x.every(v => v === '')), parts.map(p => p.requests));
+    const big2 = big.map(r => r.slice(0, 3).concat([r[3] + 100], r.slice(4)));
+    g.ctx._offRewrite('stockDaily', big.concat(big), 9);
+    g.api.reset(); g.api.failNext('batchUpdate', 1, 2); // 2번째까지 쓰고 3번째에서 한도 초과
+    g.ctx._offRewrite('stockDaily', big2, 18);
+    check('  ↳ 나눠 쓰다 중간에 실패해도 SpreadsheetApp으로 전체를 다시 써서 결과가 같다', J(dataRows(sh)) === J(big2) && g.api.calls.filter(c => c.failed).length === 1, dataRows(sh));
     g.ctx.OFF_API_CELLS_PER_CALL = 50000;
     g.ctx._offWriteRows('readme', 2, [['탭', '설명 (sheetId 0 탭)']], 0);
     check('sheetId 0인 첫 탭(README)에도 쓴다 — 응답에서 0이 빠져도', g.off._order[0] === 'README' && J(g.tab('README')._grid[1].slice(0, 2)) === J(['탭', '설명 (sheetId 0 탭)']));
@@ -277,6 +291,17 @@ function scenario(g) {
     g.api.reset();
     C._offRead('channel'); C._offRead('channel');
     check('범위 밖(편집기·직접 호출)에서는 기억하지 않는다', g.api.count('batchGet') === 2 && C._offIo === null);
+    g.api.reset(); resetStats();
+    g.api.failNext('batchGet', 1);
+    C._offWithIo(() => {
+      const ch = C._offRead('channel'), st = C._offRead('store'); // 점포마스터 = 거래처 초기값 9행
+      C._offRewrite('store', st, st.length);
+      check('한도 초과가 한 번 나면 그 요청의 나머지 읽기·쓰기는 API를 부르지 않고 SpreadsheetApp으로', ch.length === 10 && st.length === 9 && g.api.calls.length === 1 && g.api.calls[0].failed &&
+        STATS.reads === 2 && STATS.writes > 0, [g.api.calls, STATS.reads, STATS.writes]);
+    });
+    g.api.reset();
+    C._offWithIo(() => { C._offRead('channel'); });
+    check('  ↳ 다음 요청은 다시 API부터', g.api.count('batchGet') === 1 && !g.api.calls[0].failed);
   }
 
   console.log('\n[6] offline_benchmarkReads — 편집기 점검(운영 시트에 쓰지 않는다)');
@@ -294,6 +319,10 @@ function scenario(g) {
     check('  ↳ 헤더 폭 밖 열에만 값이 있는 뒤쪽 행은 "뒤쪽 빈 행만 다름"으로 알려 준다', /뒤쪽 빈 행 1개/.test(b.tabs.find(t => t.tab === '판매원장').note), b.tabs.find(t => t.tab === '판매원장'));
     check('  ↳ 파트 홈: 이전 openById 4번·탭 읽기 21번 → 지금 batchGet 3번', b.actions[3].oldCalls === '4 openById · 탭 읽기 21번' && b.actions[3].newCalls === 'batchGet 3번', b.actions[3]);
     check('  ↳ 시트·캐시에 아무것도 쓰지 않았다(batchUpdate 0)', J(g.off._order.map(n => g.tab(n)._grid)) === grids && J(g.cacheStore) === cache && g.api.count('batchUpdate') === 0);
+    check('  ↳ Sheets API 읽기 31번(탭 13 + 액션 18) — 사용자당 분당 한도 60회 아래', g.api.count('batchGet') === 31, g.api.count('batchGet'));
+    g.api.reset(); g.api.failNext('batchGet', 1, 14); // 탭 13번 + 월별 첫 회는 통과, 그다음 한 번 한도 초과
+    const bq = g.ctx.offline_benchmarkReads();
+    check('  ↳ 한도 초과가 섞이면 그 액션 줄에 "1분 뒤 다시" 표시(결과는 같음)', bq.actions[0].fellBack === 1 && /한도 초과로 SpreadsheetApp이 섞임/.test(bq.log.find(l => /offline_getMonthly/.test(l))) && bq.tabs.every(t => t.same), bq.log);
     const g2 = loadOfflineGas({ setup: true, today: TODAY, noSheetsApi: true });
     const b2 = g2.ctx.offline_benchmarkReads();
     check('Sheets 고급 서비스가 꺼져 있으면 첫 줄에 안내하고 이전 방식만 잰다', b2.sheetsApi === false && /꺼져 있다/.test(b2.log[0]) && b2.tabs.every(t => t.apiMs === null && t.oldMs != null), b2.log[0]);
