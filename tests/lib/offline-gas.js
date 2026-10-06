@@ -201,19 +201,27 @@ function loadOfflineGas(opts) {
     tryLock: () => { locks.taken++; return true; }, waitLock() { locks.taken++; }, releaseLock() {}
   });
   global.Utilities.formatDate = formatDate;
+  // SheetJS 무결성 확인(SHA-384)·파일 사이 간격 — 수신함 자동 반영(apps-script-offline-inbox.js)이 쓴다. sleep은 기다리지 않고 합만 기록
+  global.Utilities.DigestAlgorithm = { SHA_384: 'sha384', SHA_256: 'sha256', MD5: 'md5' };
+  global.Utilities.Charset = { UTF_8: 'utf8' };
+  global.Utilities.computeDigest = (alg, value, charset) => Array.from(require('crypto').createHash(alg)
+    .update(Array.isArray(value) ? Buffer.from(value) : Buffer.from(String(value), charset || 'utf8')).digest(), b => (b > 127 ? b - 256 : b));
+  const slept = { ms: 0 };
+  global.Utilities.sleep = ms => { slept.ms += ms; };
   delete global.Sheets;
   const api = opts.noSheetsApi ? null : installSheetsApi(off, OFFLINE_ID, opts.sheetsApiFailEvery);
   const ctx = vm.createContext(global);
   const dir = opts.dir || PROJ;
   vm.runInContext(fs.readFileSync(path.join(dir, 'apps-script.js'), 'utf8'), ctx, { filename: 'apps-script.js' });
   vm.runInContext(fs.readFileSync(path.join(dir, 'apps-script-offline.js'), 'utf8'), ctx, { filename: 'apps-script-offline.js' });
-  ['apps-script-offline-targets.js', 'apps-script-offline-inventory.js', 'apps-script-home.js'].forEach(f => {
+  // 편집기 파일 순서 그대로 — offline_parsers는 브라우저 파서(src/features/offline/parsers.js) 그 파일
+  ['apps-script-offline-targets.js', 'apps-script-offline-inventory.js', 'apps-script-home.js', 'src/features/offline/parsers.js', 'apps-script-offline-inbox.js'].forEach(f => {
     const p = path.join(dir, f);
     if (fs.existsSync(p)) vm.runInContext(fs.readFileSync(p, 'utf8'), ctx, { filename: f });
   });
   if (opts.today) ctx._offToday = () => opts.today;
   if (opts.setup) ctx.offline_setupSheets();
-  return { ctx, off, legacy, cacheStore, locks, api, tab: name => off.getSheetByName(name) };
+  return { ctx, off, legacy, cacheStore, locks, api, slept, scriptProps, tab: name => off.getSheetByName(name) };
 }
 
 // 탭의 데이터 행(헤더 제외, 값 있는 행까지)

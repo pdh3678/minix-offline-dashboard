@@ -47,6 +47,7 @@ const SUITES = [
   ['offline-erp.test.js', 'ERP 매출이익리스트 — 채널·거래처 설정(멱등), 판매원장 금액·수수료, 파서(쓰는 열만·무상 동봉 제외·합산·기간), 반영(거래처 → 채널·ERP 채널 교체·멱등·개인정보 없음), 업로드 미리보기, 코드 매핑 제안, IN실적원천 upload(월별·목표 관리·이관 대조·재고·파트 홈·채널 화면)'],
   ['offline-channel-category.test.js', '채널 대분류 — 채널 현황 묶음·묶음 합계·매트릭스 소계, 채널 대분류 필터(KPI·재고·기준일·경보), 채널 상세 탭 묶음·이동, 재고 현황 머리 묶음, 목표 관리 월별·연간 소계·필터·변경 보호, 업로드 현황·로그·코드 매핑 표시, 파트 홈 펼침 표'],
   ['offline-sheets-api.test.js', 'Sheets API 입출력 — API 경로 = SpreadsheetApp 경로(시트·서식·응답), 조회 batchGet 1번·반영 탭마다 batchUpdate 1번, 끝부분만 쓰기·남는 행 비우기, 날짜 셀·없는 탭 대체, 요청 범위 기억, appsscript.json'],
+  ['offline-inbox-parsers.test.js', '수신함 파서 공유 — GAS가 브라우저 파서 파일 그대로, SheetJS 같은 주소·SRI·캐시·변조 거부, samples 브라우저 경로 = GAS 경로(XLSX_PATH 있을 때)'],
   ['review-html-embed.test.js', '회고 HTML 임베드 — review_* 세션·첨부 폴더 제한·5MB/20MB, sandbox allow-scripts만·blob 없음, 높이 메시지 출처 검증, 원문 캐시']
 ];
 

@@ -1,5 +1,8 @@
 'use strict';
 /* 협력사 포털 엑셀 판별·파싱 — 순수 함수. 브라우저에서는 전역 OfflineParsers, node에서는 require().
+   GAS(드라이브 수신함 자동 반영)도 이 파일을 **그대로** 편집기 파일 "offline_parsers"로 붙여넣어 쓴다(전역 OfflineParsers) —
+   수동 업로드와 자동 반영이 같은 파서를 써야 결과가 같다. 그래서 브라우저·GAS 어느 쪽 전용 API(window·document·TextDecoder·Buffer 필수)도
+   쓰지 않는다(Buffer는 있을 때만). 고친 뒤에는 GAS에도 다시 붙여넣을 것 — tests/offline-inbox-parsers.test.js가 두 경로 결과를 비교한다.
    흐름: 파일 → readWorkbookRows(XLSX, 바이트) → 2차원 배열 → parseRows(rows, opts) → 정규화 레코드
          → toUploadPayload(결과, 미리보기에서 고친 값) → offline_upload
 
