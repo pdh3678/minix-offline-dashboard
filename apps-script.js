@@ -1942,12 +1942,13 @@ function parseMainSheet(sheet) {
   var mainRange = sheet.getRange(1, 1, lastDataRow, sheet.getLastColumn());
   var data = mainRange.getValues();
 
-  // 취소선 감지 (B열 기준, 실패해도 파싱은 계속)
+  // 취소선 감지 (B열 기준, 실패해도 파싱은 계속) — 서식은 브랜드 열만 읽는다(2026-10-02). 예전엔 메인 범위 전체(약 370행 × 60열)의
+  // TextStyle을 만들어 브랜드 열 하나만 봤다 — 같은 칸을 읽으므로 결과는 같고, 서식 객체 수만 1/60이 된다
   var strikeMap = {};
   try {
-    var styles = mainRange.getTextStyles();
+    var styles = sheet.getRange(1, COL.brand + 1, lastDataRow, 1).getTextStyles();
     for (var r = DATA_START_ROW; r < styles.length; r++) {
-      if (styles[r] && styles[r][COL.brand] && styles[r][COL.brand].isStrikethrough()) {
+      if (styles[r] && styles[r][0] && styles[r][0].isStrikethrough()) {
         strikeMap[r] = true;
       }
     }
@@ -4445,4 +4446,49 @@ function _normalizeSheetDates(dryRun) {
   }
 
   return summary;
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// ── 공구 조회 점검 (편집기에서 직접 실행 — 시트·캐시에 쓰지 않는다, 2026-10-02) ──
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+/* gongu_benchmarkRead — 공구 분석 데이터 조회(doGet 캐시 없음)가 시간을 어디에 쓰는지 단계별로 잰다(3번 평균).
+   취소선 서식을 메인 범위 전체로 읽던 이전 방식과 브랜드 열만 읽는 지금 방식(parseMainSheet)의 시간과 결과(빠지는 행)가 같은지도 본다.
+   doGet 중 쓰기가 생길 수 있는 단계(_ensureExtraHeaders·_autoFillMissingDealIds)와 캐시 저장은 하지 않는다. 결과는 실행 로그와 반환값. */
+function gongu_benchmarkRead() {
+  var REPS = 3, ss = SpreadsheetApp.getActiveSpreadsheet(), sheet = ss.getSheetByName(MAIN_SHEET), out = { steps: [], log: [] };
+  var say = function (s) { out.log.push(s); Logger.log(s); };
+  _resolveCols(sheet);
+  var lastDataRow = _getLastDataRow(sheet, COL.channel + 1), lastCol = sheet.getLastColumn(), n = lastDataRow - DATA_START_ROW;
+  var strike = function (styles, col) {
+    var rows = [];
+    for (var r = DATA_START_ROW; r < styles.length; r++) if (styles[r] && styles[r][col] && styles[r][col].isStrikethrough()) rows.push(r + 1);
+    return rows.join(',');
+  };
+  var steps = [
+    ['세션 확인(_sessions 전체 읽기 — 모든 요청)', function () { var s = ss.getSheetByName(SESSION_SHEET); return s ? _findSessionRow(s, '-') : null; }],
+    ['열 해석(_resolveCols)', function () { _resolveCols(sheet); }],
+    ['마지막 데이터 행(_getLastDataRow)', function () { return _getLastDataRow(sheet, COL.channel + 1); }],
+    ['값 getValues(' + lastDataRow + '행 × ' + lastCol + '열)', function () { return sheet.getRange(1, 1, lastDataRow, lastCol).getValues().length; }],
+    ['취소선 이전 — getTextStyles(' + lastDataRow + '행 × ' + lastCol + '열)', function () { return strike(sheet.getRange(1, 1, lastDataRow, lastCol).getTextStyles(), COL.brand); }],
+    ['취소선 지금 — getTextStyles(브랜드 열 ' + lastDataRow + '행)', function () { return strike(sheet.getRange(1, COL.brand + 1, lastDataRow, 1).getTextStyles(), 0); }],
+    ['릴스 링크 getRichTextValues(' + n + '행 × ' + REEL_SLOT_COUNT + '열)', function () { return n > 0 ? sheet.getRange(DATA_START_ROW + 1, REEL_COL_START, n, REEL_SLOT_COUNT).getRichTextValues() : null; }],
+    ['채널 링크 getRichTextValues(' + n + '행 × 1열)', function () { return n > 0 ? sheet.getRange(DATA_START_ROW + 1, COL.channel + 1, n, 1).getRichTextValues() : null; }],
+    ['캘린더 이벤트(_loadCalendarEvents)', function () { return _loadCalendarEvents(ss).length; }],
+    ['parseMainSheet 전체(지금 코드)', function () { return parseMainSheet(sheet).deals.length; }]
+  ];
+  steps.forEach(function (s) {
+    var times = [], last = null, err = '';
+    for (var i = 0; i < REPS; i++) {
+      var t = Date.now();
+      try { last = s[1](); } catch (e) { err = String(e); }
+      times.push(Date.now() - t);
+    }
+    var row = { step: s[0], ms: Math.round(times.reduce(function (a, b) { return a + b; }, 0) / REPS), result: typeof last === 'string' || typeof last === 'number' ? last : null, error: err };
+    out.steps.push(row);
+    say('[공구] ' + row.step + ' · 평균 ' + row.ms + 'ms' + (err ? ' · 오류 ' + err : ''));
+  });
+  var before = out.steps[4], now = out.steps[5];
+  out.strikeSame = !before.error && !now.error && before.result === now.result;
+  say('취소선으로 빠지는 행 — 이전 = 지금: ' + (out.strikeSame ? '같음' : '⚠ 다름') + ' (' + (now.result ? String(now.result).split(',').length : 0) + '행' + (now.result ? ': ' + now.result : '') + ')');
+  return out;
 }

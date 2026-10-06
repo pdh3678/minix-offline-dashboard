@@ -235,5 +235,33 @@ console.log('\n[11] 헤더 문구만 바꿔도 즉시 반영');
   ctx._resolveCols(sh);
   check("'인플루언서 링크'로 바꿔도 같은 논리열", ctx.COL.link === renamed.indexOf('인플루언서 링크'), ctx.COL.link);
 }
+console.log('\n[12] 취소선 감지 — 서식은 브랜드 열만 읽고, 브랜드 칸에 취소선이 있는 행만 뺀다(2026-10-02)');
+{
+  const g = buildGrid();
+  g.push(mkRow({ [C.brand]: '미닉스', [C.product]: '더 플렌더', [C.channel]: '채널A', [C.dealId]: 'S1', [C.codeSeq]: 1, [C.startMD]: '2026-01-10' }));
+  g.push(mkRow({ [C.brand]: '미닉스', [C.product]: '더 시프트', [C.channel]: '채널B', [C.dealId]: 'S2', [C.codeSeq]: 1, [C.startMD]: '2026-01-11' })); // 브랜드 칸 취소선
+  g.push(mkRow({ [C.brand]: '미닉스', [C.product]: '더 슬림', [C.channel]: '채널C', [C.dealId]: 'S3', [C.codeSeq]: 1, [C.startMD]: '2026-01-12' }));  // 제품 칸만 취소선
+  const sh = makeSheet('실적통합', g);
+  const struck = { [4 + ':' + (C.brand + 1)]: true, [5 + ':' + (C.product + 1)]: true }; // 1-based 행:열
+  const styleCalls = [], orig = sh.getRange;
+  sh.getRange = (r, c, nr, nc) => {
+    const api = orig(r, c, nr, nc);
+    api.getTextStyles = () => {
+      styleCalls.push({ r, c, nr, nc });
+      return Array.from({ length: nr }, (_, i) => Array.from({ length: nc }, (_, j) => ({ isStrikethrough: () => !!struck[(r + i) + ':' + (c + j)] })));
+    };
+    return api;
+  };
+  const cx = loadGas({ '실적통합': sh });
+  cx._resolveCols(sh);
+  const p = cx.parseMainSheet(sh);
+  check('브랜드 칸 취소선 행(S2)만 빠지고, 제품 칸 취소선(S3)은 그대로', JSON.stringify(p.deals.map(d => d.dealId)) === JSON.stringify(['S1', 'S3']), p.deals.map(d => d.dealId));
+  check('  ↳ 서식은 브랜드 열 1열 × 데이터 끝 행까지만 한 번 읽는다', styleCalls.length === 1 && styleCalls[0].c === C.brand + 1 && styleCalls[0].nc === 1 && styleCalls[0].r === 1 && styleCalls[0].nr === 5, styleCalls);
+  // 편집기 점검 함수 — 단계 10개, 이전(전체 범위)·지금(브랜드 열) 취소선 결과 같음, 시트에 쓰지 않음
+  sh._calls.length = 0;
+  const b = cx.gongu_benchmarkRead();
+  check('gongu_benchmarkRead — 단계 10개 시간, 취소선으로 빠지는 행 이전 = 지금(4행), 쓰기 없음', b.steps.length === 10 && b.steps.every(s => !s.error && s.ms >= 0) &&
+    b.strikeSame === true && b.steps[5].result === '4' && sh._calls.every(c => !/^set|clear|insert|delete|append/.test(c.op)), [b.log, sh._calls]);
+}
 console.log('\n--------------------------------\n통과 ' + pass + ' / 실패 ' + fail);
 process.exit(fail ? 1 : 0);
