@@ -1,7 +1,8 @@
 'use strict';
 /* 코드 매핑(#admin/code-mapping) — 채널마다 다른 원본코드를 표준 SKU에 연결한다.
-   위: 미매칭 코드(offline_getUnmatched) — 데이터 업로드 카드와 같은 매핑 패널(mapping-panel.js)
+   위: 미매칭 코드(offline_getUnmatched) — 데이터 업로드 카드와 같은 매핑 패널(mapping-panel.js), 대시보드 대상이 아닌 코드는 [제외]
    아래: 전체 매핑 표 — 채널·품목군·재고구분 필터, 검색, 수정, 비활성화(sku_id 비움 → 미매칭으로 복귀)
+   [제외 목록] 탭: 제외코드(마스터 excluded) — 사유·등록, [제외 해제](offline_saveExcluded include → 미매칭으로 복귀)
    저장하면 마스터(offline: 캐시는 서버가 무효화)와 미매칭 목록을 다시 받는다. */
 
 const _CM={tab:'mapping',unmatched:null,err:'',filter:{ch:'',line:'',type:'',q:''},editKey:null,edit:null,confirmKey:null,busy:false};
@@ -25,24 +26,60 @@ function _cmRender(){
   const host=document.getElementById('page-admin-code-mapping');
   if(!host)return;
   if(_CM.err&&!OFFLINE_MASTERS){host.innerHTML=`<div class="card"><div class="card-hd">코드 매핑</div><div class="up-err">${_escHtml(_CM.err)}</div></div>`;return;}
-  // [코드 매핑 | 제품마스터] — 제품마스터 탭은 sku-master.js
-  const tabs=`<div class="subtabs open">${[['mapping','코드 매핑'],['skus','제품마스터']].map(([k,l])=>`<button type="button" class="stab${_CM.tab===k?' sam':''}" onclick="_cmSetTab('${k}')">${l}</button>`).join('')}</div>`;
+  // [코드 매핑 | 제외 목록 | 제품마스터] — 제품마스터 탭은 sku-master.js
+  const nx=OFFLINE_MASTERS&&OFFLINE_MASTERS.excluded?OFFLINE_MASTERS.excluded.length:null;
+  const tabs=`<div class="subtabs open">${[['mapping','코드 매핑'],['excluded','제외 목록'+(nx?' ('+nx+')':'')],['skus','제품마스터']].map(([k,l])=>`<button type="button" class="stab${_CM.tab===k?' sam':''}" onclick="_cmSetTab('${k}')">${l}</button>`).join('')}</div>`;
   if(_CM.tab==='skus'){host.innerHTML=tabs+_skmHtml();return;}
+  if(_CM.tab==='excluded'){host.innerHTML=tabs+_cmExcludedHtml();return;}
   const n=_CM.unmatched?_CM.unmatched.length:null;
   host.innerHTML=tabs+`
-  <div class="card"><div class="card-hd">미매칭 코드${n!=null?' '+n+'개':''}<span class="card-hd-r">제안 = 같은 모델명이 이미 매핑된 SKU · 확정은 저장 버튼으로</span></div>
+  <div class="card"><div class="card-hd">미매칭 코드${n!=null?' '+n+'개':''}<span class="card-hd-r">제안 = 같은 모델명이 이미 매핑된 SKU · 확정은 저장 버튼으로 · 대시보드 대상이 아닌 코드는 [제외]</span></div>
     ${_CM.err?`<div class="up-err">${_escHtml(_CM.err)}</div>`:''}
     <div id="cmUnmatched">${_CM.unmatched?'':'<div class="mp-empty">불러오는 중…</div>'}</div></div>
   <div class="card"><div class="card-hd">전체 매핑<span class="card-hd-r" id="cmCount"></span></div>
     ${_cmSharedNoteHtml()}${_cmFiltersHtml()}<div id="cmTable"></div></div>`;
   if(_CM.unmatched){
     renderMappingPanel('cmUnmatched',_CM.unmatched.map(u=>({channelId:u.channelId,code:u.code,name:u.name,count:u.count,lastSeen:u.lastSeen})),
-      {showChannel:true,showStats:true,onSaved:()=>_cmLoad()});
+      {showChannel:true,showStats:true,allowExclude:true,onSaved:()=>_cmLoad()});
   }
   _cmRenderTable();
 }
 
 function _cmSetTab(t){_CM.tab=t;_cmRender();}
+
+/* 제외 목록 — 제외코드 탭(마스터 excluded). 판매원장·재고에는 그대로 있고 모든 집계·미매칭에서만 빠진다.
+   [제외 해제] → 제외코드에서 지우고 미매칭 목록으로 돌려보낸다(집계에는 미매칭으로 잡힌다) */
+function _cmExcludedHtml(){
+  const m=OFFLINE_MASTERS;
+  if(!m)return '<div class="card"><div class="mp-empty">불러오는 중…</div></div>';
+  const list=(m.excluded||[]).slice().sort((a,b)=>String(b.at).localeCompare(String(a.at))||String(a.channelId).localeCompare(String(b.channelId))||String(a.code).localeCompare(String(b.code)));
+  _CM.exRows=list;
+  const brands=(m.excludeBrands||[]).join(', ');
+  const rows=list.map((x,i)=>`<tr><td>${_escHtml(_offlineChannelLabel(x.channelId))}</td><td class="mp-code">${_escHtml(x.code)}</td><td class="cm-wrap">${_escHtml(x.name)}</td>
+    <td>${_escHtml(x.reason)}${x.reason==='브랜드 규칙'?'<div class="cm-reg">해제해도 다음 ERP 업로드 때 다시 제외됩니다 — 설정 탭 ERP_제외브랜드</div>':''}</td>
+    <td class="cm-reg">${_escHtml(x.at)}<br>${_escHtml(x.by)}</td>
+    <td><button type="button" class="btn-cancel up-btn" ${_CM.busy?'disabled':''} onclick="_cmInclude(${i})">제외 해제</button></td></tr>`).join('');
+  return `<div class="card"><div class="card-hd">제외 목록 ${list.length}개<span class="card-hd-r">판매원장·재고에는 그대로 있고 집계·미매칭에서만 빠집니다 · 해제하면 다시 미매칭으로</span></div>
+    ${_CM.err?`<div class="up-err">${_escHtml(_CM.err)}</div>`:''}
+    <div class="off-muted tg-help" style="margin:0 0 8px">ERP 매출이익리스트 브랜드가 <b>${_escHtml(brands||'(없음)')}</b>(으)로 시작하는 상품코드는 업로드 때 자동으로 제외됩니다(사유: 브랜드 규칙) — 설정 탭 ERP_제외브랜드에서 바꿉니다(쉼표로 여러 개).</div>
+    ${list.length?`<div class="tbl-wrap"><table class="cm-tbl"><thead><tr><th>채널</th><th>원본코드</th><th>원본상품명</th><th>제외사유</th><th>등록</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>`
+      :'<div class="mp-empty">제외한 코드가 없습니다 — 코드 매핑 탭의 미매칭 코드에서 [제외]를 누르면 여기에 쌓입니다.</div>'}</div>`;
+}
+async function _cmInclude(i){
+  const x=_CM.exRows&&_CM.exRows[i];
+  if(!x||_CM.busy)return;
+  _CM.busy=true;_cmRender();
+  try{
+    await _offlineCall('offline_saveExcluded',{items:[{op:'include',channelId:x.channelId,code:x.code}]});
+    showToast(x.code+' 제외를 해제했습니다 — 다시 미매칭 코드로 돌아갑니다.',{type:'success'});
+    _CM.busy=false;
+    await _cmLoad();
+  }catch(err){
+    showToast('제외 해제 실패: '+err.message,{type:'error'});
+  }finally{
+    _CM.busy=false;_cmRender();
+  }
+}
 
 // 매핑의 주인 채널만(코드체계채널 = 자기 자신) — 트레이더스처럼 다른 채널 매핑을 빌려 쓰는 채널은 따로 보이지 않는다.
 // 채널이 아닌 코드체계(ERP (백화점·폐쇄몰·렌탈 공통))는 그 이름의 그룹 하나로

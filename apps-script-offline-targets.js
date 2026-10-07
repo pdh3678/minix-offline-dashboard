@@ -375,10 +375,11 @@ function _offGetMonthly(data) {
   var key = 'offline:monthly:' + _offCacheGen() + ':' + from + ':' + to + ':' + ch + (totalsOnly ? ':t' : '');
   var hit = _cacheGetJSON(cache, key);
   if (hit) { hit.cached = true; return hit; }
-  var t = _offReadTabs(['channel', 'targets', 'prices', 'sales', 'mapping', 'sku']);
+  var t = _offReadTabs(['channel', 'targets', 'prices', 'sales', 'mapping', 'sku', 'excluded'], { optional: ['excluded'] });
+  var isEx = _offExcludedFn(t.channel, t.excluded); // 제외코드 — 판매·미매칭에서 뺀다(원장은 그대로)
   var out = _offMonthlyCompute({ from: from, to: to, channelId: ch,
     channels: t.channel, targets: t.targets, prices: t.prices,
-    sales: t.sales, mappings: t.mapping, skus: t.sku });
+    sales: _offDropExcluded(t.sales, isEx, 3, 5), mappings: t.mapping, skus: t.sku });
   if (totalsOnly) { out.rows = []; out.categoryRows = []; out.totalsOnly = true; }
   out.success = true;
   _cachePutJSON(cache, key, out, OFF_CACHE_TTL_SEC);
@@ -814,8 +815,8 @@ function _offCompareUploadStart(parsed, plan, channelRows) {
     legacy.OUT[k] = _offSumOrNull(legacy.OUT[k] == null ? null : legacy.OUT[k], v.outA);
     legacy.IN[k] = _offSumOrNull(legacy.IN[k] == null ? null : legacy.IN[k], v.inA);
   });
-  var t = _offReadTabs(['sales', 'mapping', 'sku']);
-  var sales = t.sales, mappings = t.mapping, skus = t.sku;
+  var t = _offReadTabs(['sales', 'mapping', 'sku', 'excluded'], { optional: ['excluded'] });
+  var sales = _offDropExcluded(t.sales, _offExcludedFn(channelRows, t.excluded), 3, 5), mappings = t.mapping, skus = t.sku;
   var out = [];
   Object.keys(targets).forEach(function (ch) {
     var ym = targets[ch];

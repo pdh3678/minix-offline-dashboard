@@ -287,10 +287,12 @@ function _offInventoryCompute(input) {
 
 // 재고 지표에 필요한 탭을 batchGet 한 번에 읽는다(설정 탭은 setup 재실행 전이면 없다)
 function _offInventoryInput() {
-  var t = _offReadTabs(['settings', 'channel', 'sku', 'mapping', 'store', 'sales', 'stockDaily', 'stockStore', 'uploadLog', 'unmatched'], { optional: ['settings'] });
+  var t = _offReadTabs(['settings', 'channel', 'sku', 'mapping', 'store', 'sales', 'stockDaily', 'stockStore', 'uploadLog', 'unmatched', 'excluded'], { optional: ['settings', 'excluded'] });
+  var isEx = _offExcludedFn(t.channel, t.excluded); // 제외코드 — 판매·재고·미매칭에서 뺀다(원장은 그대로)
   return { today: _offToday(), settingsRows: t.settings,
-    channels: t.channel, skus: t.sku, mappings: t.mapping, stores: t.store, sales: t.sales,
-    stockDaily: t.stockDaily, stockStore: t.stockStore, uploadLog: t.uploadLog, unmatchedTab: t.unmatched };
+    channels: t.channel, skus: t.sku, mappings: t.mapping, stores: t.store, sales: _offDropExcluded(t.sales, isEx, 3, 5),
+    stockDaily: _offDropExcluded(t.stockDaily, isEx, 1, 2), stockStore: _offDropExcluded(t.stockStore, isEx, 1, 3), uploadLog: t.uploadLog,
+    unmatchedTab: _offDropExcluded(t.unmatched, isEx, 0, 1) };
 }
 
 /* offline_getInventory — data.channelId 를 주면 그 채널의 점포 표(stores)도 준다.
@@ -376,9 +378,9 @@ function _offGetDailySales(data) {
   var key = 'offline:daily:' + _offCacheGen() + ':' + from + ':' + to + ':' + ch + ':' + level;
   var hit = _cacheGetJSON(cache, key);
   if (hit) { hit.cached = true; return hit; }
-  var t = _offReadTabs(['channel', 'sku', 'mapping', 'sales']);
+  var t = _offReadTabs(['channel', 'sku', 'mapping', 'sales', 'excluded'], { optional: ['excluded'] });
   var out = _offDailySalesCompute({ from: from, to: to, channelId: ch, level: level,
-    channels: t.channel, skus: t.sku, mappings: t.mapping, sales: t.sales });
+    channels: t.channel, skus: t.sku, mappings: t.mapping, sales: _offDropExcluded(t.sales, _offExcludedFn(t.channel, t.excluded), 3, 5) });
   out.success = true;
   _cachePutJSON(cache, key, out, OFF_CACHE_TTL_SEC);
   return out;
@@ -477,9 +479,10 @@ function _offGetSalesBreakdown(data) {
   var key = 'offline:breakdown:' + _offCacheGen() + ':' + [args.channelId, args.from, args.to, args.unit, args.category, args.measure].join(':');
   var hit = _cacheGetJSON(cache, key);
   if (hit) { hit.cached = true; return hit; }
-  var t = _offReadTabs(['channel', 'sku', 'mapping', 'sales', 'store', 'unmatched']);
-  args.channels = t.channel; args.skus = t.sku; args.mappings = t.mapping; args.sales = t.sales;
-  args.stores = t.store; args.unmatchedTab = t.unmatched;
+  var t = _offReadTabs(['channel', 'sku', 'mapping', 'sales', 'store', 'unmatched', 'excluded'], { optional: ['excluded'] });
+  var isEx = _offExcludedFn(t.channel, t.excluded);
+  args.channels = t.channel; args.skus = t.sku; args.mappings = t.mapping; args.sales = _offDropExcluded(t.sales, isEx, 3, 5);
+  args.stores = t.store; args.unmatchedTab = _offDropExcluded(t.unmatched, isEx, 0, 1);
   if (!args.channels.some(function (r) { return r[0] === ch; })) throw new Error('채널마스터에 없는 channel_id 입니다: ' + ch);
   var out = _offSalesBreakdownCompute(args);
   out.success = true;
@@ -533,8 +536,8 @@ function _offGetInventoryTrend(data) {
   var key = 'offline:trend:' + _offCacheGen() + ':' + [args.from, args.to, args.channelId, args.skuId, args.model, args.line, args.category].join(':');
   var hit = _cacheGetJSON(cache, key);
   if (hit) { hit.cached = true; return hit; }
-  var t = _offReadTabs(['channel', 'sku', 'mapping', 'stockDaily']);
-  args.channels = t.channel; args.skus = t.sku; args.mappings = t.mapping; args.stockDaily = t.stockDaily;
+  var t = _offReadTabs(['channel', 'sku', 'mapping', 'stockDaily', 'excluded'], { optional: ['excluded'] });
+  args.channels = t.channel; args.skus = t.sku; args.mappings = t.mapping; args.stockDaily = _offDropExcluded(t.stockDaily, _offExcludedFn(t.channel, t.excluded), 1, 2);
   var out = _offInventoryTrendCompute(args);
   out.success = true;
   _cachePutJSON(cache, key, out, OFF_CACHE_TTL_SEC);

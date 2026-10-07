@@ -158,7 +158,7 @@ const { TODAY, USER, SALES, compute, G, near, env } = require(path.join(__dirnam
     const before = g.call('offline_getInventory', {});
     const s = g.call('offline_saveSettings', { settings: { '재고경보_과다일수': 40, '재고일수_판매기준일수': 14 } }, 'admin');
     check('관리자 저장 — 탭 값 갱신, 설명·다른 키 그대로(자동반영_사용 Y도 글자 그대로 — 0으로 덮이지 않음)', s.success && s.settings['재고경보_과다일수'] === 40 &&
-      J(dataRows(g.tab('설정')).map(r => r[0] + '=' + r[1])) === J(['재고일수_판매기준일수=14', '재고경보_과다일수=40', '재고경보_결품위험일수=14', '데이터지연_경고일수=3', '자동반영_사용=Y', '자동반영_시작시각=7', '자동반영_종료시각=22', '처리완료_보관일수=30', '자동반영_회당최대파일수=10']) && dataRows(g.tab('설정'))[1][2], dataRows(g.tab('설정')));
+      J(dataRows(g.tab('설정')).map(r => r[0] + '=' + r[1])) === J(['재고일수_판매기준일수=14', '재고경보_과다일수=40', '재고경보_결품위험일수=14', '데이터지연_경고일수=3', '자동반영_사용=Y', '자동반영_시작시각=7', '자동반영_종료시각=22', '처리완료_보관일수=30', '자동반영_회당최대파일수=10', 'ERP_제외브랜드=톰']) && dataRows(g.tab('설정'))[1][2], dataRows(g.tab('설정')));
     const after = g.call('offline_getInventory', {});
     check('저장 뒤 지표 재계산(캐시 무효) — N=14, SKU-0001 하이마트 50 ÷ 2 = 25일', before.windowDays === 28 && !after.cached && after.windowDays === 14 && G(after, 'himart', 'sku', 'SKU-0001').days === 25, after.windowDays);
     check('마스터에도 설정이 실린다', g.call('offline_getMasters').settings['재고경보_과다일수'] === 40);

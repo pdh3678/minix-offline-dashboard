@@ -123,9 +123,12 @@ function _upUnmatched(f){
   if(!p||!p.ok||!OFFLINE_MASTERS)return null;
   // ERP 매출이익리스트는 브랜드·카테고리(본품/구성품)를 같이 넘긴다 — 코드 매핑 제안(필터·기타)이 쓴다
   const info=(p.summary&&p.summary.products)||{};
-  return _offlineResolver().unmatched(p.channelId,p.codes).map(code=>Object.assign({channelId:p.channelId,code,name:p.records.names[code]||''},
+  // 제외코드(resolver)와 제외 브랜드 코드(반영 때 제외코드에 등록된다)는 미매칭이 아니다
+  return _offlineResolver().unmatched(p.channelId,p.codes).filter(code=>!(info[code]&&_upExBrand(info[code].brand))).map(code=>Object.assign({channelId:p.channelId,code,name:p.records.names[code]||''},
     info[code]?{brand:info[code].brand,cat:info[code].category}:{}));
 }
+// ERP 제외 브랜드(설정 ERP_제외브랜드 — 마스터 excludeBrands) — 반영 때 서버가 그 상품코드를 제외코드에 등록한다(판매원장에는 저장, 집계·미매칭에서 제외)
+function _upExBrand(brand){return OfflineParsers.brandExcluded(brand,(OFFLINE_MASTERS&&OFFLINE_MASTERS.excludeBrands)||[]);}
 
 /* ERP 매출이익리스트(split 'customer') — 거래처 → 채널. 거래처매핑(마스터 customers)에 ERP 채널로 있으면 그 채널, 없으면 미리보기에서 고른다
    (f.edits.cust{거래처코드: channel_id | '-'(이번엔 반영 안 함)}). 고른 채널은 반영 때 GAS가 거래처매핑에 저장한다. 반영 때는 서버가 같은 규칙으로 정한다 */
@@ -156,9 +159,12 @@ function _upErpHtml(f,p){
   const byCh={};custs.forEach(c=>{if(!c.channelId||c.channelId==='-')return;const o=byCh[c.channelId]||(byCh[c.channelId]={custs:0,qty:0,amount:0,ex:0});o.custs++;o.qty+=c.qty;o.amount+=c.amount;o.ex+=c.excludedQty;});
   const chRows=chs.map(ch=>{const o=byCh[ch.channelId]||{custs:0,qty:0,amount:0,ex:0};
     return `<tr><td>${_escHtml(_ofChLabel(ch.channelCategory,ch.name))}</td><td class="num-col">${o.custs}</td><td class="num-col">${n(o.qty)}</td><td class="num-col">${won(o.amount)}</td><td class="num-col">${o.ex?n(o.ex):'—'}</td></tr>`;}).join('');
-  const brRows=(s.brands||[]).map(b=>`<tr${b.minix?'':' class="up-other"'}><td>${_escHtml(b.brand)}${b.minix?'':' <span class="up-chip applying">미닉스 외</span>'}</td><td class="num-col">${n(b.qty)}</td><td class="num-col">${won(b.amount)}</td></tr>`).join('');
+  const brRows=(s.brands||[]).map(b=>`<tr${b.minix?'':' class="up-other"'}><td>${_escHtml(b.brand)}${_upExBrand(b.brand)?' <span class="up-chip error">제외 브랜드</span>':b.minix?'':' <span class="up-chip applying">미닉스 외</span>'}</td><td class="num-col">${n(b.qty)}</td><td class="num-col">${won(b.amount)}</td></tr>`).join('');
+  const words=OFFLINE_MASTERS.excludeBrands||[],xb=(s.brands||[]).filter(b=>_upExBrand(b.brand));
+  const xbCodes=Object.keys(s.products||{}).filter(c=>_upExBrand(s.products[c].brand)).length;
+  const xbHtml=words.length?`<br>제외 브랜드(${_escHtml(words.join(', '))}) <b>${n(xb.reduce((a,b)=>a+b.rows,0))}</b>행 · 수량 <b>${n(xb.reduce((a,b)=>a+b.qty,0))}</b> · 금액 <b>${won(xb.reduce((a,b)=>a+b.amount,0))}</b> · 상품코드 <b>${xbCodes}</b>종 — 판매원장에는 저장하고 집계·미매칭에서 뺀다(반영 때 제외코드에 자동 등록)`:'';
   return `<div class="up-stats">파일 금액 합계 <b>${won(s.fileAmount)}</b> · 수불구분 ${gub}${s.dataPeriod?` · 파일 안 날짜 ${_escHtml(s.dataPeriod.start)} ~ ${_escHtml(s.dataPeriod.end)}`:''}<br>
-      무상 동봉 제외(카테고리 구성품 · 금액 0 — 판매로 저장하지 않음) <b>${n(ex.rows)}</b>행 · 수량 <b>${n(ex.qty)}</b></div>
+      무상 동봉 제외(카테고리 구성품 · 금액 0 — 판매로 저장하지 않음) <b>${n(ex.rows)}</b>행 · 수량 <b>${n(ex.qty)}</b>${xbHtml}</div>
     <div class="up-erp"><div><div class="f-lbl">거래처 → 채널 <span class="off-muted">거래처매핑 · 없는 거래처는 채널을 고르면 반영 때 저장</span></div>
       <div class="tbl-wrap"><table class="cm-tbl"><thead><tr><th>거래처코드</th><th>거래처(점포)</th><th>채널</th><th class="num-col">원본 행</th><th class="num-col">판매 수량</th><th class="num-col">금액</th><th class="num-col">무상 동봉 제외</th></tr></thead><tbody>${custRows}</tbody></table></div></div>
     <div class="up-erp-2"><div><div class="f-lbl">채널별 <span class="off-muted">교체 기간 동안 이 채널들의 판매원장을 바꾼다</span></div>
@@ -396,6 +402,7 @@ function _upResultHtml(r){
   if(a.storesAdded)parts.push('새 점포 '+a.storesAdded);
   if(a.storesMoved)parts.push('채널 옮긴 점포 '+a.storesMoved);
   if(a.customersAdded)parts.push('거래처매핑에 추가 '+a.customersAdded);
+  if(a.excludedAdded)parts.push('제외코드 등록(브랜드 규칙) '+a.excludedAdded+'건');
   // 채널별(한 파일에 여러 채널 — 이마트·트레이더스, ERP 매출이익리스트는 금액도)
   if(a.byChannel)parts.push(Object.keys(a.byChannel).map(c=>{const b=a.byChannel[c];return _offlineChannelLabel(c)+(b.rows!=null?' '+b.rows+'행·판매 '+b.qty+(b.amount!=null?'·금액 ₩'+Math.round(b.amount).toLocaleString('ko-KR'):''):' 점포 '+b.stores+'·재고 '+b.stock);}).join(' / '));
   let range=rr.start?rr.start+' ~ '+rr.end:(rr.baseDate||'');

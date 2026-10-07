@@ -83,10 +83,12 @@ var OFF_TABS = {
   // 파트 홈(2026-09-29) — 공동구매 월 목표. 키 (연월, 벤더, 품목군, 모델). 로직은 apps-script-home.js
   gonguTargets: { name: '공구목표_월', headers: ['연월', '벤더', '대분류', '품목군', '모델', '목표수량', '목표금액', '출처', '수정일', '수정자'], text: [0, 1, 2, 3, 4, 7, 8, 9] },
   // ERP 매출이익리스트(2026-09-30) — ERP 거래처 → 채널. 거래처가 곧 그 채널의 점포(점포코드 = 거래처코드)
-  customerMap: { name: '거래처매핑', headers: ['거래처코드', '거래처명', 'channel_id', '비고'], text: [0, 1, 2, 3] }
+  customerMap: { name: '거래처매핑', headers: ['거래처코드', '거래처명', 'channel_id', '비고'], text: [0, 1, 2, 3] },
+  // 코드 매핑 제외(2026-10-07) — 대시보드 대상이 아닌 상품(톰 브랜드 등). (코드체계채널, 원본코드)가 있으면 모든 집계·미매칭에서 읽을 때 뺀다(원장 행은 그대로)
+  excluded: { name: '제외코드', headers: ['코드체계채널', '원본코드', '원본상품명', '제외사유', '등록일', '등록자'], text: [0, 1, 2, 3, 4, 5] }
 };
 var OFF_TAB_ORDER = ['readme', 'sku', 'channel', 'mapping', 'store', 'sales', 'stockDaily', 'stockStore', 'himartSnap', 'uploadLog', 'unmatched',
-  'targets', 'prices', 'migrationLog', 'settings', 'gonguTargets', 'customerMap'];
+  'targets', 'prices', 'migrationLog', 'settings', 'gonguTargets', 'customerMap', 'excluded'];
 
 /* 설정 기본값 — 설정 탭에 없는 키는 setup이 이 값으로 채우고(있는 값은 덮어쓰지 않음), 읽을 때도 없거나 잘못된 값은 이 값을 쓴다.
    재고 지표(apps-script-offline-inventory.js)가 이 네 값을 읽는다. */
@@ -97,6 +99,10 @@ var OFF_SETTINGS_DEFAULT = [
   ['데이터지연_경고일수', 3, '채널의 판매·재고 최신 기준일이 오늘보다 이 일수보다 더 오래되면 경고 배지']
 ];
 /* 드라이브 수신함 자동 반영(2026-10-06, apps-script-offline-inbox.js) — setup이 없는 키만 덧붙인다. 읽기는 _offInboxSettings(잘못된 값은 기본값) */
+/* 코드 매핑 제외(2026-10-07) — ERP 매출이익리스트 브랜드가 이 단어로 시작하는 상품코드는 업로드 때 제외코드에 자동 등록(사유: 브랜드 규칙). 쉼표로 여러 개 */
+var OFF_EXCLUDE_SETTINGS_DEFAULT = [
+  ['ERP_제외브랜드', '톰', 'ERP 매출이익리스트 브랜드가 이 단어로 시작하면(쉼표로 여러 개) 그 상품코드를 제외코드에 자동 등록 — 집계·미매칭에서 빠진다(원장은 그대로)']
+];
 var OFF_INBOX_SETTINGS_DEFAULT = [
   ['자동반영_사용', 'Y', '드라이브 수신함 자동 반영 — Y = 1시간마다 확인, N = 끔(데이터 업로드 화면의 [지금 확인]은 그대로 된다)'],
   ['자동반영_시작시각', 7, '자동 반영을 확인하는 시각 범위의 시작(0~23시, 한국 시각) — 이 시각부터'],
@@ -231,7 +237,7 @@ function offline_setupSheets() {
     if (key === 'settings' && ok(key)) {
       var srows = _offReadRows(sheet, def), have = {};
       srows.forEach(function (r) { if (r[0]) have[r[0]] = true; });
-      var add = OFF_SETTINGS_DEFAULT.concat(OFF_INBOX_SETTINGS_DEFAULT).filter(function (d) { return !have[d[0]]; });
+      var add = OFF_SETTINGS_DEFAULT.concat(OFF_INBOX_SETTINGS_DEFAULT, OFF_EXCLUDE_SETTINGS_DEFAULT).filter(function (d) { return !have[d[0]]; });
       if (add.length) _offWriteBlock(sheet, def, sheet.getLastRow() + 1, add);
       report.settingsAdded = add.map(function (d) { return d[0]; });
     }
@@ -454,9 +460,10 @@ function _offReadmeRows() {
     ['목표실적_월', '채널×품목군×모델×월 목표·실적(구분 IN=Sell-in, OUT=Sell-out). 출처 input = 대시보드 목표 관리에서 입력(이관이 덮어쓰지 않음), migration = 기존 진행현황에서 이관. OUT 실적은 업로드시작월 이전 달·업로드 없는 채널만 쓰고, 그 뒤로는 판매원장에서 집계한다. 대분류 열: 모델 단위 행은 대분류·품목군·모델 모두, 대분류 단위 행(모델 구분이 없는 과거 수치 — 예: 진행현황의 "건조기" 행)은 대분류만 채운다.'],
     ['단가마스터', '채널×품목군×모델 공급가 이력. 금액 = 수량 × 그 달 1일 기준 가장 최근 적용시작일의 공급가.'],
     ['이관로그', '기존 스프레드시트(진행현황·납품가 수수료) 이관 1회 = 1행. 대시보드에서 단가 행을 삭제한 기록(대상 "단가 삭제")도 여기에 남는다.'],
-    ['설정', '기준값(키-값). 재고 지표: 재고일수_판매기준일수·재고경보_과다일수·재고경보_결품위험일수·데이터지연_경고일수 — 대시보드 재고 현황의 설정(관리자)에서 고친다. 드라이브 수신함 자동 반영: 자동반영_사용(Y/N)·자동반영_시작시각·자동반영_종료시각(한국 시각, 시작 이상 종료 미만에만 1시간마다 확인)·처리완료_보관일수·자동반영_회당최대파일수 — 이 탭에서 직접 고친다. 키 이름은 바꾸지 말 것.'],
+    ['설정', '기준값(키-값). 재고 지표: 재고일수_판매기준일수·재고경보_과다일수·재고경보_결품위험일수·데이터지연_경고일수 — 대시보드 재고 현황의 설정(관리자)에서 고친다. 드라이브 수신함 자동 반영: 자동반영_사용(Y/N)·자동반영_시작시각·자동반영_종료시각(한국 시각, 시작 이상 종료 미만에만 1시간마다 확인)·처리완료_보관일수·자동반영_회당최대파일수 — 이 탭에서 직접 고친다. 코드 제외: ERP_제외브랜드(쉼표로 여러 개, 비우면 규칙 없음) — 이 탭에서 직접 고친다. 키 이름은 바꾸지 말 것.'],
     ['공구목표_월', '공동구매 월 목표(벤더×품목군×모델, 목표수량·목표금액 — 원, VAT 포함). 출처 input = 대시보드 목표 관리 [공구 목표]에서 입력(이관이 덮어쓰지 않음), migration = 기존 \'공동구매 26년 목표\' 탭에서 이관. 파트 홈의 파트 목표 = 오프라인 IN 목표 금액 + 이 탭의 목표금액.'],
-    ['거래처매핑', 'ERP 매출이익리스트의 거래처코드 → channel_id(코드체계 erp 채널만). 거래처 = 그 채널의 점포(점포마스터 점포코드 = 거래처코드, 점포명 = 이 탭의 거래처명). 업로드 미리보기에서 채널을 고른 새 거래처는 반영 때 여기에 덧붙는다. 채널을 바꾸면 다음 업로드부터 그 채널로 들어간다.']
+    ['거래처매핑', 'ERP 매출이익리스트의 거래처코드 → channel_id(코드체계 erp 채널만). 거래처 = 그 채널의 점포(점포마스터 점포코드 = 거래처코드, 점포명 = 이 탭의 거래처명). 업로드 미리보기에서 채널을 고른 새 거래처는 반영 때 여기에 덧붙는다. 채널을 바꾸면 다음 업로드부터 그 채널로 들어간다.'],
+    ['제외코드', '대시보드 대상이 아닌 상품의 (코드체계채널, 원본코드). 여기 있는 코드는 판매원장·재고에 그대로 있지만 모든 집계(채널 현황·채널 상세·판매 분석·재고·파트 홈·목표 관리 실적)와 미매칭 목록·경고에서 빠진다. 대시보드 코드 매핑 화면에서 제외·해제한다(해제하면 바로 다시 미매칭으로). 제외사유 수동 = 사람이 제외, 브랜드 규칙 = ERP 매출이익리스트 브랜드가 설정 탭 ERP_제외브랜드로 시작해 업로드 때 자동 등록. 매핑된 코드는 제외할 수 없다.']
   ];
 }
 
@@ -719,6 +726,11 @@ function _offTabMeta(key) {
   if (!m) throw new Error('오프라인 시트에 "' + OFF_TABS[key].name + '" 탭이 없습니다 — 편집기에서 offline_setupSheets를 먼저 실행하세요.');
   return m;
 }
+// 탭이 있는지(setup 재실행 전에 생긴 탭) — Sheets API면 탭 메타(요청 범위에서 한 번 받는다), 못 받으면 SpreadsheetApp
+function _offHasTab(key) {
+  if (_offApiReady()) { try { _offTabMeta(key); return true; } catch (e) { if (/탭이 없습니다/.test(String(e && e.message))) return false; } }
+  return !!_offSS().getSheetByName(OFF_TABS[key].name);
+}
 
 // 값 하나 → CellData (텍스트 열은 문자열 그대로, '' = 빈칸)
 function _offCell(v, text) {
@@ -829,6 +841,24 @@ function _offCodeSystem(channelRows) {
   return function (ch) { return m[ch] || ch; };
 }
 function _offCodeSystemOf() { return _offCodeSystem(_offRead('channel')); }
+/* 제외코드(2026-10-07) → isExcluded(ch, code) | null(제외 없음). 키는 코드체계채널(트레이더스 코드 = emart 제외 한 벌) */
+function _offExcludedFn(channelRows, excludedRows) {
+  var cs = _offCodeSystem(channelRows), set = {}, n = 0;
+  (excludedRows || []).forEach(function (r) { if (r[0] && r[1]) { set[r[0] + OFF_KEY_SEP + r[1]] = true; n++; } });
+  return n ? function (ch, code) { return !!set[cs(ch) + OFF_KEY_SEP + code]; } : null;
+}
+// 읽은 원장 행에서 제외코드 행을 뺀다 — 집계 계산 직전에(원장은 그대로). chIdx·codeIdx = 그 탭의 channel_id·원본코드 열
+function _offDropExcluded(rows, isEx, chIdx, codeIdx) { return isEx ? rows.filter(function (r) { return !isEx(r[chIdx], r[codeIdx]); }) : rows; }
+// ERP_제외브랜드(설정 탭, 쉼표로 여러 개) → 단어 목록. 키가 없으면(setup 재실행 전) 기본값, 값을 비우면 규칙 없음. parsers.js brandExcluded와 같은 규칙
+function _offExcludeBrands(settingsRows) {
+  var v = OFF_EXCLUDE_SETTINGS_DEFAULT[0][1];
+  (settingsRows || []).forEach(function (r) { if (r[0] === 'ERP_제외브랜드') v = r[1]; });
+  return _offSplitList(v);
+}
+function _offBrandExcluded(brand, words) {
+  var b = String(brand == null ? '' : brand).trim().toLowerCase();
+  return !!b && (words || []).some(function (w) { w = String(w == null ? '' : w).trim().toLowerCase(); return !!w && b.indexOf(w) === 0; });
+}
 /* 채널이 아닌 코드체계(erp) — 여러 채널이 코드체계채널로 가리키지만 그 이름의 채널은 없다. 코드매핑·미매칭코드는 이 이름으로 쌓인다.
    → [{ id, name, channels[] }] (코드 매핑 화면의 그룹·채널 칸 표시용) */
 function _offVirtualCodeSystems(channelRows) {
@@ -876,7 +906,7 @@ function _offMappedKeys(mappingRows, codeSys) {
 
 /* 파일 1개 단위.
    data.meta    = { fileName, fileType, channelId, baseDate(스냅샷형) | replaceStart·replaceEnd(기간 교체형), rawRowCount }
-   data.records = { sales[], storeStock[], channelStock[], himart[], stores[], names{code: 상품명} }
+   data.records = { sales[], storeStock[], channelStock[], himart[], stores[], names{code: 상품명}, brands{code: 브랜드}(ERP만 — 제외 브랜드 규칙) }
                   (파서 출력 그대로 — src/features/offline/parsers.js 의 toUploadPayload)
    opts         = 서버 안에서만(드라이브 수신함 자동 반영 — doPost는 넘기지 않는다):
                   { strict: 모르는 업태명·매핑 안 된 거래처가 있으면 쓰기 전에 실패, auto: { fileId, modifiedTime, md5 } 업로드로그에 남길 원본 파일 }
@@ -909,12 +939,12 @@ function _offUpload(data, auth, opts) {
     if (totalRows > 0) ctx.warnings.push('합계·소계 행 제외 ' + totalRows + '행(날짜 없는 행 — 판매로 집계하지 않음)');
     // 이 반영이 읽는 탭을 batchGet 한 번에 — 아래 함수들은 요청 범위에 기억된 사본을 받는다.
     // 미리 읽기일 뿐이라 실패(탭 없음 등)는 넘긴다 — 아래 각 읽기가 원래 자리에서 같은 오류를 낸다(실패 로그도 원래대로)
-    var tabs = ['channel', 'store', 'mapping', 'unmatched', 'uploadLog'];
+    var tabs = ['channel', 'store', 'mapping', 'unmatched', 'uploadLog', 'excluded'];
     if (ft.kind === 'period' || ft.kind === 'himart') tabs.push('sales');
     if (ft.kind !== 'period') tabs.push('stockDaily', 'stockStore');
     if (ft.kind === 'himart') tabs.push('himartSnap');
-    if (ft.split === 'customer') tabs.push('customerMap');
-    try { _offReadTabs(tabs); } catch (e) {}
+    if (ft.split === 'customer') tabs.push('customerMap', 'settings');
+    try { _offReadTabs(tabs, { optional: ['excluded', 'settings'] }); } catch (e) {}
     ctx.chMeta = _offChannelMeta();
     if (ft.kind === 'snapshot') _offStockBasis(ctx, meta, ft);
     try {
@@ -926,6 +956,7 @@ function _offUpload(data, auth, opts) {
         if (ft.kind === 'himart') range.himart = _offApplyHimart(ctx, meta, rec);
       }
       _offUpsertStores(ctx, meta.channelId, rec.stores || []);
+      if (ft.split === 'customer') _offRegisterBrandExcluded(ctx, meta.channelId, rec);
       var unmatched = _offUpdateUnmatched(ctx, meta.channelId, _offCodesOf(rec));
       _offAppendLog(ctx, meta, auth, '성공', unmatched.length);
       _offInvalidateCache();
@@ -1332,13 +1363,35 @@ function _offCodesOf(rec) {
   return out;
 }
 
-// 미매칭코드 갱신 — 이번 업로드에서 매핑 없는 코드를 누적(발견횟수 = 나온 업로드 수), 매핑된 코드는 정리.
-// ch가 다른 채널의 코드체계를 빌려 쓰면(트레이더스) 그 코드체계채널(emart) 이름으로 쌓는다
-function _offUpdateUnmatched(ctx, ch, codes) {
-  var t = _offReadTabs(['channel', 'mapping', 'unmatched']);
+/* ERP 제외 브랜드 규칙 — rec.brands{상품코드: 브랜드} 중 브랜드가 설정 ERP_제외브랜드로 시작하는 코드를 제외코드에 등록(사유: 브랜드 규칙).
+   판매원장에는 그대로 들어가고 읽을 때 빠진다. 매핑된 코드·이미 제외된 코드는 그대로 둔다. 제외코드 탭이 없으면(setup 재실행 전) 경고만 */
+function _offRegisterBrandExcluded(ctx, ch, rec) {
+  var brands = rec.brands && typeof rec.brands === 'object' ? rec.brands : {}, names = rec.names || {};
+  var t = _offReadTabs(['settings', 'channel', 'mapping', 'excluded'], { optional: ['settings', 'excluded'] });
+  var words = _offExcludeBrands(t.settings);
+  var hit = Object.keys(brands).filter(function (c) { return c && _offBrandExcluded(brands[c], words); }).sort();
+  if (!hit.length) return;
   var cs = _offCodeSystem(t.channel);
   ch = cs(ch);
-  var mapped = _offMappedKeys(t.mapping, cs);
+  var mapped = _offMappedKeys(t.mapping, cs), isEx = _offExcludedFn(t.channel, t.excluded);
+  var add = hit.filter(function (c) { return !mapped[ch + OFF_KEY_SEP + c] && !(isEx && isEx(ch, c)); });
+  if (!add.length) return;
+  if (!_offHasTab('excluded')) {
+    ctx.warnings.push('제외 브랜드 상품코드 ' + add.length + '건 — 제외코드 탭이 없어 등록하지 못했습니다(편집기에서 offline_setupSheets 실행)');
+    return;
+  }
+  _offAppend('excluded', add.map(function (c) { return [ch, c, String(names[c] || ''), '브랜드 규칙', ctx.today, ctx.email]; }));
+  ctx.applied.excludedAdded = add.length;
+}
+
+// 미매칭코드 갱신 — 이번 업로드에서 매핑 없는 코드를 누적(발견횟수 = 나온 업로드 수), 매핑된 코드는 정리.
+// ch가 다른 채널의 코드체계를 빌려 쓰면(트레이더스) 그 코드체계채널(emart) 이름으로 쌓는다.
+// 제외코드는 미매칭이 아니다 — 쌓지 않고 남아 있던 행도 정리한다(해제하면 _offSaveExcluded가 다시 올린다)
+function _offUpdateUnmatched(ctx, ch, codes) {
+  var t = _offReadTabs(['channel', 'mapping', 'unmatched', 'excluded'], { optional: ['excluded'] });
+  var cs = _offCodeSystem(t.channel);
+  ch = cs(ch);
+  var mapped = _offMappedKeys(t.mapping, cs), isEx = _offExcludedFn(t.channel, t.excluded);
   var rows = t.unmatched;
   var prev = rows.length;
   var idx = {};
@@ -1346,7 +1399,7 @@ function _offUpdateUnmatched(ctx, ch, codes) {
   var list = [];
   Object.keys(codes).sort().forEach(function (code) {
     var k = ch + OFF_KEY_SEP + code;
-    if (mapped[k]) return;
+    if (mapped[k] || (isEx && isEx(ch, code))) return;
     list.push({ code: code, name: codes[code] });
     var row = idx[k];
     if (row) {
@@ -1358,7 +1411,7 @@ function _offUpdateUnmatched(ctx, ch, codes) {
       rows.push(row); idx[k] = row;
     }
   });
-  _offRewrite('unmatched', rows.filter(function (r) { return !mapped[cs(r[0]) + OFF_KEY_SEP + r[1]]; }), prev);
+  _offRewrite('unmatched', rows.filter(function (r) { return !mapped[cs(r[0]) + OFF_KEY_SEP + r[1]] && !(isEx && isEx(r[0], r[1])); }), prev);
   return list;
 }
 
@@ -1391,6 +1444,7 @@ function _offlineRoute(action, data, auth) {
     else if (action === 'offline_saveSku') out = _offSaveSku(data || {}, auth);
     else if (action === 'offline_saveMapping') out = _offSaveMapping(data || {}, auth);
     else if (action === 'offline_getUnmatched') out = _offGetUnmatched();
+    else if (action === 'offline_saveExcluded') out = _offSaveExcluded(data || {}, auth);
     else if (action === 'offline_getUploadLog') out = _offGetUploadLog();
     else if (action === 'offline_getStatus') out = _offGetStatus();
     // 2-A (apps-script-offline-targets.js)
@@ -1434,8 +1488,8 @@ function _offGetMasters() {
   var cache = CacheService.getScriptCache();
   var hit = _cacheGetJSON(cache, 'offline:masters');
   if (hit) { hit.cached = true; return hit; }
-  // 거래처매핑·설정은 setup 재실행 전이면 없다
-  var t = _offReadTabs(['channel', 'sku', 'customerMap', 'mapping', 'store', 'settings'], { optional: ['customerMap', 'settings'] });
+  // 거래처매핑·설정·제외코드는 setup 재실행 전이면 없다
+  var t = _offReadTabs(['channel', 'sku', 'customerMap', 'mapping', 'store', 'settings', 'excluded'], { optional: ['customerMap', 'settings', 'excluded'] });
   var chRows = t.channel.filter(function (r) { return r[0]; });
   var out = {
     success: true,
@@ -1456,18 +1510,24 @@ function _offGetMasters() {
     }),
     productLines: OFFLINE_PRODUCT_LINES,
     stockTypes: OFF_STOCK_TYPES,
-    settings: _offSettingsFrom(t.settings)
+    settings: _offSettingsFrom(t.settings),
+    // 제외코드(코드 매핑 화면 [제외 목록]·업로드 미리보기 미매칭에서 빼기)와 ERP 제외 브랜드(미리보기 "제외 브랜드 n행")
+    excluded: t.excluded.filter(function (r) { return r[0] && r[1]; }).map(function (r) {
+      return { channelId: r[0], code: r[1], name: r[2], reason: r[3], at: r[4], by: r[5] };
+    }),
+    excludeBrands: _offExcludeBrands(t.settings)
   };
   _cachePutJSON(cache, 'offline:masters', out, OFF_CACHE_TTL_SEC);
   return out;
 }
 
 function _offGetUnmatched() {
-  var t = _offReadTabs(['channel', 'mapping', 'unmatched']);
+  var t = _offReadTabs(['channel', 'mapping', 'unmatched', 'excluded'], { optional: ['excluded'] });
   var cs = _offCodeSystem(t.channel);
   var mapped = _offMappedKeys(t.mapping, cs);
+  var isEx = _offExcludedFn(t.channel, t.excluded); // 제외코드는 목록에서 뺀다(미매칭코드 탭 행은 그대로 — 해제하면 다시 보인다)
   var items = t.unmatched
-    .filter(function (r) { return r[0] && r[1] && !mapped[cs(r[0]) + OFF_KEY_SEP + r[1]]; })
+    .filter(function (r) { return r[0] && r[1] && !mapped[cs(r[0]) + OFF_KEY_SEP + r[1]] && !(isEx && isEx(r[0], r[1])); })
     .map(function (r) { return { channelId: r[0], code: r[1], name: r[2], firstSeen: r[3], lastSeen: r[4], count: Number(r[5]) || 0 }; });
   items.sort(function (a, b) { return (b.count - a.count) || (b.lastSeen < a.lastSeen ? -1 : b.lastSeen > a.lastSeen ? 1 : 0); });
   return { success: true, items: items };
@@ -1616,9 +1676,10 @@ function _offSaveMapping(data, auth) {
   var items = data.items || [];
   if (!items.length) throw new Error('저장할 매핑이 없습니다.');
   return _offWithLock(function () {
-    var t = _offReadTabs(['sku', 'channel', 'mapping', 'unmatched']);
+    var t = _offReadTabs(['sku', 'channel', 'mapping', 'unmatched', 'excluded'], { optional: ['excluded'] });
     var today = _offToday();
     var skuIds = {}, channelIds = {};
+    var isEx = _offExcludedFn(t.channel, t.excluded);
     t.sku.forEach(function (r) { if (r[0]) skuIds[r[0]] = true; });
     var chRows = t.channel;
     chRows.forEach(function (r) { if (r[0]) channelIds[r[0]] = true; });
@@ -1645,6 +1706,8 @@ function _offSaveMapping(data, auth) {
         deactivated.push(row);
         return;
       }
+      // 매핑과 제외는 함께 둘 수 없다 — 제외된 코드는 매핑해도 집계에서 빠지므로 먼저 해제하게 한다
+      if (isEx && isEx(ch, code)) throw new Error('제외된 코드입니다 — 코드 매핑 화면 [제외 목록]에서 제외를 해제한 뒤 매핑하세요: ' + ch + ' / ' + code);
       var sku = String(it.skuId || '').trim();
       if (!skuIds[sku]) throw new Error('제품마스터에 없는 sku_id 입니다: ' + sku);
       var st = it.stockType || '정상';
@@ -1671,6 +1734,54 @@ function _offSaveMapping(data, auth) {
     _offInvalidateCache();
     Logger.log('[오프라인] 매핑 저장 ' + items.length + '건 by ' + auth.email);
     return { success: true, saved: Object.keys(mappedNow).length, deactivated: deactivated.length };
+  });
+}
+
+/* 제외코드 제외·해제 (여러 건 한 번에) — items: [{ op: 'exclude'|'include', channelId, code, name }]
+   제외: 매핑된 코드는 막는다(매핑을 먼저 해제). 미매칭코드 탭에서 빠지고, 판매원장·재고는 그대로 둔 채 읽을 때 빠진다.
+   해제: 제외코드 행을 지우고 미매칭코드 탭에 다시 올린다 — 다음 조회부터 집계에 미매칭으로 잡힌다.
+   channelId는 코드체계채널로 바꿔 저장한다(트레이더스로 와도 emart 한 벌) */
+function _offSaveExcluded(data, auth) {
+  var items = data.items || [];
+  if (!items.length) throw new Error('제외·해제할 코드가 없습니다.');
+  return _offWithLock(function () {
+    var t = _offReadTabs(['channel', 'mapping', 'unmatched', 'excluded']);
+    var today = _offToday(), email = (auth && auth.email) || '';
+    var chRows = t.channel, channelIds = {};
+    chRows.forEach(function (r) { if (r[0]) channelIds[r[0]] = true; });
+    _offVirtualCodeSystems(chRows).forEach(function (c) { channelIds[c.id] = true; });
+    var cs = _offCodeSystem(chRows), mapped = _offMappedKeys(t.mapping, cs);
+    var xRows = t.excluded, xPrev = xRows.length, uRows = t.unmatched, uPrev = uRows.length;
+    var xIdx = {}, uIdx = {}, drop = {}, back = [], excluded = 0, included = 0;
+    xRows.forEach(function (r) { if (r[0] && r[1]) xIdx[cs(r[0]) + OFF_KEY_SEP + r[1]] = r; });
+    uRows.forEach(function (r) { if (r[0] && r[1]) uIdx[cs(r[0]) + OFF_KEY_SEP + r[1]] = r; });
+    items.forEach(function (it) {
+      var ch = String(it.channelId || '').trim(), code = String(it.code || '').trim();
+      if (!channelIds[ch]) throw new Error('채널마스터에 없는 channel_id 입니다: ' + ch);
+      if (!code) throw new Error('원본코드가 비었습니다.');
+      ch = cs(ch);
+      var k = ch + OFF_KEY_SEP + code;
+      if (it.op === 'include') {
+        var x = xIdx[k];
+        if (!x) return; // 이미 해제됨
+        delete xIdx[k]; drop[k] = true; included++;
+        if (!uIdx[k] && !mapped[k]) { var u = [ch, code, x[2], today, today, 0]; back.push(u); uIdx[k] = u; }
+        return;
+      }
+      if (it.op !== 'exclude') throw new Error('알 수 없는 작업입니다: ' + it.op);
+      if (mapped[k]) throw new Error('매핑된 코드입니다 — 매핑을 먼저 해제하세요: ' + ch + ' / ' + code);
+      if (xIdx[k]) return; // 이미 제외됨
+      var name = String(it.name || '').trim() || (uIdx[k] ? String(uIdx[k][2] || '') : '');
+      var row = [ch, code, name, '수동', today, email];
+      xRows.push(row); xIdx[k] = row; excluded++;
+    });
+    var xKeep = xRows.filter(function (r) { return !drop[cs(r[0]) + OFF_KEY_SEP + r[1]] || xIdx[cs(r[0]) + OFF_KEY_SEP + r[1]] === r; });
+    _offRewrite('excluded', xKeep, xPrev);
+    var uKeep = uRows.filter(function (r) { return !xIdx[cs(r[0]) + OFF_KEY_SEP + r[1]]; }).concat(back);
+    _offRewrite('unmatched', uKeep, uPrev);
+    _offInvalidateCache();
+    Logger.log('[오프라인] 제외코드 제외 ' + excluded + '건 · 해제 ' + included + '건 by ' + email);
+    return { success: true, excluded: excluded, included: included };
   });
 }
 

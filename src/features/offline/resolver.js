@@ -30,6 +30,9 @@
     ((masters && masters.mappings) || []).forEach(m => {
       if (m.channelId && m.code && m.skuId) byKey[cs(m.channelId) + SEP + m.code] = m;
     });
+    // 제외코드(masters.excluded) — 대시보드 대상이 아닌 코드. 집계·미매칭 어디에도 넣지 않는다
+    const exKey = {};
+    ((masters && masters.excluded) || []).forEach(x => { if (x.channelId && x.code) exKey[cs(x.channelId) + SEP + x.code] = x; });
     return {
       // → { skuId, stockType, sku, mapping } | null(미매칭)
       resolve(channelId, code) {
@@ -38,8 +41,9 @@
         return { skuId: m.skuId, stockType: m.stockType || '정상', sku: skuById[m.skuId] || null, mapping: m };
       },
       isMapped(channelId, code) { return !!byKey[cs(channelId) + SEP + code]; },
-      // 코드 목록 중 매핑 없는 것만(순서 유지)
-      unmatched(channelId, codes) { return (codes || []).filter(c => !byKey[cs(channelId) + SEP + c]); },
+      isExcluded(channelId, code) { return !!exKey[cs(channelId) + SEP + code]; },
+      // 코드 목록 중 매핑 없는 것만(순서 유지) — 제외코드는 미매칭이 아니다
+      unmatched(channelId, codes) { return (codes || []).filter(c => !byKey[cs(channelId) + SEP + c] && !exKey[cs(channelId) + SEP + c]); },
       codeSystem: cs
     };
   }

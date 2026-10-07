@@ -7,7 +7,7 @@
 
    renderMappingPanel(hostId, items, opts)
      items  [{channelId, code, name, count?, lastSeen?}]
-     opts   { showChannel, showStats, onSaved() }
+     opts   { showChannel, showStats, allowExclude(코드 매핑 화면 — 행마다 [제외]·제외 체크 → [선택한 n건 제외]), onSaved() }
    패널 상태는 hostId별로 남는다(다시 그려도 고른 SKU·체크가 유지됨 — 키는 채널+원본코드). */
 const _MP={};
 const _mpKey=it=>it.channelId+'\u0001'+it.code;
@@ -87,17 +87,20 @@ function renderMappingPanel(hostId,items,opts){
       <td><select class="f-sel mp-type" onchange="_mpSetType('${hostId}',${i},this.value)">${OfflineResolver.STOCK_TYPES.map(t=>
         `<option${t===sel.stockType?' selected':''}>${t}</option>`).join('')}</select></td>
       <td><input type="checkbox" title="저장 대상"${sel.checked?' checked':''} onchange="_mpCheck('${hostId}',${i},this.checked)"></td>
+      ${O.allowExclude?`<td class="mp-ex"><input type="checkbox" title="제외 대상"${sel.exChecked?' checked':''} onchange="_mpExCheck('${hostId}',${i},this.checked)"> <button type="button" class="mp-link" ${st.busy?'disabled':''} onclick="_mpExclude('${hostId}',${i})">제외</button></td>`:''}
     </tr>`;
   }).join('');
   const nChecked=st.items.filter(it=>{const s=st.sel[_mpKey(it)];return s&&s.checked&&s.skuId;}).length;
+  const nEx=st.items.filter(it=>{const s=st.sel[_mpKey(it)];return s&&s.exChecked;}).length;
   host.innerHTML=(st.ns?_mpNewSkuHtml(hostId,st):'')+
     (st.items.length?`<div class="tbl-wrap"><table class="mp-tbl"><thead><tr>
       ${O.showChannel?'<th>채널</th>':''}<th>원본코드</th><th>원본상품명</th>
       ${O.showStats?'<th class="num-col">발견</th><th>최근 발견</th>':''}
-      <th>SKU</th><th>재고구분</th><th>저장</th></tr></thead><tbody>${rows}</tbody></table></div>`
+      <th>SKU</th><th>재고구분</th><th>저장</th>${O.allowExclude?'<th title="대시보드 대상이 아닌 코드 — 판매원장·재고에는 그대로 두고 집계·미매칭에서 뺀다">제외</th>':''}</tr></thead><tbody>${rows}</tbody></table></div>`
       :'<div class="mp-empty">매핑할 코드가 없습니다.</div>')+
     `<div class="mp-foot">
       ${st.items.length?`<button type="button" class="btn-primary up-btn" ${st.busy||!nChecked?'disabled':''} onclick="_mpSave('${hostId}')">선택한 ${nChecked}건 매핑 저장</button>`:''}
+      ${st.items.length&&O.allowExclude?`<button type="button" class="btn-cancel up-btn" ${st.busy||!nEx?'disabled':''} onclick="_mpExcludeChecked('${hostId}')">선택한 ${nEx}건 제외</button>`:''}
       ${st.ns?'':`<button type="button" class="btn-cancel up-btn" onclick="_mpOpenNewSku('${hostId}',-1)">＋ 새 SKU 만들기</button>`}
       ${st.msg?`<span class="off-muted">${_escHtml(st.msg)}</span>`:''}
     </div>`;
@@ -107,6 +110,7 @@ function _mpItemSel(hostId,i){const st=_MP[hostId];const it=st.items[i];return s
 function _mpSetSku(hostId,i,v){const s=_mpItemSel(hostId,i);s.skuId=v;s.checked=!!v;_mpRerender(hostId);}
 function _mpSetType(hostId,i,v){_mpItemSel(hostId,i).stockType=v;}
 function _mpCheck(hostId,i,on){_mpItemSel(hostId,i).checked=on;_mpRerender(hostId);}
+function _mpExCheck(hostId,i,on){_mpItemSel(hostId,i).exChecked=on;_mpRerender(hostId);}
 function _mpApplySugg(hostId,i){
   const st=_MP[hostId],it=st.items[i];
   const sugg=OfflineResolver.suggestSkus(OFFLINE_MASTERS||{},it.code,it.name)[0];
@@ -133,6 +137,30 @@ async function _mpSave(hostId){
   }catch(e){
     st.msg='';
     showToast('매핑 저장 실패: '+e.message,{type:'error'});
+  }finally{
+    st.busy=false;_mpRerender(hostId);
+  }
+}
+
+/* 제외(offline_saveExcluded) — 대시보드 대상이 아닌 코드(톰 등 미닉스 외 상품). 판매원장·재고는 그대로 두고 모든 집계와 미매칭에서 뺀다.
+   코드 매핑 화면 [제외 목록]에서 해제하면 다시 미매칭으로 돌아온다. 매핑된 코드는 서버가 막는다(매핑을 먼저 해제) */
+function _mpExclude(hostId,i){const st=_MP[hostId];return _mpSendExclude(hostId,[st.items[i]]);}
+function _mpExcludeChecked(hostId){const st=_MP[hostId];return _mpSendExclude(hostId,st.items.filter(it=>{const s=st.sel[_mpKey(it)];return s&&s.exChecked;}));}
+async function _mpSendExclude(hostId,list){
+  const st=_MP[hostId];
+  if(!st||st.busy||!list.length)return;
+  const items=list.map(it=>({op:'exclude',channelId:it.channelId,code:it.code,name:it.name||''}));
+  st.busy=true;st.msg='제외하는 중…';_mpRerender(hostId);
+  try{
+    await _offlineCall('offline_saveExcluded',{items});
+    await _offlineLoadMasters(true);
+    items.forEach(x=>{delete st.sel[_mpKey(x)];});
+    st.msg='';
+    showToast(items.length+'건을 제외했습니다 — 집계·미매칭에서 빠집니다. [제외 목록]에서 해제할 수 있습니다.',{type:'success'});
+    if(st.opts.onSaved)await st.opts.onSaved(items);
+  }catch(e){
+    st.msg='';
+    showToast('제외 실패: '+e.message,{type:'error'});
   }finally{
     st.busy=false;_mpRerender(hostId);
   }

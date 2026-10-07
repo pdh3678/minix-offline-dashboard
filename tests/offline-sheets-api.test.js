@@ -169,9 +169,10 @@ function scenario(g) {
       return { r, batchGet: g.api.count('batchGet'), get: g.api.count('get'), batchUpdate: g.api.count('batchUpdate'), legacy: STATS.reads + STATS.writes,
         ranges: [].concat(...g.api.calls.filter(c => c.op === 'batchGet').map(c => c.ranges)), updates: g.api.calls.filter(c => c.op === 'batchUpdate').map(c => c.requests) };
     };
-    const reads = [['offline_getMonthly', { from: '2026-01', to: '2026-12' }, 6], ['offline_getInventory', { channelId: 'himart' }, 10], ['offline_getSalesBreakdown', { channelId: 'emart', from: '2026-09', to: '2026-09' }, 6],
-      ['offline_getDailySales', { from: '2026-09-01', to: '2026-09-30' }, 4], ['offline_getInventoryTrend', { from: '2026-09-01', to: '2026-09-30' }, 4], ['offline_getMasters', {}, 6],
-      ['offline_getStatus', {}, 2], ['offline_getUnmatched', {}, 3], ['offline_getUploadLog', {}, 1], ['offline_getPrices', {}, 2], ['offline_getGonguTargets', { year: '2026' }, 1]];
+    // 집계·미매칭·마스터 조회는 제외코드 탭도 같은 batchGet으로 읽는다(2026-10-07) — 호출 수는 그대로
+    const reads = [['offline_getMonthly', { from: '2026-01', to: '2026-12' }, 7], ['offline_getInventory', { channelId: 'himart' }, 11], ['offline_getSalesBreakdown', { channelId: 'emart', from: '2026-09', to: '2026-09' }, 7],
+      ['offline_getDailySales', { from: '2026-09-01', to: '2026-09-30' }, 5], ['offline_getInventoryTrend', { from: '2026-09-01', to: '2026-09-30' }, 5], ['offline_getMasters', {}, 7],
+      ['offline_getStatus', {}, 2], ['offline_getUnmatched', {}, 4], ['offline_getUploadLog', {}, 1], ['offline_getPrices', {}, 2], ['offline_getGonguTargets', { year: '2026' }, 1]];
     reads.forEach(([a, d, tabs]) => {
       const m = measure(() => call(g, a, d));
       check(a + ' — batchGet 1번(탭 ' + tabs + '개), 메타·쓰기·SpreadsheetApp 0', !m.r.error && m.batchGet === 1 && m.ranges.length === tabs && m.get === 0 && m.batchUpdate === 0 && m.legacy === 0, m);

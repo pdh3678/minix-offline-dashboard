@@ -64,6 +64,8 @@
 .mp-chip{border:1px solid var(--minix);background:var(--minix-lt);color:var(--minix);border-radius:12px;padding:1px 8px;font-size:11px;font-weight:700;cursor:pointer;font-family:inherit}
 .mp-link{border:none;background:none;color:var(--minix);font-size:11px;font-weight:700;cursor:pointer;padding:0;margin-top:4px;font-family:inherit}
 .mp-hint{font-size:10px;color:var(--text-3);margin-left:4px}
+.mp-tbl td.mp-ex{white-space:nowrap}
+.mp-ex .mp-link{color:var(--text-3)}
 .mp-foot{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:10px}
 .mp-empty{padding:18px;text-align:center;color:var(--text-3);font-size:12px}
 .mp-newsku{border:1px solid var(--minix);border-radius:var(--r);background:var(--minix-lt);padding:12px 14px;margin-bottom:10px}

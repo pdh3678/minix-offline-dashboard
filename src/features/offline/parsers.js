@@ -368,7 +368,7 @@
      교체 기간 기본값 = 파일명의 기간, 없으면 파일 안의 최소~최대 날짜.
      summary.byCust[] = 거래처별 { code, name, rows(원본 행), qty·amount·fee(무상 동봉 제외 뒤), excludedQty }(원본 순서)
      summary.brands[] = 브랜드별 { brand, rows, qty, amount, minix }(무상 동봉 제외 뒤) · summary.excluded = { rows, qty }
-     summary.products = { 상품코드: { brand, category } }(코드 매핑 제안용) · summary.fileAmount = 파일 전체 금액 합 · summary.dataPeriod */
+     summary.products = { 상품코드: { brand, category } }(코드 매핑 제안용 · 반영 때 제외 브랜드 판정) · summary.fileAmount = 파일 전체 금액 합 · summary.dataPeriod */
   function parseErpSales(res, data, cell, num, bad, fileName) {
     const agg = {}, order = [], custs = {}, custOrder = [], brands = {}, brandOrder = [], gubun = {};
     const ex = { rows: 0, qty: 0 };
@@ -503,13 +503,23 @@
     // 합계·소계 행을 뺐다는 사실 — 서버가 업로드로그 경고에 남긴다
     if (res.summary && res.summary.totalRows) meta.totalRowsExcluded = res.summary.totalRows;
     const r = res.records;
-    return {
-      meta,
-      records: {
-        sales: r.sales, storeStock: r.storeStock, channelStock: r.channelStock,
-        himart: r.himart, stores: r.stores, names: r.names
-      }
+    const records = {
+      sales: r.sales, storeStock: r.storeStock, channelStock: r.channelStock,
+      himart: r.himart, stores: r.stores, names: r.names
     };
+    // ERP — 상품코드 → 브랜드. 제외 브랜드 판정은 서버가 설정 탭 ERP_제외브랜드로 한다(미리보기의 값이 오래됐어도 서버 기준)
+    if (res.split === 'customer') {
+      records.brands = {};
+      Object.keys((res.summary && res.summary.products) || {}).forEach(c => { records.brands[c] = res.summary.products[c].brand || ''; });
+    }
+    return { meta, records };
+  }
+
+  /* 제외 브랜드 — 브랜드(앞뒤 공백·대소문자 무시)가 words 중 하나로 시작하면 true. 빈 브랜드·빈 단어는 해당 없음.
+     GAS _offBrandExcluded와 같은 규칙 */
+  function brandExcluded(brand, words) {
+    const b = String(brand == null ? '' : brand).trim().toLowerCase();
+    return !!b && (words || []).some(w => { w = String(w == null ? '' : w).trim().toLowerCase(); return !!w && b.indexOf(w) === 0; });
   }
 
   /* 개인정보 차단 — 유형에 onlyUsedCols가 있으면(ERP 매출이익리스트: 주문자·수취인·연락처·주소·송장번호 열) 그 유형의 cols 열만 남긴
@@ -555,7 +565,7 @@
 
   return {
     TYPES, TYPE_ORDER, HEADER_SCAN_ROWS,
-    detect, parseRows, toUploadPayload, readWorkbookRows, dropUnusedColumns,
+    detect, parseRows, toUploadPayload, readWorkbookRows, dropUnusedColumns, brandExcluded,
     dateFromFileName, periodFromFileName, cleanCustomerName, addDays, toNum, toCode, toDate, normHeader
   };
 });

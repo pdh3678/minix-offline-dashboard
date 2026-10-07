@@ -1,7 +1,7 @@
 /* 오프라인 스프레드시트 구조 — offline_setupSheets와 시트 입출력 헬퍼.
 
    지키려는 성질:
-     · 17개 탭이 정해진 순서·헤더로 만들어지고, 1행 헤더 고정·굵게, 날짜·코드 열은 텍스트 서식
+     · 18개 탭이 정해진 순서·헤더로 만들어지고, 1행 헤더 고정·굵게, 날짜·코드 열은 텍스트 서식
      · 두 번 실행해도 안전 — 새로 만들지 않고, 데이터(채널 초기값 포함)를 중복시키지 않는다
      · 헤더가 다르면 고치지 않고 보고만 한다
      · OFFLINE_SHEET_ID는 Script Properties에서만 — 없으면 무엇을 넣어야 하는지 알려주며 실패
@@ -35,7 +35,8 @@ const EXPECT = [
   ['이관로그', ['실행시각', '실행자', '대상', '월 범위', '반영 행수', '미매핑 항목', '상태']],
   ['설정', ['키', '값', '설명']],
   ['공구목표_월', ['연월', '벤더', '대분류', '품목군', '모델', '목표수량', '목표금액', '출처', '수정일', '수정자']],
-  ['거래처매핑', ['거래처코드', '거래처명', 'channel_id', '비고']]
+  ['거래처매핑', ['거래처코드', '거래처명', 'channel_id', '비고']],
+  ['제외코드', ['코드체계채널', '원본코드', '원본상품명', '제외사유', '등록일', '등록자']]
 ];
 // 텍스트 서식이어야 하는 열(날짜·코드·id) — 숫자 열은 절대 텍스트가 되면 안 된다(합계가 깨짐)
 const NUMERIC = {
@@ -53,12 +54,12 @@ function textColsFromFormats(sheet) {
 }
 
 (function main() {
-  console.log('\n[1] 빈 스프레드시트에서 실행 — 17개 탭 생성');
+  console.log('\n[1] 빈 스프레드시트에서 실행 — 18개 탭 생성');
   {
     const { ctx, off, tab } = loadOfflineGas();
     const rep = ctx.offline_setupSheets();
-    check('17개 탭을 만들었다고 보고', rep.created.length === 17 && rep.verified.length === 0 && rep.extended.length === 0 && rep.mismatched.length === 0, rep);
-    check('탭 순서 = README → 거래처매핑', JSON.stringify(off._order) === JSON.stringify(EXPECT.map(e => e[0])), off._order);
+    check('18개 탭을 만들었다고 보고', rep.created.length === 18 && rep.verified.length === 0 && rep.extended.length === 0 && rep.mismatched.length === 0, rep);
+    check('탭 순서 = README → 거래처매핑 → 제외코드', JSON.stringify(off._order) === JSON.stringify(EXPECT.map(e => e[0])), off._order);
     EXPECT.forEach(([name, headers]) => {
       const sh = tab(name);
       check(name + ' 헤더', JSON.stringify(sh._grid[0].slice(0, headers.length)) === JSON.stringify(headers), sh._grid[0]);
@@ -90,7 +91,7 @@ function textColsFromFormats(sheet) {
     console.log('\n[2] 두 번째 실행 — 만들지 않고 헤더만 확인, 데이터 불변');
     const before = JSON.stringify(off.getSheets().map(s => s._grid));
     const rep2 = ctx.offline_setupSheets();
-    check('새로 만든 탭 없음, 17개 모두 확인(채널·점포 추가 없음)', rep2.created.length === 0 && rep2.verified.length === 17 && !rep2.channelsAdded.length && !rep2.storesAdded.length, rep2);
+    check('새로 만든 탭 없음, 18개 모두 확인(채널·점포 추가 없음)', rep2.created.length === 0 && rep2.verified.length === 18 && !rep2.channelsAdded.length && !rep2.storesAdded.length, rep2);
     check('시트 내용이 그대로(채널 초기값 중복 없음)', JSON.stringify(off.getSheets().map(s => s._grid)) === before);
 
     console.log('\n[3] 헤더가 바뀐 탭 — 고치지 않고 보고만');
@@ -106,7 +107,7 @@ function textColsFromFormats(sheet) {
     const sh = off.insertSheet('채널마스터');
     sh.getRange(1, 1, 1, 5).setValues([['channel_id', '채널명', '유형', '활성', '정렬순서']]);
     const rep = ctx.offline_setupSheets();
-    check('채널마스터는 열 확장, 나머지 16개 생성', rep.extended.length === 1 && rep.extended[0].tab === '채널마스터' && rep.created.length === 16, rep);
+    check('채널마스터는 열 확장, 나머지 17개 생성', rep.extended.length === 1 && rep.extended[0].tab === '채널마스터' && rep.created.length === 17, rep);
     check('초기 데이터 10행(업로드시작월 포함)', dataRows(tab('채널마스터')).length === 10 && dataRows(tab('채널마스터'))[0][5] === '2026-09');
   }
 
@@ -181,7 +182,7 @@ function textColsFromFormats(sheet) {
     check('README에 새 탭 설명이 추가됨', ['목표실적_월', '단가마스터', '이관로그'].every(n => dataRows(tab('README')).some(r => r[0] === n)));
     ch._grid[1][5] = ''; // 사람이 하이마트 업로드시작월을 비움
     const rep2 = ctx.offline_setupSheets();
-    check('다시 실행하면 확장 없이 확인만', rep2.extended.length === 0 && rep2.verified.length === 17, rep2);
+    check('다시 실행하면 확장 없이 확인만', rep2.extended.length === 0 && rep2.verified.length === 18, rep2);
     check('  ↳ 사람이 비운 업로드시작월을 다시 채우지 않음', dataRows(ch)[0][5] === '');
   }
 
@@ -206,14 +207,14 @@ function textColsFromFormats(sheet) {
     const { ctx, off, tab } = loadOfflineGas({ setup: true });
     const st = tab('설정');
     const rows = () => dataRows(st).map(r => r[0] + '=' + r[1]).join();
-    check('기본값 9행(재고 지표 4 + 자동 반영 5 — 2026-10-06)', rows() === '재고일수_판매기준일수=28,재고경보_과다일수=90,재고경보_결품위험일수=14,데이터지연_경고일수=3,자동반영_사용=Y,자동반영_시작시각=7,자동반영_종료시각=22,처리완료_보관일수=30,자동반영_회당최대파일수=10', rows());
+    check('기본값 10행(재고 지표 4 + 자동 반영 5 — 2026-10-06 + ERP 제외 브랜드 — 2026-10-07)', rows() === '재고일수_판매기준일수=28,재고경보_과다일수=90,재고경보_결품위험일수=14,데이터지연_경고일수=3,자동반영_사용=Y,자동반영_시작시각=7,자동반영_종료시각=22,처리완료_보관일수=30,자동반영_회당최대파일수=10,ERP_제외브랜드=톰', rows());
     check('설명 열 채움', dataRows(st).every(r => r[2]));
     st._grid[2][1] = 120;                // 사람이 과다일수를 120으로
     st._grid.splice(3, 1);               // 결품위험일수 행을 지움
     const rep = ctx.offline_setupSheets();
     check('재실행 — 빠진 키만 보고', JSON.stringify(rep.settingsAdded) === '["재고경보_결품위험일수"]', rep.settingsAdded);
-    check('  ↳ 고친 값은 그대로, 지운 키는 기본값으로 다시', rows() === '재고일수_판매기준일수=28,재고경보_과다일수=120,데이터지연_경고일수=3,자동반영_사용=Y,자동반영_시작시각=7,자동반영_종료시각=22,처리완료_보관일수=30,자동반영_회당최대파일수=10,재고경보_결품위험일수=14', rows());
-    check('다시 실행하면 추가 없음', ctx.offline_setupSheets().settingsAdded.length === 0 && dataRows(st).length === 9);
+    check('  ↳ 고친 값은 그대로, 지운 키는 기본값으로 다시', rows() === '재고일수_판매기준일수=28,재고경보_과다일수=120,데이터지연_경고일수=3,자동반영_사용=Y,자동반영_시작시각=7,자동반영_종료시각=22,처리완료_보관일수=30,자동반영_회당최대파일수=10,ERP_제외브랜드=톰,재고경보_결품위험일수=14', rows());
+    check('다시 실행하면 추가 없음', ctx.offline_setupSheets().settingsAdded.length === 0 && dataRows(st).length === 10);
     const vals = rows => JSON.stringify(rows.slice(2, 4).map(r => r[1]));
     check('값 열은 그대로 읽는 열 — 숫자는 숫자, Y/N은 글자(숫자 열로 읽으면 0이 된다) · SpreadsheetApp = Sheets API', vals(ctx._offReadRows(st, ctx.OFF_TABS.settings)) === JSON.stringify([3, 'Y']) &&
       vals(ctx._offRead('settings')) === JSON.stringify([3, 'Y']), [vals(ctx._offReadRows(st, ctx.OFF_TABS.settings)), vals(ctx._offRead('settings'))]);

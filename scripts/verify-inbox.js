@@ -90,13 +90,15 @@ st.files.filter(f => f.result === 'success').forEach(f => {
 const byId = log => { const o = {}; log.forEach(r => { o[r[0]] = 'ID:' + r[3]; }); return o; };
 const norm = (rows, ids) => J(rows.map(r => r.map(v => (ids[v] || v))));
 const mlog = dataRows(gm.tab('업로드로그')), aIds = byId(autoLog), mIds = byId(mlog);
-const same = nm => norm(dataRows(gm.tab(nm)), mIds) === norm(auto[nm], aIds);
+// 제외코드 등록자 = 반영한 사람(자동 반영은 파일 마지막 수정자) — 업로드로그 업로더처럼 빼고 비교한다
+const who = (nm, rows) => (nm === '제외코드' ? rows.map(r => r.slice(0, 5)) : rows);
+const same = nm => norm(who(nm, dataRows(gm.tab(nm))), mIds) === norm(who(nm, auto[nm]), aIds);
 const tabDiff = gm.off._order.filter(nm => nm !== '업로드로그' && !same(nm));
 const aOk = autoLog.filter(r => r[11] === '성공');
 const logSame = aOk.length === mlog.length && aOk.every((r, i) => J(r.slice(3, 12)) === J(mlog[i].slice(3, 12)));
 console.log('\n④ 같은 실파일을 같은 순서로 수동 업로드한 결과와 대조 (upload_id는 그 업로드의 파일명으로 바꿔 비교)');
 console.table(gm.off._order.filter(nm => nm !== 'README').map(nm => ({ 탭: nm, '자동 행': (auto[nm] || []).length, '수동 행': dataRows(gm.tab(nm)).length,
-  결과: nm === '업로드로그' ? ok(logSame) + '(성공 행의 파일명~상태, 반영방식만 다름)' : ok(same(nm)) })));
+  결과: nm === '업로드로그' ? ok(logSame) + '(성공 행의 파일명~상태, 반영방식만 다름)' : nm === '제외코드' ? ok(same(nm)) + '(등록자만 다름)' : ok(same(nm)) })));
 const all = !tabDiff.length && logSame && leaks === 0 && st2.counts.skipped === 1 && newFiles === 0;
 console.log(all ? '모두 같음 — 자동 반영 = 수동 업로드' : '⚠ 다른 곳: ' + tabDiff.join(', '));
 process.exit(all ? 0 : 1);

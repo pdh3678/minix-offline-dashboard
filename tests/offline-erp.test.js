@@ -245,7 +245,9 @@ async function main() {
       r1.applied.sales === 6 && r1.applied.salesRemoved === 1, r1.applied);
     const log = g.rows('업로드로그').pop();
     check('업로드로그 — 유형·채널 5개·교체 기간·성공', log[4] === 'ERP_SALES_PROFIT' && log[5] === ERP_CHS.join(',') && log[6] === '2026-09-01~2026-09-30' && log[11] === '성공', log);
-    check('미매칭코드 = erp 코드체계로(상품명 = 기본상품명)', g.rows('미매칭코드').every(r => r[0] === 'erp') && g.rows('미매칭코드').length === 5 && g.rows('미매칭코드').some(r => r[1] === CODE.TOM && r[2] === NAME[CODE.TOM]), g.rows('미매칭코드'));
+    check('미매칭코드 = erp 코드체계로(상품명 = 기본상품명) — 톰 브랜드 코드는 미매칭이 아니다(2026-10-07 제외 브랜드)', g.rows('미매칭코드').every(r => r[0] === 'erp') && g.rows('미매칭코드').length === 4 && !g.rows('미매칭코드').some(r => r[1] === CODE.TOM) && g.rows('미매칭코드').some(r => r[1] === CODE.MAX && r[2] === NAME[CODE.MAX]), g.rows('미매칭코드'));
+    check('  ↳ 톰 코드는 제외코드에 브랜드 규칙으로 등록(판매원장에는 그대로)', J(g.rows('제외코드')) === J([['erp', CODE.TOM, NAME[CODE.TOM], '브랜드 규칙', TODAY, EMAIL]]) && r1.applied.excludedAdded === 1 &&
+      erpRows().some(r => r[5] === CODE.TOM) && r1.unmatched.every(u => u.code !== CODE.TOM), g.rows('제외코드'));
     const st0 = g.rows('점포마스터').find(r => r[1] === '00476');
     check('점포마스터 — 거래처매핑 이름 유지(파일의 (주) 이름으로 바꾸지 않음), 매핑 없는 00999는 점포로 등록하지 않음', st0[0] === 'shinsegae' && st0[2] === '신세계(센텀시티점)' && !g.rows('점포마스터').some(r => r[1] === '00999'));
     const st = g.call('offline_getStatus'), by = {}; st.channels.forEach(c => { by[c.channelId] = c; });
