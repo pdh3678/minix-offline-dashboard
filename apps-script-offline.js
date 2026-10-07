@@ -175,6 +175,16 @@ function _offStoreTypeOf(name, region) { return OFF_ONLINE_STORE_RE.test(String(
 
 // 하이마트 누적 스냅샷 보관 기간 — 차이 계산에는 "바로 이전 스냅샷"만 필요하다
 var OFF_SNAPSHOT_KEEP_DAYS = 45;
+/* 재고만 있는 행(판매 값 없이 잔여재고만)도 두는 최근 스냅샷 개수(기준일 수) — 스냅샷을 지울 때 재고_점포최신을 그 앞 스냅샷의
+   점포별 잔여재고로 되살리려면 그 날의 전 행이 있어야 한다(2026-10-07 전 스냅샷은 판매 행만 있어 일부만 되살아난다). 이보다 오래된 날짜는 판매 행만 */
+var OFF_SNAPSHOT_STOCK_DATES = 7;
+/* 스냅샷형 파일 급감 차단(2026-10-07) — 행 수나 점포 수가 직전 스냅샷(재고_점포최신에 있는 그 채널 최신 기준일)의 이 비율 미만이면 반영하지 않는다.
+   하이마트 포털에서 당일 날짜로 받은 파일은 일부 점포만 들어 있다(10/6 12행·10/7 22행 — 평소 1,500행대). 수동은 [그래도 반영](meta.allowShrink)으로만, 자동 반영은 오류 폴더로.
+   프론트 미리보기(src/features/admin/upload.js _upShrink)도 같은 비율·같은 문구로 먼저 막는다 */
+var OFF_SHRINK_RATIO = 0.5;
+// 하이마트 스냅샷 삭제(2026-10-07) — 업로드로그 기록 행의 파일유형, 지운 날짜 업로드 행의 상태(성공이 아니라 데이터 현황·판매 최신 기준일에서 빠진다)
+var OFF_SNAPSHOT_DELETE_TYPE = 'HIMART_SNAPSHOT_DELETE';
+var OFF_SNAPSHOT_DELETED = '스냅샷 삭제됨';
 var OFF_CACHE_TTL_SEC = 300;
 var OFF_CACHE_KEYS = ['offline:masters', 'offline:status'];
 // 공구 저장(_withStructLock)은 ScriptLock을 5초만 기다린다. 업로드가 그 락을 수십 초 잡으면 공구 저장이
@@ -454,8 +464,8 @@ function _offReadmeRows() {
     ['판매원장', '판매 수량. 단위 day = 하루치(기간시작=기간종료), period = 여러 날 합. 원본코드만 저장하고 SKU는 읽을 때 코드매핑으로 해석. 설치완료수량은 하이마트만. 금액·수수료는 파일에 금액이 있는 채널만(ERP 매출이익리스트 — 원, 반품·취소는 음수) — 금액이 있는 행은 그 값, 빈 행은 수량 × 단가마스터 공급가로 금액을 계산한다.'],
     ['재고_채널일별', '채널 전체 합계 재고, 기준일마다 누적(이력).'],
     ['재고_점포최신', '채널별 최신 기준일 1벌만 유지(0 재고 포함). 당월입고·당월판매는 파일에 있을 때만.'],
-    ['하이마트_누적스냅샷', '하이마트 당월 누적 판매 스냅샷(판매 값이 있는 행만). 일별 판매 = 이웃 스냅샷의 차이. 최근 45일만 보관.'],
-    ['업로드로그', '업로드 1건 = 1행. 반영 행수·미매칭 코드 수·경고. 반영방식 = 수동(데이터 업로드 화면) | 자동 반영(드라이브 수신함 — 업로더 = 파일을 마지막으로 고친 사람). 원본파일ID·원본수정시각·원본MD5 = 자동 반영한 드라이브 파일(같은 파일은 다시 반영하지 않는다). 수신함처리 = 파일을 처리완료·오류 폴더로 옮기거나 휴지통으로 보내지 못한 사유.'],
+    ['하이마트_누적스냅샷', '하이마트 당월 누적 판매 스냅샷(판매 값이 있는 행 + 최근 7개 기준일은 재고만 있는 행도). 일별 판매 = 이웃 스냅샷의 차이. 최근 45일만 보관. 데이터 업로드 화면 업로드 로그의 [이 날짜 스냅샷 삭제]로 한 날짜를 지우면 판매를 다시 계산하고 재고_점포최신을 그 앞 스냅샷으로 되살린다.'],
+    ['업로드로그', '업로드 1건 = 1행. 반영 행수·미매칭 코드 수·경고. 반영방식 = 수동(데이터 업로드 화면) | 자동 반영(드라이브 수신함 — 업로더 = 파일을 마지막으로 고친 사람). 원본파일ID·원본수정시각·원본MD5 = 자동 반영한 드라이브 파일(같은 파일은 다시 반영하지 않는다). 수신함처리 = 파일을 처리완료·오류 폴더로 옮기거나 휴지통으로 보내지 못한 사유. 하이마트 스냅샷을 지우면 그 날짜 업로드의 상태가 "스냅샷 삭제됨"으로 바뀌고 파일유형 HIMART_SNAPSHOT_DELETE 행(삭제 기록)이 붙는다.'],
     ['미매칭코드', '코드매핑이 없는 원본코드. 매핑하면 목록에서 빠진다.'],
     ['목표실적_월', '채널×품목군×모델×월 목표·실적(구분 IN=Sell-in, OUT=Sell-out). 출처 input = 대시보드 목표 관리에서 입력(이관이 덮어쓰지 않음), migration = 기존 진행현황에서 이관. OUT 실적은 업로드시작월 이전 달·업로드 없는 채널만 쓰고, 그 뒤로는 판매원장에서 집계한다. 대분류 열: 모델 단위 행은 대분류·품목군·모델 모두, 대분류 단위 행(모델 구분이 없는 과거 수치 — 예: 진행현황의 "건조기" 행)은 대분류만 채운다.'],
     ['단가마스터', '채널×품목군×모델 공급가 이력. 금액 = 수량 × 그 달 1일 기준 가장 최근 적용시작일의 공급가.'],
@@ -905,7 +915,8 @@ function _offMappedKeys(mappingRows, codeSys) {
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 /* 파일 1개 단위.
-   data.meta    = { fileName, fileType, channelId, baseDate(스냅샷형) | replaceStart·replaceEnd(기간 교체형), rawRowCount }
+   data.meta    = { fileName, fileType, channelId, baseDate(스냅샷형) | replaceStart·replaceEnd(기간 교체형), rawRowCount,
+                    allowShrink(스냅샷형 — 직전 대비 급감이어도 반영: 미리보기 [그래도 반영]. 자동 반영에는 없다) }
    data.records = { sales[], storeStock[], channelStock[], himart[], stores[], names{code: 상품명}, brands{code: 브랜드}(ERP만 — 제외 브랜드 규칙) }
                   (파서 출력 그대로 — src/features/offline/parsers.js 의 toUploadPayload)
    opts         = 서버 안에서만(드라이브 수신함 자동 반영 — doPost는 넘기지 않는다):
@@ -948,6 +959,13 @@ function _offUpload(data, auth, opts) {
     ctx.chMeta = _offChannelMeta();
     if (ft.kind === 'snapshot') _offStockBasis(ctx, meta, ft);
     try {
+      // 스냅샷형 — 직전 스냅샷 대비 행 수·점포 수 급감이면 쓰기 전에 거절(자동 반영은 늘, 수동은 [그래도 반영]이 아니면). 하이마트 당일 파일은 경고만
+      if (ft.kind !== 'period') {
+        var shrink = _offShrinkReason(Number(meta.rawRowCount) || 0, _offStoreCount(rec), _offSnapshotBase(ft, _offRead('stockStore'), _offRead('uploadLog'), ctx.chMeta.codeSys));
+        if (shrink && (ctx.auto || meta.allowShrink !== true)) throw new Error(shrink + (ctx.auto ? ' — 자동 반영은 이 파일을 반영하지 않았습니다' : ''));
+        if (shrink) ctx.warnings.push('급감 확인 후 반영(그래도 반영): ' + shrink);
+      }
+      if (ft.kind === 'himart' && meta.baseDate === ctx.today) ctx.warnings.push(_offSameDayNote(meta.baseDate));
       var range = {};
       if (ft.split === 'customer') range = _offApplyErpSales(ctx, meta, rec);
       else if (ft.kind === 'period') range = _offApplyPeriodSales(ctx, meta, rec, ft);
@@ -1157,6 +1175,37 @@ function _offStockBasis(ctx, meta, ft) {
 // 파일에 없는 값은 빈칸('없음')으로 — 0(있는데 0개)과 구분한다
 function _offOpt(v) { return (v === '' || v == null) ? '' : (Number(v) || 0); }
 
+/* 급감 판정의 기준(직전 스냅샷) — 재고_점포최신에 남아 있는 그 파일 채널의 최신 기준일 한 벌(이마트 재고현황_상세는 코드체계가 같은
+   이마트·트레이더스 함께). rows = 그 스냅샷을 만든 업로드의 원본 행수(업로드로그), stores = 그 스냅샷의 점포 수.
+   스냅샷이 없으면 null(첫 업로드 — 판정하지 않는다). 하이마트 스냅샷을 지우면 재고_점포최신이 그 앞 스냅샷으로 돌아가 기준도 같이 돌아간다 */
+function _offSnapshotBase(ft, stockRows, logRows, codeSys) {
+  var cs = codeSys || function (c) { return c; };
+  var mine = function (ch) { return ft.split ? cs(ch) === cs(ft.channelId) : ch === ft.channelId; };
+  var date = '';
+  stockRows.forEach(function (r) { if (mine(r[1]) && _offIsDate(r[0]) && r[0] > date) date = r[0]; });
+  if (!date) return null;
+  var stores = {}, ids = {}, rows = 0;
+  stockRows.forEach(function (r) { if (mine(r[1]) && r[0] === date) { if (r[2]) stores[r[2]] = true; if (r[9]) ids[r[9]] = true; } });
+  logRows.forEach(function (r) { if (ids[r[0]]) rows = Math.max(rows, Number(r[7]) || 0); });
+  return { date: date, rows: rows, stores: Object.keys(stores).length };
+}
+function _offStoreCount(rec) {
+  var s = {};
+  (rec.stores || []).forEach(function (x) { var c = String(x.code == null ? '' : x.code).trim(); if (c) s[c] = true; });
+  return Object.keys(s).length;
+}
+// 급감 사유 — 행 수·점포 수 중 하나라도 직전의 OFF_SHRINK_RATIO 미만이면 문구, 아니면 ''. 프론트 _upShrink와 같은 문구
+function _offShrinkReason(rawRows, stores, base) {
+  if (!base) return '';
+  var parts = [];
+  if (base.rows && rawRows < base.rows * OFF_SHRINK_RATIO) parts.push('행 수 급감(' + _offComma(rawRows) + '행 / 직전 ' + _offComma(base.rows) + '행)');
+  if (base.stores && stores < base.stores * OFF_SHRINK_RATIO) parts.push('점포 수 급감(' + _offComma(stores) + '곳 / 직전 ' + _offComma(base.stores) + '곳)');
+  return parts.length ? '직전 대비 ' + parts.join(' · ') + ' — 당일 날짜로 받은 불완전 파일일 수 있습니다. 전일 날짜로 다시 받아주세요' : '';
+}
+// 하이마트 기준일 = 업로드 당일 — 차단하지 않고 경고만(차단은 급감 규칙으로만). 프론트 미리보기도 같은 경고
+function _offSameDayNote(d) { return '기준일이 업로드 당일(' + d + ')입니다 — 당일 파일은 불완전할 수 있습니다(일부 점포만). 숫자가 이상하면 전일 날짜로 다시 받아주세요'; }
+function _offComma(n) { return String(Math.round(Number(n) || 0)).replace(/\B(?=(\d{3})+(?!\d))/g, ','); }
+
 /* B-2. 스냅샷형 + 채널 분리(이마트 재고 '재고현황_상세' — 이마트·트레이더스 점포가 한 파일).
    점포마다 채널: ① 점포마스터에 그 점포코드가 있는 채널(같은 코드체계 안에서) ② 점포명이 채널마스터 점포명접두어로 시작하는 채널
    ③ 둘 다 없으면 코드체계 채널(이마트)로 두고 경고. 그 뒤 채널마다 기존 규칙 그대로 —
@@ -1240,26 +1289,23 @@ function _offChName(cm, id) { for (var i = 0; i < cm.rows.length; i++) if (cm.ro
    1) 누적스냅샷에 기준일 D0 교체 저장
    2) 영향 날짜 = D0 + D0 바로 다음에 존재하는 스냅샷 날짜(그 날의 "이전 스냅샷"이 D0로 바뀌므로)
    3) 영향 날짜마다 _offHimartSalesFor로 다시 계산, 판매원장의 하이마트 행 중 기간종료가 영향 날짜인 것을 교체
-   스냅샷에는 판매 값(당월실판매·당월판매·금주판매·당일판매)이 하나라도 있는 행만 둔다. 없는 행은
+   스냅샷에는 판매 값(당월실판매·당월판매·금주판매·당일판매)이 하나라도 있는 행을 둔다. 없는 행은
    "0으로 본다"는 계산 규칙과 결과가 같고, 점포×상품 전부(하루 1,600여 행)를 45일 쌓으면 매 업로드가
-   수십만 셀을 읽고 쓰게 된다. */
+   수십만 셀을 읽고 쓰게 된다. 단 최근 OFF_SNAPSHOT_STOCK_DATES개 기준일은 재고만 있는 행(판매 값 없이 잔여재고만)도 둔다 —
+   스냅샷을 지울 때(_offDeleteHimartSnapshot) 재고_점포최신을 그 앞 날짜의 점포별 잔여재고로 되살리는 데 쓴다(판매 계산에는 0이라 영향 없음). */
 function _offApplyHimart(ctx, meta, rec) {
   var D0 = meta.baseDate;
   var oldSnap = _offRead('himartSnap');
   var newSnap = [];
   (rec.himart || []).forEach(function (r) {
-    if (!(r.real || r.sale || r.week || r.day)) return;
+    if (!(r.real || r.sale || r.week || r.day || r.stock)) return;
     newSnap.push([D0, r.store || '', r.code, Number(r.real) || 0, Number(r.sale) || 0, Number(r.week) || 0, Number(r.day) || 0, Number(r.stock) || 0, ctx.uploadId]);
   });
   // 판매 값이 하나도 없는 날(월초 등)도 "이 날 스냅샷이 있었다"는 사실은 남겨야 다음 날이 day로 계산된다
   if (!newSnap.length) newSnap.push([D0, '', '', 0, 0, 0, 0, 0, ctx.uploadId]);
 
   var merged = oldSnap.filter(function (r) { return r[0] !== D0 && _offIsDate(r[0]); }).concat(newSnap);
-  var byDate = {};
-  merged.forEach(function (r) {
-    var m = byDate[r[0]] || (byDate[r[0]] = {});
-    m[r[1] + OFF_KEY_SEP + r[2]] = { real: Number(r[3]) || 0, sale: Number(r[4]) || 0, day: Number(r[6]) || 0 };
-  });
+  var byDate = _offSnapByDate(merged);
   var dates = Object.keys(byDate).sort();
   var affected = [D0];
   for (var i = 0; i < dates.length; i++) if (dates[i] > D0) { affected.push(dates[i]); break; }
@@ -1280,11 +1326,27 @@ function _offApplyHimart(ctx, meta, rec) {
   ctx.applied.salesRemoved = res2.removed;
 
   var cutoff = _offAddDays(ctx.today, -OFF_SNAPSHOT_KEEP_DAYS);
-  var keepSnap = newSnap.filter(function (r) { return r[0] >= cutoff; });
-  _offReplace('himartSnap', oldSnap, function (r) { return r[0] !== D0 && r[0] >= cutoff; }, keepSnap);
+  // 재고만 있는 행은 최근 OFF_SNAPSHOT_STOCK_DATES개 기준일에만 — 그보다 오래된 날짜에서는 이번에 걷어낸다
+  var recent = {};
+  dates.slice(-OFF_SNAPSHOT_STOCK_DATES).forEach(function (d) { recent[d] = true; });
+  var keep = function (r) { return r[0] >= cutoff && (recent[r[0]] || !_offSnapStockOnly(r)); };
+  var keepSnap = newSnap.filter(keep);
+  _offReplace('himartSnap', oldSnap, function (r) { return r[0] !== D0 && keep(r); }, keepSnap);
   ctx.applied.himartSnap = keepSnap.length;
   return { recomputed: recomputed };
 }
+
+// 스냅샷 행 → { 기준일: { 점포코드+원본코드: { real, sale, day } } } — 반영(_offApplyHimart)과 삭제(_offDeleteHimartSnapshot)가 같이 쓴다
+function _offSnapByDate(rows) {
+  var byDate = {};
+  rows.forEach(function (r) {
+    var m = byDate[r[0]] || (byDate[r[0]] = {});
+    m[r[1] + OFF_KEY_SEP + r[2]] = { real: Number(r[3]) || 0, sale: Number(r[4]) || 0, day: Number(r[6]) || 0 };
+  });
+  return byDate;
+}
+// 재고만 있는 스냅샷 행 — 판매 값(당월실판매·당월판매·금주판매·당일판매)이 모두 0이고 잔여재고만 있다
+function _offSnapStockOnly(r) { return !(Number(r[3]) || Number(r[4]) || Number(r[5]) || Number(r[6])) && !!Number(r[7]); }
 
 /* 영향 날짜 D 하나의 하이마트 판매 레코드(점포코드 × 원본코드).
    prev = D보다 이전의 가장 최근 스냅샷(같은 달일 때만 유효 — 당월 누적은 매달 1일에 0부터 다시 쌓인다)
@@ -1317,6 +1379,77 @@ function _offHimartSalesFor(D, byDate, dates, uploadId) {
     }
   });
   return { rows: rows, unit: unit, start: start, mismatch: mismatch, samples: samples };
+}
+
+/* C-2. 하이마트 스냅샷 삭제(2026-10-07) — 데이터 업로드 화면 업로드 로그의 [이 날짜 스냅샷 삭제](offline_deleteHimartSnapshot).
+   당일 날짜로 받은 불완전 파일(일부 점포만 — 당월판매가 빠진 점포는 0으로 계산돼 큰 음수 판매가 생긴다)을 반영했을 때 그 날짜를 없던 것으로 되돌린다.
+   data = { date, uploadId(화면이 본 그 날짜 업로드 — 그 사이 다시 반영됐으면 거절, 생략 가능) }
+   1) 하이마트_누적스냅샷에서 그 기준일 행 삭제
+   2) 판매원장 — 기간종료가 그 날짜인 하이마트 행 삭제, 바로 다음 스냅샷 날짜는 남은 스냅샷으로 다시 계산(반영 때와 같은 _offHimartSalesFor)
+   3) 재고_점포최신 — 하이마트 기준일이 그 날짜면 남은 가장 최근 스냅샷의 점포별 잔여재고·당월판매로 되살린다(남은 스냅샷이 없으면 비운다).
+      스냅샷에 재고만 있는 행이 없는 날짜(2026-10-07 전 반영 — 판매 행만 보관)는 판매가 있던 점포·상품만 되살아난다 → 결과의 stockStore.fileRows와 비교
+   4) 재고_채널일별 — 그 날짜 하이마트 행 삭제(채널 재고 기준일이 그 앞 날짜로 돌아간다)
+   5) 업로드로그 — 그 날짜 하이마트 업로드(성공)의 상태를 '스냅샷 삭제됨'으로(데이터 현황·판매 최신 기준일에서 빠진다) + 삭제 기록 1행
+   다른 채널은 건드리지 않는다(다른 스냅샷형 채널로 넓힐 때도 이 순서 — 단 판매 재계산은 하이마트만 있다). */
+function _offDeleteHimartSnapshot(data, auth) {
+  var D = String(data.date || '').trim(), want = String(data.uploadId || '').trim();
+  if (!_offIsDate(D)) throw new Error('삭제할 기준일이 올바르지 않습니다: ' + (D || '(빈칸)'));
+  return _offWithLock(function () {
+    var t = _offReadTabs(['himartSnap', 'sales', 'stockStore', 'stockDaily', 'uploadLog']);
+    var snap = t.himartSnap, mine = snap.filter(function (r) { return r[0] === D; });
+    if (!mine.length) throw new Error('하이마트_누적스냅샷에 ' + D + ' 스냅샷이 없습니다 — 이미 지웠거나 보관 기간(' + OFF_SNAPSHOT_KEEP_DAYS + '일)이 지났습니다.');
+    if (want && !mine.some(function (r) { return r[8] === want; })) throw new Error(D + ' 스냅샷은 그 사이 다른 업로드로 바뀌었습니다 — 화면을 새로 고친 뒤 다시 확인하세요.');
+    var email = (auth && auth.email) || '', now = new Date();
+    var id = 'X' + Utilities.formatDate(now, 'Asia/Seoul', 'yyyyMMdd-HHmmss') + '-' + Utilities.getUuid().slice(0, 4);
+    var rest = snap.filter(function (r) { return r[0] !== D && _offIsDate(r[0]); });
+    var byDate = _offSnapByDate(rest), dates = Object.keys(byDate).sort();
+    var next = '', prevLatest = '';
+    dates.forEach(function (d) { if (d > D && !next) next = d; if (d < D) prevLatest = d; });
+
+    // 2) 판매원장 — 그 날짜 행은 지우고, 다음 스냅샷 날짜는 남은 스냅샷으로 다시
+    var drop = {}; drop[D] = true;
+    if (next) drop[next] = true;
+    var re = next ? _offHimartSalesFor(next, byDate, dates, id) : null;
+    var sRes = _offReplace('sales', t.sales, function (r) { return !(r[3] === 'himart' && drop[r[1]]); }, re ? re.rows : []);
+    // 1) 누적스냅샷
+    _offReplace('himartSnap', snap, function (r) { return r[0] !== D; }, []);
+    // 3) 재고_점포최신 — 지금 하이마트 점포 재고가 그 날짜일 때만(더 최신 날짜면 그대로)
+    var storeDate = '', restore = null;
+    t.stockStore.forEach(function (r) { if (r[1] === 'himart' && r[0] > storeDate) storeDate = r[0]; });
+    if (storeDate === D) {
+      var from = prevLatest, ids = {};
+      var rows = rest.filter(function (r) { return r[0] === from && r[2]; }).map(function (r) {
+        ids[r[8]] = true;
+        return [from, 'himart', r[1], r[2], Number(r[7]) || 0, '', '', '', Number(r[4]) || 0, r[8]];
+      });
+      var fileRows = 0;
+      t.uploadLog.forEach(function (r) { if (ids[r[0]]) fileRows = Math.max(fileRows, Number(r[7]) || 0); });
+      _offReplace('stockStore', t.stockStore, function (r) { return r[1] !== 'himart'; }, rows);
+      restore = { from: from, rows: rows.length, fileRows: fileRows, stock: rows.reduce(function (s, r) { return s + r[4]; }, 0) };
+    }
+    // 4) 재고_채널일별
+    var dRes = _offReplace('stockDaily', t.stockDaily, function (r) { return !(r[0] === D && r[1] === 'himart'); }, []);
+    // 5) 업로드로그 — 그 날짜 업로드 상태 + 삭제 기록
+    var logs = t.uploadLog, first = -1, marked = 0;
+    logs.forEach(function (r, i) {
+      if (r[4] !== 'HIMART_SALES_STOCK' || r[6] !== D || r[11] !== '성공') return;
+      r[11] = OFF_SNAPSHOT_DELETED; marked++;
+      if (first < 0) first = i;
+    });
+    var note = '스냅샷 ' + mine.length + '행 삭제 · 판매원장 ' + D + (next ? '·' + next : '') + ' 하이마트 ' + sRes.removed + '행 지움' +
+      (re ? ' → ' + next + ' 다시 계산 ' + re.rows.length + '행(' + (re.unit === 'day' ? 'day' : re.start + '~ period') + ')' : '') +
+      (restore ? ' · 재고_점포최신 ' + (restore.from ? restore.from + ' 스냅샷으로 ' + restore.rows + '행 복원' + (restore.fileRows > restore.rows ? '(그 날 파일 ' + restore.fileRows + '행 중 — 판매 행만 남은 스냅샷이라 일부)' : '') : '비움(남은 스냅샷 없음)') : '') +
+      ' · 재고_채널일별 ' + dRes.removed + '행 지움 · 업로드 ' + marked + '건 상태 → ' + OFF_SNAPSHOT_DELETED;
+    logs.push([id, Utilities.formatDate(now, 'Asia/Seoul', 'yyyy-MM-dd HH:mm:ss'), email, '하이마트 스냅샷 삭제 ' + D, OFF_SNAPSHOT_DELETE_TYPE, 'himart', D,
+      mine.length, re ? re.rows.length : 0, 0, note.slice(0, 2000), '성공'].concat(_offLogSource(null)));
+    if (first < 0) first = logs.length - 1;
+    _offWriteRows('uploadLog', 2 + first, logs.slice(first), 0);
+    _offInvalidateCache();
+    Logger.log('[오프라인] 하이마트 스냅샷 삭제 ' + D + ' by ' + email + ' — ' + note);
+    return { success: true, date: D, deleteId: id, snapshotRows: mine.length, salesRemoved: sRes.removed,
+      recomputed: re ? { date: next, unit: re.unit, start: re.start, rows: re.rows.length } : null,
+      stockStore: restore, stockDailyRemoved: dRes.removed, logMarked: marked, note: note };
+  });
 }
 
 /* 점포마스터 upsert — 새 점포는 추가, 있던 점포는 이름·지역(값이 있을 때만)과 최근확인일 갱신.
@@ -1446,6 +1579,7 @@ function _offlineRoute(action, data, auth) {
     else if (action === 'offline_getUnmatched') out = _offGetUnmatched();
     else if (action === 'offline_saveExcluded') out = _offSaveExcluded(data || {}, auth);
     else if (action === 'offline_getUploadLog') out = _offGetUploadLog();
+    else if (action === 'offline_deleteHimartSnapshot') out = _offDeleteHimartSnapshot(data || {}, auth);
     else if (action === 'offline_getStatus') out = _offGetStatus();
     // 2-A (apps-script-offline-targets.js)
     else if (action === 'offline_getMonthly') out = _offGetMonthly(data || {});
@@ -1533,11 +1667,22 @@ function _offGetUnmatched() {
   return { success: true, items: items };
 }
 
-// 최근 50건 — 로그는 batchGet 한 번에 통째로 읽고(끝 행 번호를 따로 묻는 왕복이 더 비싸다) 끝부분만 쓴다
+/* 최근 50건 — 로그는 batchGet 한 번에 통째로 읽고(끝 행 번호를 따로 묻는 왕복이 더 비싸다) 끝부분만 쓴다.
+   snapshotDeletable = 그 날짜 하이마트 스냅샷을 지금 만들고 있는 업로드(그 날짜의 마지막 성공 업로드, 보관 기간 안) — [이 날짜 스냅샷 삭제] 버튼.
+   snapshotBase{파일유형: {date, rows, stores}} = 스냅샷형 파일의 직전 스냅샷 — 미리보기가 급감을 먼저 막는다(서버 _offUpload도 같은 기준으로 다시 본다) */
 function _offGetUploadLog() {
-  var all = _offRead('uploadLog');
+  var t = _offReadTabs(['uploadLog', 'stockStore', 'channel']);
+  var all = t.uploadLog, cs = _offCodeSystem(t.channel), base = {};
+  Object.keys(OFF_FILE_TYPES).forEach(function (k) {
+    var ft = OFF_FILE_TYPES[k];
+    if (ft.kind === 'period' || ft.blocked) return;
+    var b = _offSnapshotBase(ft, t.stockStore, all, cs);
+    if (b) base[k] = b;
+  });
+  var cutoff = _offAddDays(_offToday(), -OFF_SNAPSHOT_KEEP_DAYS), lastOk = {};
+  all.forEach(function (r) { if (r[4] === 'HIMART_SALES_STOCK' && r[11] === '성공' && _offIsDate(r[6]) && r[6] >= cutoff) lastOk[r[6]] = r[0]; });
   var n = Math.min(50, all.length);
-  if (!n) return { success: true, items: [] };
+  if (!n) return { success: true, items: [], snapshotBase: base };
   var rows = all.slice(all.length - n);
   var items = rows.map(function (r) {
     return {
@@ -1545,11 +1690,12 @@ function _offGetUploadLog() {
       fileType: _offStr(r[4]), channelId: _offStr(r[5]), range: _offStr(r[6]),
       rawRows: Number(r[7]) || 0, appliedRows: Number(r[8]) || 0, unmatched: Number(r[9]) || 0,
       warnings: _offStr(r[10]), status: _offStr(r[11]),
-      mode: _offStr(r[12]) === '자동 반영' ? 'auto' : 'manual', inboxNote: _offStr(r[16])
+      mode: _offStr(r[12]) === '자동 반영' ? 'auto' : 'manual', inboxNote: _offStr(r[16]),
+      snapshotDeletable: !!r[0] && lastOk[r[6]] === r[0]
     };
   }).filter(function (x) { return x.uploadId; });
   items.reverse();
-  return { success: true, items: items };
+  return { success: true, items: items, snapshotBase: base };
 }
 
 /* 채널·데이터유형별 마지막 기준일과 이번 달 빈 날짜.
@@ -1846,5 +1992,57 @@ function offline_benchmarkReads() {
   var bad = out.tabs.filter(function (t) { return t.same === false; });
   say(api ? (bad.length ? '⚠ 읽은 행이 다른 탭: ' + bad.map(function (t) { return t.tab; }).join(', ') : '모든 탭 — Sheets API로 읽은 행 = 이전 방식으로 읽은 행') : '');
   out.log = log;
+  return out;
+}
+
+/* offline_himartCheck — 편집기에서 직접 실행(읽기만 — 시트·캐시에 쓰지 않는다). 하이마트 스냅샷을 지우기 전후에 숫자를 본다(2026-10-07).
+   ① 스냅샷 기준일별 — 스냅샷 행 · 점포 · 당월판매 합 · 재고만 있는 행 · 그 날 업로드(마지막 성공)의 원본 행수
+   ② 판매원장 하이마트 기간종료일별 — 단위(day / 시작일~ period) · 레코드 · 수량 합 · 음수 레코드와 그 합
+   ③ 월 누적 대조 — 기준일 D마다 판매원장 (D의 달 1일~D, 기간종료 기준) 수량 합 = 당월판매(D) 합인지. 차이 계산이 끊김 없이 이어지면 같다.
+      월 경계: 그 달 첫 스냅샷은 1일~D 를 당월판매(D) 그대로 넣는다(9/30 다음이 10/2면 10/2 = 10/1~10/2 period)
+   from = 볼 시작일(기본 오늘 −14일). 불완전 파일(당일 날짜로 받은 파일)은 ①에서 원본 행수가 평소보다 크게 적은 날로 보인다 */
+function offline_himartCheck(from) {
+  from = _offIsDate(from) ? from : _offAddDays(_offToday(), -14);
+  var t = _offWithIo(function () { return _offReadTabs(['himartSnap', 'sales', 'uploadLog']); });
+  var lines = [], say = function (s) { lines.push(s); Logger.log(s); };
+  var fileRows = {}, snap = {};
+  t.uploadLog.forEach(function (r) { if (r[4] === 'HIMART_SALES_STOCK' && r[11] === '성공') fileRows[r[6]] = Number(r[7]) || 0; });
+  t.himartSnap.forEach(function (r) {
+    if (!_offIsDate(r[0])) return;
+    var o = snap[r[0]] || (snap[r[0]] = { rows: 0, stores: {}, sale: 0, real: 0, stockOnly: 0 });
+    if (!r[2]) return; // 판매 값이 하나도 없던 날의 표시 행
+    o.rows++; o.stores[r[1]] = true; o.sale += Number(r[4]) || 0; o.real += Number(r[3]) || 0;
+    if (_offSnapStockOnly(r)) o.stockOnly++;
+  });
+  var dates = Object.keys(snap).sort(), led = {}, hm = t.sales.filter(function (r) { return r[3] === 'himart' && _offIsDate(r[1]); });
+  hm.forEach(function (r) {
+    var o = led[r[1]] || (led[r[1]] = { units: {}, n: 0, qty: 0, inst: 0, neg: 0, negQty: 0 });
+    o.units[r[2] === 'day' ? 'day' : r[0] + '~ period'] = true;
+    o.n++; o.qty += Number(r[6]) || 0; o.inst += Number(r[7]) || 0;
+    if ((Number(r[6]) || 0) < 0) { o.neg++; o.negQty += Number(r[6]) || 0; }
+  });
+  var out = { from: from, snapshots: [], ledger: [], monthCheck: [] };
+  say('① 하이마트_누적스냅샷 기준일별 (' + from + ' 이후) — 기준일 · 스냅샷 행 · 점포 · 당월판매 합 · 재고만 있는 행 · 그 날 파일 원본 행수');
+  dates.filter(function (d) { return d >= from; }).forEach(function (d) {
+    var o = snap[d], x = { date: d, rows: o.rows, stores: Object.keys(o.stores).length, sale: o.sale, stockOnly: o.stockOnly, fileRows: fileRows[d] == null ? null : fileRows[d] };
+    out.snapshots.push(x);
+    say('  ' + d + ' · ' + x.rows + '행 · 점포 ' + x.stores + ' · 당월판매 ' + x.sale + ' · 재고만 ' + x.stockOnly + ' · 파일 ' + (x.fileRows == null ? '(성공 업로드 없음)' : x.fileRows + '행'));
+  });
+  say('② 판매원장 하이마트 기간종료일별 — 단위 · 레코드 · 수량 합 · 설치 합 · 음수 레코드(합)');
+  Object.keys(led).sort().filter(function (d) { return d >= from; }).forEach(function (d) {
+    var o = led[d], x = { end: d, units: Object.keys(o.units).join(','), records: o.n, qty: o.qty, inst: o.inst, negative: o.neg, negativeQty: o.negQty };
+    out.ledger.push(x);
+    say('  ' + d + ' · ' + x.units + ' · ' + x.records + '건 · 수량 ' + x.qty + ' · 설치 ' + x.inst + (x.negative ? ' · ⚠ 음수 ' + x.negative + '건(' + x.negativeQty + ')' : ''));
+  });
+  say('③ 월 누적 대조 — 기준일 · 판매원장(그 달 1일~기준일) 합 · 당월판매 합 · 결과');
+  dates.filter(function (d) { return d >= from; }).forEach(function (d) {
+    var m0 = d.slice(0, 8) + '01', sum = 0, inst = 0;
+    hm.forEach(function (r) { if (r[1] >= m0 && r[1] <= d) { sum += Number(r[6]) || 0; inst += Number(r[7]) || 0; } });
+    var x = { date: d, ledger: sum, monthSale: snap[d].sale, ledgerInst: inst, monthReal: snap[d].real, ok: sum === snap[d].sale && inst === snap[d].real };
+    out.monthCheck.push(x);
+    say('  ' + d + ' · 원장 ' + sum + ' / 당월판매 ' + x.monthSale + ' · 설치 ' + inst + ' / 당월실판매 ' + x.monthReal + ' · ' + (x.ok ? '같음' : '⚠ 다름'));
+  });
+  out.ok = out.monthCheck.every(function (x) { return x.ok; });
+  out.log = lines;
   return out;
 }

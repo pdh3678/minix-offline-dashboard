@@ -14,6 +14,7 @@
  *                period 레코드는 기간종료일이 창 안이면 통째로 포함. 재고구분과 무관하게 합산
  *   재고일수     정상재고 ÷ 일평균 판매. 일평균이 0 이하면 null('판매 없음'). 재고 데이터가 없는 채널(ERP 채널)은 null·경보 없음,
  *                그 채널의 판매는 전체 채널('*') 그룹에 넣지 않는다
+ *   취급 없음    재고(재고구분 합) 0이고 최근 N일 판매도 0 이하 → idle. 재고일수 null('—')·'판매 없음' 아님·경보 없음(2026-10-07)
  *   진열 점포 수 재고_점포최신에서 '전시' 재고 > 0 인 점포 수
  *   취급 점포 수 재고구분 무관 재고 > 0 인 점포 수. 커버리지 = 취급 ÷ 점포마스터의 그 채널 점포 수
  *   점포 결품    당월판매 > 0 인데 현재 재고(재고구분 합) 0 인 점포 × SKU
@@ -88,7 +89,7 @@ function _offChannelInfo(channelRows) {
    반환:
      channels[]  채널별 기준일·지연·점포 수·당월판매 원천
      groups[]    채널(channelId '*' = 전체 채널) × 단계(channel·category·line·model·sku) 지표
-                 { stock{정상,전시,리퍼}, total, windowQty, dailyAvg, days, noSales, displayStores, handlingStores, coverage, storeOuts, alert }
+                 { stock{정상,전시,리퍼}, total, windowQty, dailyAvg, days, noSales, idle, displayStores, handlingStores, coverage, storeOuts, alert }
      unmatched[] 채널 × 미매칭 코드 { stock, windowQty }
      storeOuts[] 점포 결품 { channelId, store, storeName, region, skuId, monthSale }
      stores[]    storeChannel 의 점포 × SKU(미매칭 코드는 skuId '' + code) 재고·당월판매·진열·결품 */
@@ -238,7 +239,9 @@ function _offInventoryCompute(input) {
     var noStock = ch !== '*' && !stockDate[ch]; // 재고 데이터가 없는 채널 — 재고일수·경보를 셀 수 없다('재고 0'이 아니다)
     g.total = g.stock['정상'] + g.stock['전시'] + g.stock['리퍼'];
     g.dailyAvg = hasSales ? g.windowQty / N : null;
-    g.noSales = hasSales && !noStock && !(g.dailyAvg > 0);
+    // 취급 없음 — 재고 0이고 최근 N일 판매도 없다(0 이하). 재고일수 '—'·경보 없음(결품 위험은 판매가 있는데 재고일수가 짧을 때만)
+    g.idle = hasSales && !noStock && g.total === 0 && !(g.windowQty > 0);
+    g.noSales = hasSales && !noStock && !g.idle && !(g.dailyAvg > 0);
     g.days = g.dailyAvg > 0 && !noStock ? g.stock['정상'] / g.dailyAvg : null;
     g.displayStores = Object.keys(g._disp).length;
     g.handlingStores = Object.keys(g._hand).length;

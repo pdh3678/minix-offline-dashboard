@@ -9,7 +9,7 @@
 const OFFLINE_UPLOAD_TIMEOUT_MS=300000; // 하이마트 1개 파일 반영이 수십 초까지 걸릴 수 있다
 const OFFLINE_CALL_TIMEOUT_MS=45000;
 // 원장·원본 스프레드시트를 통째로 읽고 쓰는 액션 — 업로드와 같은 긴 타임아웃
-const OFFLINE_LONG_ACTIONS={offline_upload:true,offline_migrateProgress:true,offline_migratePrices:true,offline_processInbox:true};
+const OFFLINE_LONG_ACTIONS={offline_upload:true,offline_migrateProgress:true,offline_migratePrices:true,offline_processInbox:true,offline_deleteHimartSnapshot:true};
 
 async function _offlineCall(action,data){
   if(!_getToken())throw new Error('로그인이 필요합니다.');
@@ -25,6 +25,8 @@ async function _offlineCall(action,data){
     if(/_off(GetMonthly|SaveTargets|GetPrices|SavePrices|MigrateProgress|MigratePrices) is not defined/.test(j.error))throw new Error('Apps Script 배포본에 목표·단가·이관 기능이 아직 없습니다 — apps-script-offline-targets.js(offline_targets) 추가 후 재배포가 필요합니다.');
     // 2-B 파일(offline_inventory)을 추가하기 전 배포본 — 단가 삭제는 offline_targets 갱신분이라 같이 안내한다
     if(/_off(GetInventory|GetDailySales|GetInventoryTrend|SaveSettings|DeletePrice) is not defined/.test(j.error))throw new Error('Apps Script 배포본에 재고 지표 기능이 아직 없습니다 — apps-script-offline-inventory.js(offline_inventory) 추가와 offline·offline_targets 갱신 후 새 버전 배포가 필요합니다.');
+    // 하이마트 스냅샷 삭제(2026-10-07) 전 배포본
+    if(/알 수 없는 오프라인 액션: offline_deleteHimartSnapshot/.test(j.error))throw new Error('Apps Script 배포본에 하이마트 스냅샷 삭제가 아직 없습니다 — apps-script-offline.js(offline) 갱신 후 새 버전 배포가 필요합니다.');
     throw new Error(j.error);
   }
   // 쓰기가 성공하면 조회 메모를 비운다 — 서버 캐시 세대가 바뀌는 것과 같은 시점

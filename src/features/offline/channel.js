@@ -206,7 +206,7 @@ function _ocdCells(t,g,opt){
   const outA=opt.skuOut!==undefined?`<td class="num-col" title="판매원장 기준(SKU 단위)">${OFFLINE_FILTER.unit==='amount'?'<span class="of-dim">—</span>':_ofNum(opt.skuOut)}</td>`:`<td class="num-col">${c('out','actual')}${t?_ofIncompleteMark(t.out):''}</td>`;
   const stock=g?`<td class="num-col">${_ofNum(g.stock['정상'])}</td><td class="num-col">${_ofNum(g.stock['전시'])}</td><td class="num-col">${_ofNum(g.stock['리퍼'])}</td>
     <td class="num-col${g.alert==='over'?' cw':g.alert==='risk'?' of-t-bad':''}">${_ofDays(g)}</td><td class="num-col">${_ofNum(g.displayStores)}</td>
-    <td>${g.alert==='over'?'<span class="of-badge of-b-over">과다</span>':g.alert==='risk'?'<span class="of-badge of-b-risk">결품 위험</span>':''}${g.storeOuts?` <span class="of-badge of-b-out" title="당월판매가 있는데 재고 0인 점포">결품 ${g.storeOuts}</span>`:''}</td>`
+    <td>${_ofStatusBadge(g)}${g.storeOuts?` <span class="of-badge of-b-out" title="당월판매가 있는데 재고 0인 점포">결품 ${g.storeOuts}</span>`:''}</td>`
     :'<td class="num-col of-dim">—</td><td class="num-col of-dim">—</td><td class="num-col of-dim">—</td><td class="num-col of-dim">—</td><td class="num-col of-dim">—</td><td></td>';
   return `<td class="num-col">${c('in','target')}</td><td class="num-col">${c('in','actual')}${t?_ofIncompleteMark(t.in):''}</td>${rate('in')}
     <td class="num-col">${c('out','target')}</td>${outA}${opt.skuOut!==undefined?'<td></td>':rate('out')}${stock}`;

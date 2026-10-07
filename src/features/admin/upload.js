@@ -5,7 +5,10 @@
    파일은 브라우저에서 파싱하고(src/features/offline/parsers.js) 정규화 레코드만 서버로 보낸다. 반영은 파일
    1개 = 요청 1개이고, 서버가 락으로 직렬화한다. 하이마트는 누적 차이 계산이라 기준일 오름차순으로 보낸다. */
 
-const _UP={files:[],seq:0,status:null,statusErr:'',log:null,logErr:'',mastersErr:'',busyAll:false,progress:'',inbox:null,inboxErr:'',inboxBusy:false};
+/* snapBase = 업로드 로그 응답의 snapshotBase{파일유형: {date, rows, stores}}(스냅샷형 파일의 직전 스냅샷 — 급감 판정 기준)
+   delBusy = 지우는 중인 하이마트 스냅샷 기준일, delResult = 마지막 삭제 결과 { ok, date, text } */
+const _UP={files:[],seq:0,status:null,statusErr:'',log:null,logErr:'',mastersErr:'',busyAll:false,progress:'',inbox:null,inboxErr:'',inboxBusy:false,
+  snapBase:null,delBusy:'',delResult:null};
 
 function mountUploadPage(){
   _upRender();
@@ -17,7 +20,7 @@ PAGE_MOUNTS['admin-upload']=mountUploadPage;
 async function _upRefreshSide(){
   await Promise.all([
     _offlineCall('offline_getStatus').then(j=>{_UP.status=j;_UP.statusErr='';}).catch(e=>{_UP.statusErr=e.message;}),
-    _offlineCall('offline_getUploadLog').then(j=>{_UP.log=j.items;_UP.logErr='';}).catch(e=>{_UP.logErr=e.message;}),
+    _offlineCall('offline_getUploadLog').then(j=>{_UP.log=j.items;_UP.snapBase=j.snapshotBase||null;_UP.logErr='';}).catch(e=>{_UP.logErr=e.message;}),
     _offlineCall('offline_getInboxStatus').then(j=>{_UP.inbox=j;_UP.inboxErr='';}).catch(e=>{_UP.inboxErr=e.message;}),
     _offlineLoadMasters(true).then(()=>{_UP.mastersErr='';}).catch(e=>{_UP.mastersErr=e.message;})
   ]);
@@ -93,7 +96,7 @@ function _upBaseNote(f,p,b){
 }
 function _upRemove(id){_UP.files=_UP.files.filter(x=>x.id!==id);_upRender();}
 function _upSetType(id,v){const f=_upFile(id);f.edits={type:v,baseDate:f.edits.baseDate};_upParse(f);_upRender();}
-function _upSetBase(id,v){const f=_upFile(id);f.edits.baseDate=v;_upParse(f);_upRender();}
+function _upSetBase(id,v){const f=_upFile(id);f.edits.baseDate=v;f.edits.allowShrink=false;_upParse(f);_upRender();}
 function _upSetYear(id,v){const f=_upFile(id);f.edits.year=v?Number(v):null;f.edits.replaceStart=f.edits.replaceEnd='';_upParse(f);_upRender();}
 function _upSetRange(id,which,v){const f=_upFile(id);f.edits[which]=v;f.result=null;f.error='';if(f.status==='done')f.status='ready';_upRender();}
 function _upTogglePanel(id){const f=_upFile(id);f.panelOpen=!f.panelOpen;_upRender();}
@@ -116,7 +119,34 @@ function _upPlan(f){
   }
   const b=f.edits.baseDate||p.baseDate;
   if(!b)return{error:'기준일을 선택하세요(파일명에 날짜가 없습니다).'};
+  const sh=_upShrink(p);
+  if(sh&&!f.edits.allowShrink)return{error:sh,shrink:true};
   return{baseDate:b};
+}
+/* 스냅샷형 파일 급감 — 행 수·점포 수가 직전 스냅샷(_UP.snapBase — 재고_점포최신의 그 채널 최신 기준일)의 절반 미만이면 문구, 아니면 ''.
+   서버 _offShrinkReason(apps-script-offline.js)과 같은 비율·문구다. 기준을 아직 못 받았으면 '' — 반영 때 서버가 같은 규칙으로 다시 막는다 */
+const UP_SHRINK_RATIO=0.5;
+function _upShrink(p){
+  const b=p&&p.ok&&p.kind!=='period'&&_UP.snapBase?_UP.snapBase[p.type]:null;
+  if(!b)return '';
+  const n=v=>Math.round(v||0).toLocaleString('ko-KR'),parts=[],stores=p.summary.storeCount||0;
+  if(b.rows&&p.rawRowCount<b.rows*UP_SHRINK_RATIO)parts.push(`행 수 급감(${n(p.rawRowCount)}행 / 직전 ${n(b.rows)}행)`);
+  if(b.stores&&stores<b.stores*UP_SHRINK_RATIO)parts.push(`점포 수 급감(${n(stores)}곳 / 직전 ${n(b.stores)}곳)`);
+  return parts.length?'직전 대비 '+parts.join(' · ')+' — 당일 날짜로 받은 불완전 파일일 수 있습니다. 전일 날짜로 다시 받아주세요':'';
+}
+// 하이마트 기준일 = 오늘 — 막지는 않고 경고만(서버 _offSameDayNote와 같은 문구)
+function _upSameDayNote(f){
+  const p=f.parse,b=p&&p.ok&&p.kind==='himart'?(f.edits.baseDate||p.baseDate):'';
+  return b&&b===_upTodayStr()?`기준일이 업로드 당일(${b})입니다 — 당일 파일은 불완전할 수 있습니다(일부 점포만). 숫자가 이상하면 전일 날짜로 다시 받아주세요`:'';
+}
+// [그래도 반영] — 급감 경고를 확인창에서 한 번 더 확인한 뒤에만 서버에 allowShrink로 보낸다
+function _upForceShrink(id){
+  const f=_upFile(id);
+  if(!f||!f.parse||f.status==='applying')return;
+  const why=_upShrink(f.parse)||f.error.replace(/^반영 실패: /,'');
+  if(!confirm(`${f.name}\n\n${why}\n\n그래도 이 파일을 반영할까요? 이 채널의 점포 재고(재고_점포최신)가 이 파일로 바뀝니다${f.parse.kind==='himart'?' — 하이마트는 판매도 이 파일로 다시 계산됩니다':''}.`))return;
+  f.edits.allowShrink=true;f.error='';
+  _upApply(id);
 }
 function _upUnmatched(f){
   const p=f.parse;
@@ -181,6 +211,7 @@ async function _upApply(id,quiet){
   f.status='applying';f.error='';f.result=null;_upRender();
   try{
     const payload=OfflineParsers.toUploadPayload(f.parse,Object.assign({fileName:f.name},plan,{customers:_upErpPicks(f)}));
+    if(f.edits.allowShrink)payload.meta.allowShrink=true;
     f.result=await _offlineCall('offline_upload',payload);
     f.status='done';
   }catch(e){
@@ -347,8 +378,9 @@ function _upCardHtml(f){
   const p=f.parse;
   const chip=`<span class="up-chip ${f.status}">${_UP_STATUS_LABEL[f.status]}</span>`;
   const busy=f.status==='applying'||_UP.busyAll;
+  const shrunk=!!(p&&p.ok&&_upPlan(f).shrink);
   const acts=`<div class="up-acts">
-    ${p&&p.ok?`<button type="button" class="btn-primary up-btn" ${busy||p.blocked?'disabled':''} ${p.blocked?'title="반영할 수 없는 양식"':''} onclick="_upApply(${f.id})">${f.status==='done'?'다시 반영':'반영'}</button>`:''}
+    ${p&&p.ok?`<button type="button" class="btn-primary up-btn" ${busy||p.blocked||shrunk?'disabled':''} ${p.blocked?'title="반영할 수 없는 양식"':shrunk?'title="직전 대비 급감 — 아래 [그래도 반영]"':''} onclick="_upApply(${f.id})">${f.status==='done'?'다시 반영':'반영'}</button>`:''}
     <button type="button" class="btn-cancel up-btn" ${busy?'disabled':''} onclick="_upRemove(${f.id})">제거</button></div>`;
   const typeSel=`<span class="f-lbl">유형</span><select class="f-sel" ${busy?'disabled':''} onchange="_upSetType(${f.id},this.value)">
     ${p&&p.ok?'':'<option value="">— 유형 선택 —</option>'}
@@ -359,6 +391,10 @@ function _upCardHtml(f){
       ${f.rows?`<div class="up-row">${typeSel}</div>`:''}<div class="up-err">${_escHtml(f.error)}</div></div>`;
   }
   const plan=_upPlan(f);
+  // 급감 — 미리보기에서 막았거나(plan.shrink) 서버가 거절했다(미리보기가 기준을 못 받았을 때). [그래도 반영]은 확인창을 거친다
+  const shrinkMsg=plan.shrink?plan.error:/직전 대비 .*급감/.test(f.error||'')?f.error:'';
+  const shrinkHtml=shrinkMsg?`<div class="up-err">⛔ ${_escHtml(shrinkMsg)} <button type="button" class="btn-cancel up-btn up-force" ${busy?'disabled':''} onclick="_upForceShrink(${f.id})">그래도 반영</button></div>`:'';
+  const warns=p.warnings.concat(_upSameDayNote(f)||[]);
   let dateCtl='';
   if(p.kind==='period'){
     const s=f.edits.replaceStart||(p.period&&p.period.start)||'',e=f.edits.replaceEnd||(p.period&&p.period.end)||'';
@@ -386,8 +422,8 @@ function _upCardHtml(f){
     <div class="up-stats">헤더 <b>${p.headerRow}</b>행 · 원본 <b>${p.rawRowCount}</b>행 · 반영 예정 ${planned} · 점포 <b>${p.summary.storeCount}</b> · 원본코드 <b>${p.summary.codeCount}</b>종${gubun}</div>
     ${_upSplitHtml(p)}${_upErpHtml(f,p)}
     <div class="up-row">${umHtml}</div>
-    ${p.warnings.length?`<ul class="up-warn">${p.warnings.map(w=>'<li>'+_escHtml(w)+'</li>').join('')}</ul>`:''}
-    ${f.error?`<div class="up-err">${_escHtml(f.error)}</div>`:(plan.error&&(p.kind==='period'||plan.blocked)?`<div class="up-err">${plan.blocked?'⛔ ':''}${_escHtml(plan.error)}</div>`:'')}
+    ${warns.length?`<ul class="up-warn">${warns.map(w=>'<li>'+_escHtml(w)+'</li>').join('')}</ul>`:''}
+    ${shrinkHtml||(f.error?`<div class="up-err">${_escHtml(f.error)}</div>`:(plan.error&&(p.kind==='period'||plan.blocked)?`<div class="up-err">${plan.blocked?'⛔ ':''}${_escHtml(plan.error)}</div>`:''))}
     ${f.result?_upResultHtml(f.result):''}
     ${f.panelOpen?`<div class="up-panel" id="upMap-${f.id}"></div>`:''}
   </div>`;
@@ -415,11 +451,31 @@ function _upLogHtml(){
   if(_UP.logErr)return `<div class="up-err">${_escHtml(_UP.logErr)}</div>`;
   if(!_UP.log)return '<div class="mp-empty">불러오는 중…</div>';
   if(!_UP.log.length)return '<div class="mp-empty">아직 업로드 기록이 없습니다.</div>';
-  const label=t=>OfflineParsers.TYPES[t]?OfflineParsers.TYPES[t].label:t;
-  return `<div class="tbl-wrap"><table class="up-log"><thead><tr><th>시각</th><th>방식</th><th>파일명</th><th>유형</th><th>채널</th><th>기준일/기간</th>
+  const label=t=>t==='HIMART_SNAPSHOT_DELETE'?'하이마트 스냅샷 삭제':OfflineParsers.TYPES[t]?OfflineParsers.TYPES[t].label:t;
+  const d=_UP.delResult;
+  const res=d?(d.ok?`<div class="up-result">✓ 하이마트 ${_escHtml(d.date)} 스냅샷 삭제 — ${_escHtml(d.text)}</div>`:`<div class="up-err">하이마트 ${_escHtml(d.date)} 스냅샷 삭제 실패: ${_escHtml(d.text)}</div>`):'';
+  // [이 날짜 스냅샷 삭제] — 그 날짜 하이마트 스냅샷을 지금 만들고 있는 업로드(서버 snapshotDeletable) 행에만
+  const del=x=>x.snapshotDeletable?`<button type="button" class="btn-cancel up-btn up-del" ${_UP.delBusy?'disabled':''} onclick="_upDeleteSnap('${_escAttr(x.range)}','${_escAttr(x.uploadId)}')">${_UP.delBusy===x.range?'삭제 중…':'이 날짜 스냅샷 삭제'}</button>`:'';
+  return `${res}<div class="tbl-wrap"><table class="up-log"><thead><tr><th>시각</th><th>방식</th><th>파일명</th><th>유형</th><th>채널</th><th>기준일/기간</th>
     <th class="num-col">원본</th><th class="num-col">반영</th><th class="num-col">미매칭</th><th>상태</th><th>업로더</th><th>경고</th></tr></thead><tbody>${
     _UP.log.map(x=>`<tr><td>${_escHtml(x.at)}</td><td>${x.mode==='auto'?'<span class="up-chip done">자동 반영</span>':'<span class="off-muted">수동</span>'}</td><td>${_escHtml(x.fileName)}</td><td>${_escHtml(label(x.fileType))}</td><td>${_escHtml(_offlineChannelsLabel(x.channelId))}</td><td>${_escHtml(x.range)}</td>
       <td class="num-col">${x.rawRows}</td><td class="num-col">${x.appliedRows}</td><td class="num-col">${x.unmatched}</td>
-      <td>${x.status==='성공'?'<span class="off-ok">성공</span>':'<span class="off-miss">'+_escHtml(x.status)+'</span>'}</td>
+      <td>${x.status==='성공'?'<span class="off-ok">성공</span>':'<span class="off-miss">'+_escHtml(x.status)+'</span>'}${del(x)}</td>
       <td>${_escHtml(x.uploader)}</td><td class="up-log-warn">${_escHtml(x.warnings)}${x.inboxNote?`<div class="off-miss">${_escHtml(x.inboxNote)}</div>`:''}</td></tr>`).join('')}</tbody></table></div>`;
+}
+/* 하이마트 스냅샷 삭제(offline_deleteHimartSnapshot) — 확인창 필수. uploadId = 이 행의 업로드(그 사이 같은 날짜가 다시 반영됐으면 서버가 거절) */
+async function _upDeleteSnap(date,uploadId){
+  if(_UP.delBusy)return;
+  if(!confirm(`하이마트 ${date} 스냅샷을 삭제합니다.\n\n· 하이마트_누적스냅샷에서 ${date} 행 삭제\n· 판매원장: ${date} 하이마트 판매를 지우고 바로 다음 스냅샷 날짜를 다시 계산\n· 재고_점포최신(하이마트): 남아 있는 가장 최근 스냅샷으로 복원\n· 재고_채널일별: ${date} 하이마트 행 삭제\n· 업로드로그에 삭제 기록\n\n다른 채널은 바뀌지 않습니다. 되돌리려면 그 날짜 파일을 다시 올려야 합니다. 삭제할까요?`))return;
+  _UP.delBusy=date;_UP.delResult=null;_upRender();
+  try{
+    const r=await _offlineCall('offline_deleteHimartSnapshot',{date,uploadId});
+    _UP.delResult={ok:true,date,text:r.note||''};
+    showToast(`하이마트 ${date} 스냅샷을 삭제했습니다`,{type:'success'});
+  }catch(e){
+    _UP.delResult={ok:false,date,text:e.message};
+    showToast('스냅샷 삭제 실패: '+e.message,{type:'error'});
+  }
+  _UP.delBusy='';
+  await _upRefreshSide();
 }

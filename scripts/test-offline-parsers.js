@@ -193,7 +193,7 @@ console.log('\n[8] 하이마트 판매재고현황');
   check('점포 재고 = 잔여재고, 당월판매 채움, 나머지 빈칸', s.stock === 40 && s.monthSale === 0 && s.transit === '' && s.monthIn === '', s);
   check('채널 합계 재고', r.records.channelStock.find(o => o.code === 'MNMD-999G_OFF').stock === 43);
   check('점포 = 인도처코드·인도처명·지사명', r.records.stores.find(o => o.code === 'S01C').region === '물류센타');
-  check('누적 스냅샷 반영 예정 = 판매 값 있는 행만(2)', r.plannedRows.himartSnap === 2 && r.plannedRows.stockStore === 4, r.plannedRows);
+  check('누적 스냅샷 반영 예정 = 판매 값이나 잔여재고가 있는 행(4 — 2026-10-07부터 재고만 있는 행도)', r.plannedRows.himartSnap === 4 && r.plannedRows.stockStore === 4, r.plannedRows);
 }
 
 console.log('\n[8-1] 재고 기준일 = 파일명 날짜 + 채널 재고기준일오프셋(스냅샷형만)');

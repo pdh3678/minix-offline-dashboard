@@ -31,6 +31,8 @@
 .up-chip.error{background:#FEE2E2;color:#B91C1C}
 .up-card-hd .up-acts{margin-left:auto;display:flex;gap:6px}
 .up-btn{padding:5px 12px;font-size:12px}
+.up-log .up-del{margin-left:6px;padding:2px 8px;font-size:11px;white-space:nowrap}
+.up-err .up-force{margin-left:6px;vertical-align:baseline}
 .up-row{display:flex;align-items:center;gap:8px 14px;flex-wrap:wrap;margin-top:10px}
 .up-row .f-lbl{margin-right:-6px}
 .up-row .f-inp,.up-row .f-sel{width:auto;padding:5px 9px;font-size:12px}

@@ -39,7 +39,10 @@ function _ofWonShort(v){
   return _ofWon(v);
 }
 const _ofPct=r=>r==null||!isFinite(r)?'—':(Math.round(r*1000)/10)+'%';
-const _ofDays=g=>g==null?'—':g.noSales?'판매 없음':g.days==null?'—':(g.days>=100?Math.round(g.days).toLocaleString('ko-KR'):(Math.round(g.days*10)/10))+'일';
+// 취급 없음(idle — 재고 0·최근 판매 0)은 '판매 없음'이 아니라 '—'
+const _ofDays=g=>g==null||g.idle?'—':g.noSales?'판매 없음':g.days==null?'—':(g.days>=100?Math.round(g.days).toLocaleString('ko-KR'):(Math.round(g.days*10)/10))+'일';
+// 상태 배지 — 과다 / 결품 위험(판매가 있는데 재고일수가 짧을 때만) / 취급 없음(회색)
+const _ofStatusBadge=g=>g.alert==='over'?'<span class="of-badge of-b-over">과다</span>':g.alert==='risk'?'<span class="of-badge of-b-risk">결품 위험</span>':g.idle?'<span class="of-badge of-b-none" title="재고 0이고 최근 판매도 없음">취급 없음</span>':'';
 const _ofMD=s=>s?(+s.slice(5,7))+'/'+(+s.slice(8,10)):'';
 function _ofRate(a,t){return (t&&a!=null)?a/t:null;}
 // 달성률 색 — 100% 이상 초록, 80% 미만 빨강, 그 사이 노랑, 목표 없음 회색
@@ -97,7 +100,8 @@ function _ofScopeGroup(inv,level,key){
   g.total=g.stock['정상']+g.stock['전시']+g.stock['리퍼'];
   const hasSales=chans.some(c=>c.hasSales);
   g.dailyAvg=hasSales?g.windowQty/(inv.windowDays||1):null;
-  g.noSales=hasSales&&!(g.dailyAvg>0);
+  g.idle=hasSales&&g.total===0&&!(g.windowQty>0);
+  g.noSales=hasSales&&!g.idle&&!(g.dailyAvg>0);
   g.days=g.dailyAvg>0?g.stock['정상']/g.dailyAvg:null;
   return g;
 }

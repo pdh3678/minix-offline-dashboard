@@ -55,7 +55,7 @@ function _offInboxReadRows(bytes) {
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 /* 수신함 폴더(회사 공유 드라이브)의 엑셀을 수동 업로드와 같은 규칙으로 반영한다.
    · 파일 → SheetJS → 공유 파서 → _offUpload(수동 업로드와 같은 함수, strict: 모르는 업태명·매핑 안 된 거래처면 쓰기 전에 실패)
-   · 성공 → 하위 폴더 '처리완료', 파일 문제(판별 불가·반영 불가 양식·모르는 업태·매핑 안 된 거래처·날짜 없음 등) → '오류'.
+   · 성공 → 하위 폴더 '처리완료', 파일 문제(판별 불가·반영 불가 양식·모르는 업태·매핑 안 된 거래처·날짜 없음·직전 대비 행 수/점포 수 급감 등) → '오류'.
      미매칭 상품코드는 실패가 아니다(수동처럼 반영하고 미매칭 목록에 쌓는다)
    · 일시적인 문제(SheetJS를 못 받음·다른 반영이 락을 잡고 있음)는 파일을 그대로 두고 다음 실행으로 넘긴다 — 멀쩡한 파일을 '오류'로 보내지 않게
    · 이미 반영한 파일은 건너뛴다 — 업로드로그의 원본MD5(같은 내용)·원본파일ID+원본수정시각으로 판단. 실패한 파일을 고쳐(또는 매핑을 고친 뒤)
@@ -187,6 +187,9 @@ function _offInboxFile(f, run) {
     out.detail = [a.sales != null ? '판매 ' + a.sales + '행' : '', a.stockDaily != null ? '채널 재고 ' + a.stockDaily : '', a.stockStore != null ? '점포 재고 ' + a.stockStore : '',
       res.unmatched && res.unmatched.length ? '미매칭 ' + res.unmatched.length + '개' : '', res.warnings && res.warnings.length ? '경고 ' + res.warnings.length + '건' : '']
       .filter(function (x) { return x; }).join(' · ');
+    // 하이마트 당일 파일(기준일 = 오늘) — 반영은 했지만 불완전할 수 있다는 경고를 상태 패널 경고에도 올린다(업로드로그 경고 열에는 _offUpload가 남긴다)
+    var same = (res.warnings || []).filter(function (w) { return String(w).indexOf('기준일이 업로드 당일') === 0; })[0];
+    if (same) out.warn = f.name + ' — ' + same;
   } catch (e) {
     var msg = String((e && e.message) || e);
     if (/다른 오프라인 반영이 진행 중/.test(msg)) { out.result = 'deferred'; out.detail = '다른 반영이 진행 중 — 다음 실행에서'; return out; }
@@ -269,6 +272,7 @@ function _offInboxRun(by) {
           var fbNote = 'Sheets API 한도 초과로 SpreadsheetApp 대체 ' + r.apiFallbacks + '회';
           try { _offInboxNote(r.uploadId, fbNote); } catch (e) {}
         }
+        if (r.warn) status.warnings.push(r.warn);
         status.counts[r.result === 'success' ? 'success' : 'error']++;
         status.files.push(r);
       }

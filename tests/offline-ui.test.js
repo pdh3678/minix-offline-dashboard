@@ -104,7 +104,8 @@ function setup() {
     check('파일명에 날짜 없는 이마트 재고 → 선택 필요 강조', h.indexOf('up-need') >= 0 && h.indexOf('선택 필요') >= 0);
     check('기간 교체형 → 교체 기간 입력(9/2~9/4)', h.indexOf('value="2026-09-02"') >= 0 && h.indexOf('value="2026-09-04"') >= 0);
     check('전자랜드 구분 요약', h.indexOf('판매(계약) <b>1</b>건') >= 0 && h.indexOf('반품 <b>1</b>건') >= 0);
-    check('하이마트 반영 예정(점포 재고 2 · 누적스냅샷 1)', h.indexOf('점포 재고 <b>2</b>') >= 0 && h.indexOf('누적스냅샷 <b>1</b>') >= 0);
+    // 누적스냅샷 = 판매 값이 있거나 잔여재고가 있는 행(2026-10-07 — 재고만 있는 MNFD-200G도)
+    check('하이마트 반영 예정(점포 재고 2 · 누적스냅샷 2)', h.indexOf('점포 재고 <b>2</b>') >= 0 && h.indexOf('누적스냅샷 <b>2</b>') >= 0);
     check('미매칭: 하이마트 코드 2개 모두(같은 코드의 전자랜드 매핑은 채널이 달라 해당 없음)', ctx._upUnmatched(f[0]).length === 2, ctx._upUnmatched(f[0]));
     check('미매칭: 전자랜드는 매핑됨 → "모든 코드 매핑됨"', ctx._upUnmatched(f[2]).length === 0 && h.indexOf('모든 코드 매핑됨') >= 0);
     check('전체 반영 버튼 = 준비된 3개(기준일 없는 파일 제외)', h.indexOf('전체 반영 (3)') >= 0);

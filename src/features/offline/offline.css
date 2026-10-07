@@ -26,6 +26,7 @@
 .of-b-over{background:var(--warn-bg);color:var(--warn)}
 .of-b-risk{background:#FEE2E2;color:#B91C1C}
 .of-b-out{background:#FCE7F3;color:#9D174D}
+.of-b-none{background:var(--nbg);color:var(--text-3);font-weight:700}
 .of-badges{display:flex;gap:4px;flex-wrap:wrap}
 
 /* 달성률 색(셀 배경) */

@@ -171,7 +171,10 @@ function env() {
     up();
     check('같은 파일 재반영 → 재고 두 탭·점포마스터 불변', J(daily()) === J(snap.d) && J(store()) === J(snap.s) && g.rows('점포마스터').length === snap.m);
     const older = P.parseRows(stockFile([['TR구성점', '2001', MAX, 1, 0], ['EM분당점', '1003', MAX, 1, 0]]), { fileName: '재고현황_상세_20260920101559.xlsx', today: TODAY, stockOffsets: {} });
-    const r3 = g.ctx._offUpload(P.toUploadPayload(older, { fileName: '재고현황_상세_20260920101559.xlsx' }), AUTH);
+    // 2점포짜리 과거 파일 — 직전(5점포) 대비 급감이라 [그래도 반영](allowShrink)으로 넘긴다(차단 자체는 tests/offline-himart-snapshot.test.js)
+    const olderPl = P.toUploadPayload(older, { fileName: '재고현황_상세_20260920101559.xlsx' });
+    olderPl.meta.allowShrink = true;
+    const r3 = g.ctx._offUpload(olderPl, AUTH);
     check('더 과거 파일 → 채널일별에 9/20 채널별 추가, 점포최신은 두 채널 모두 그대로 + 경고', daily().some(x => x === '2026-09-20|traders|' + MAX + '|1') && daily().some(x => x === '2026-09-20|emart|' + MAX + '|1') &&
       J(store()) === J(snap.s) && r3.warnings.filter(w => /더 최신 기준일/.test(w)).length === 2, r3.warnings);
     // 재고 지표 — 트레이더스 재고가 이마트 매핑으로 SKU에

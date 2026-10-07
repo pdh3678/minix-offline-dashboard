@@ -37,11 +37,14 @@ function himart(entries) {
   return [['지사명', '인도처코드', '인도처명', '상품코드', '상품명', '당월실판매', '당월판매', '금주판매', '당일판매', '잔여재고', '회전율']]
     .concat(Object.keys(entries).map(k => { const [s, c] = k.split('|'); const v = entries[k]; return ['가상지사', s, s + 'HM', c, '가상 ' + c].concat(v, [0]); }));
 }
-// 원장 반영 규칙만 본다 — 재고기준일오프셋 0 채널로 파싱(오프셋·옛 화면 호환은 tests/offline-stock-date.test.js)
+// 원장 반영 규칙만 본다 — 재고기준일오프셋 0 채널로 파싱(오프셋·옛 화면 호환은 tests/offline-stock-date.test.js).
+// 픽스처가 몇 행짜리라 뒤 파일이 앞 파일보다 작은 일이 잦다 — 급감 차단은 [그래도 반영](allowShrink)으로 넘긴다(차단 자체는 tests/offline-himart-snapshot.test.js)
 function upload(ctx, rows, fileName, edits) {
   const r = P.parseRows(rows, { fileName, today: TODAY, stockOffsets: {} });
   if (!r.ok) throw new Error('픽스처 파싱 실패: ' + r.error);
-  return ctx._offUpload(P.toUploadPayload(r, Object.assign({ fileName }, edits || {})), AUTH);
+  const pl = P.toUploadPayload(r, Object.assign({ fileName }, edits || {}));
+  pl.meta.allowShrink = true;
+  return ctx._offUpload(pl, AUTH);
 }
 // 비교용 — upload_id(10번째 열)는 업로드마다 달라서 뺀다. 그 뒤 금액·수수료는 ERP 매출이익리스트 전용(포털 채널은 빈칸 — tests/offline-erp.test.js)
 const noId = rows => rows.map(r => r.slice(0, 9));
@@ -146,7 +149,8 @@ const himartLedger = t => ledger(t).filter(r => r[3] === 'himart');
     check('9/23 업로드는 9/23만(다음 스냅샷 없음)', J(r23.replaceRange.himart.recomputed.map(x => x.date)) === J(['2026-09-23']));
     check('설치완료만 있고 판매 차이 0인 행도 저장(S1/C1 9/24: 0, 1)', himartLedger(tab).some(r => r[0] === '2026-09-24' && r[4] === 'S1' && r[6] === 0 && r[7] === 1));
     const snap = dataRows(tab('하이마트_누적스냅샷'));
-    check('누적스냅샷 = 판매 값 있는 행만(재고만 있는 S1/C2 제외)', snap.length === 5 && !snap.some(r => r[2] === 'C2'), snap.map(r => r.slice(0, 3)));
+    // 2026-10-07부터 최근 7개 기준일은 재고만 있는 행도 둔다(스냅샷 삭제 때 재고_점포최신 복원용 — 7개를 넘으면 걷어내는 건 tests/offline-himart-snapshot.test.js)
+    check('누적스냅샷 = 판매 값 있는 행 5 + 재고만 있는 S1/C2 3(최근 7개 기준일 안)', snap.length === 8 && snap.filter(r => r[2] === 'C2').length === 3, snap.map(r => r.slice(0, 3)));
     check('하이마트도 재고 반영(점포최신 = 9/24, 3행)', dataRows(tab('재고_점포최신')).filter(r => r[1] === 'himart').length === 3 && dataRows(tab('재고_점포최신'))[0][0] === '2026-09-24');
     check('  ↳ 점포최신 당월판매 = 당월판매, 재고 = 잔여재고', dataRows(tab('재고_점포최신')).some(r => r[2] === 'S1' && r[3] === 'C1' && r[4] === 3 && r[8] === 5));
     const again = J(sorted(himartLedger(tab)));

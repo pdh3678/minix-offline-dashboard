@@ -71,7 +71,7 @@ function _oivMatrixHtml(){
   const G=(ch,lv,k)=>_ofGroup(inv,ch,lv,k);
   const cell=(ch,g,skuId)=>{
     const q=_oivQty(g);
-    if(!g||(!g.total&&!g.windowQty))return '<td><span class="of-dim">—</span></td>';
+    if(!g||g.idle||(!g.total&&!g.windowQty))return '<td><span class="of-dim">—</span></td>';
     const cls=g.alert==='over'?' of-a-over':g.alert==='risk'?' of-a-risk':'';
     const click=skuId&&ch!=='*'?` clickable" onclick="_ocdOpenFocus('${_escAttr(ch)}',{skuId:'${_escAttr(skuId)}'})" title="채널 상세에서 보기`:'';
     return `<td><span class="of-mx-cell${cls}${click}"><span class="of-mx-main">${_ofNum(q)}</span><span class="of-mx-sub">${_ofDays(g)}${g.storeOuts?' · 결품 '+g.storeOuts:''}</span></span></td>`;

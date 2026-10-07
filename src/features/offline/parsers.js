@@ -482,7 +482,8 @@
     const r = res.records;
     res.plannedRows = res.kind === 'period'
       ? { sales: r.sales.length }
-      : { stockDaily: r.channelStock.length, stockStore: r.storeStock.length, himartSnap: r.himart.filter(h => h.real || h.sale || h.week || h.day).length };
+      // 하이마트 누적스냅샷 = 판매 값이 있거나 잔여재고가 있는 행(GAS _offApplyHimart — 재고만 있는 행은 최근 7개 기준일에만 남는다)
+      : { stockDaily: r.channelStock.length, stockStore: r.storeStock.length, himartSnap: r.himart.filter(h => h.real || h.sale || h.week || h.day || h.stock).length };
   }
 
   /* 미리보기에서 고친 값(기준일·교체기간)을 얹어 offline_upload 입력으로 — { meta, records }
