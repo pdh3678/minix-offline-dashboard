@@ -2,6 +2,8 @@ import { createRoot } from 'react-dom/client';
 import ReviewApp from './App.jsx';
 import './styles.css';
 import { setHtmlEmbedBridge } from './htmlEmbed.js';
+// 설문 관리 화면의 안내문 편집기 — 같은 번들(window.ReviewApp.mountSurveyNote)로 내보낸다
+export { mountSurveyNote } from './surveyNote.jsx';
 
 let root = null;
 

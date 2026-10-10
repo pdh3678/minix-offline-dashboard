@@ -53,7 +53,7 @@ function fakeEl(extra) {
     'sec:gongu-products', '품목별 실적',
     'page:review', '공동구매 회고', 'page:management', '미기입 목록',
     'sec:admin', '대시보드 관리',
-    'page:admin-upload', '데이터 업로드', 'page:admin-code-mapping', '코드 매핑', 'page:admin-targets', '목표 관리',
+    'page:admin-upload', '데이터 업로드', 'page:admin-code-mapping', '코드 매핑', 'page:admin-targets', '목표 관리', 'page:admin-surveys', '설문 관리',
     'page:monthly-review', '월 회고'
   ];
   check('메뉴 순서·이름이 확정안과 같음', JSON.stringify(seq) === JSON.stringify(EXPECT), seq);
@@ -83,6 +83,9 @@ function fakeEl(extra) {
     ['offline/channels', 'page:offline-channels'], ['offline/channel', 'page:offline-channel'],
     ['offline/channel/ch-001', 'page:offline-channel|ch-001'], ['offline/inventory', 'page:offline-inventory'],
     ['admin/upload', 'page:admin-upload'], ['admin/code-mapping', 'page:admin-code-mapping'], ['admin/targets', 'page:admin-targets'],
+    // 설문 관리 — 목록 · 편집 · 결과 · 엑셀의 영수증 보기 링크(파라미터에 /가 들어간다)
+    ['admin/surveys', 'page:admin-surveys'], ['admin/surveys/sv_abc', 'page:admin-surveys|sv_abc'], ['admin/surveys/sv_abc/results', 'page:admin-surveys|sv_abc/results'],
+    ['admin/surveys/sv_abc/r/r_123', 'page:admin-surveys|sv_abc/r/r_123'],
     ['monthly-review', 'page:monthly-review'],
     // 기존 해시 — 개명된 페이지도 해시는 그대로
     ['calendar', 'page:calendar'], ['dashboard', 'page:dashboard'], ['review', 'page:review'], ['entry-list', 'page:management'],
@@ -104,7 +107,7 @@ function fakeEl(extra) {
   {
     const { ctx, X } = loadFrontend(PROJ, SHIM, { search: '?embed=1', runHeadScripts: true });
     const last = () => ctx.history._urls[ctx.history._urls.length - 1];
-    ['home', 'offline-channels', 'offline-inventory', 'admin-upload', 'admin-code-mapping', 'admin-targets', 'monthly-review'].forEach(p => {
+    ['home', 'offline-channels', 'offline-inventory', 'admin-upload', 'admin-code-mapping', 'admin-targets', 'admin-surveys', 'monthly-review'].forEach(p => {
       ctx.navPage(p, null);
       check(`${p} → /?embed=1#${X.PAGE_ID_TO_HASH[p]}`, last() === '/?embed=1#' + X.PAGE_ID_TO_HASH[p], last());
     });

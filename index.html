@@ -705,6 +705,9 @@ tbody tr:hover td.sticky-col1,tbody tr:hover td.sticky-col2{background:var(--sur
 <!-- 오프라인 화면(채널 현황·채널 상세·재고 현황) 전용 스타일 -->
 <link rel="stylesheet" href="src/features/offline/offline.css">
 <link rel="stylesheet" href="src/features/home/home.css">
+<!-- 설문 관리(#admin/surveys) · 미리보기 안의 설문 양식(응답 페이지 form.html과 같은 파일) -->
+<link rel="stylesheet" href="src/features/survey/survey-admin.css">
+<link rel="stylesheet" href="src/features/survey/form.css">
 <script>
 /* 임베드 판정은 첫 페인트 전에 끝나야 한다 — 문서 끝의 큰 스크립트에서 걸면 사이드바가 한 번
    보였다가 사라지는 깜빡임이 생긴다. 그래서 여기(head)에서 클래스만 먼저 붙이고,
@@ -794,6 +797,7 @@ tbody tr:hover td.sticky-col1,tbody tr:hover td.sticky-col2{background:var(--sur
           <div class="sb-item" data-page="admin-upload" onclick="navPage('admin-upload',this)"><span class="sb-ic">⬆️</span><span class="sb-label">데이터 업로드</span></div>
           <div class="sb-item" data-page="admin-code-mapping" onclick="navPage('admin-code-mapping',this)"><span class="sb-ic">🧩</span><span class="sb-label">코드 매핑</span></div>
           <div class="sb-item" data-page="admin-targets" onclick="navPage('admin-targets',this)"><span class="sb-ic">🎯</span><span class="sb-label">목표 관리</span></div>
+          <div class="sb-item" data-page="admin-surveys" onclick="navPage('admin-surveys',this)"><span class="sb-ic">📋</span><span class="sb-label">설문 관리</span></div>
         </div>
       </div>
       <div class="sb-item-solo" data-page="monthly-review" onclick="navPage('monthly-review',this)">
@@ -846,6 +850,7 @@ tbody tr:hover td.sticky-col1,tbody tr:hover td.sticky-col2{background:var(--sur
     <div class="main page" id="page-admin-upload"></div>
     <div class="main page" id="page-admin-code-mapping"></div>
     <div class="main page" id="page-admin-targets"></div>
+    <div class="main page" id="page-admin-surveys"></div>
     <div class="main page" id="page-monthly-review"></div>
 
     <!-- ① 공구 캘린더 페이지 -->
@@ -1790,6 +1795,9 @@ tbody tr:hover td.sticky-col1,tbody tr:hover td.sticky-col2{background:var(--sur
 <script src="src/features/admin/targets.js"></script>
 <script src="src/features/admin/targets-annual.js"></script>
 <script src="src/features/admin/targets-gongu.js"></script>
+<script src="src/features/survey/survey-common.js"></script>
+<script src="src/features/survey/survey-admin.js"></script>
+<script src="src/features/survey/survey-results.js"></script>
 <script src="src/features/monthly-review/monthly-review.js"></script>
 <script src="src/main.js"></script>
 <script id="gsiScriptTag" src="https://accounts.google.com/gsi/client" async defer onload="_gsiScriptLoaded()" onerror="_gsiScriptFailed()"></script>

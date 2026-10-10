@@ -33,12 +33,13 @@ const PAGE_ID_TO_HASH={
   home:'home',
   'offline-channels':'offline/channels','offline-channel':'offline/channel','offline-inventory':'offline/inventory',
   calendar:'calendar',dashboard:'dashboard',review:'review',management:'entry-list',
-  'admin-upload':'admin/upload','admin-code-mapping':'admin/code-mapping','admin-targets':'admin/targets',
+  'admin-upload':'admin/upload','admin-code-mapping':'admin/code-mapping','admin-targets':'admin/targets','admin-surveys':'admin/surveys',
   'monthly-review':'monthly-review'
 };
 const HASH_TO_PAGE_ID=Object.assign({},...Object.keys(PAGE_ID_TO_HASH).map(p=>({[PAGE_ID_TO_HASH[p]]:p})));
 // 해시 뒤에 /<파라미터>를 더 받을 수 있는 페이지 — #offline/channel/{channelId} (채널 상세, 2단계에서 채움)
-const PAGE_WITH_PARAM=['offline-channel'];
+// #admin/surveys/{설문ID} · /{설문ID}/results · /{설문ID}/r/{응답ID} (설문 관리 — 파라미터에 / 가 들어간다)
+const PAGE_WITH_PARAM=['offline-channel','admin-surveys'];
 const DEFAULT_PAGE_ID='home'; // 해시 없음/알 수 없는 해시 → 파트 홈
 let _currentPageHash='dashboard'; // 새 공구건 등록 모달을 닫을 때 되돌아갈 해시(모달 밑에 깔린 실제 탭)
 let _pageParam=null; // 지금 페이지의 해시 파라미터(#offline/channel/{channelId}의 channelId) — 없으면 null
