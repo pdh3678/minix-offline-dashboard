@@ -16,6 +16,13 @@ services:
     # ⚠ 공개 목록에서 빠진 파일이 이전 배포의 것으로 계속 서빙될 수 있다 — 그럴 땐 Manual Deploy → Clear build cache & deploy
     buildCommand: bash scripts/build-public.sh
     staticPublishPath: public
+    # 설문 응답 페이지(2026-10-10) — /s/{설문 주소}를 form.html로(주소창은 그대로). ⚠ 대시보드 Settings → Redirects/Rewrites에
+    #   Source /s/*  Destination /form.html  Action Rewrite 로 직접 추가해야 동작한다(이 파일은 기록). 없으면 /s/… 가 404 —
+    #   그동안은 form.html?f={설문ID} 주소로 응답을 받을 수 있다. form.html은 자원을 전부 절대경로로 부른다(build-public.sh가 검사).
+    routes:
+      - type: rewrite
+        source: /s/*
+        destination: /form.html
     # ⚠ 아래 headers는 의도한 값의 기록이다. 2026-09-28 라이브 실측(두 서비스 동일)과 다르다:
     #   Cache-Control = public, max-age=0, s-maxage=300 (아래 no-cache 아님)
     #   Content-Security-Policy = frame-ancestors 'self' https://minix-workspace.onrender.com 만
@@ -66,6 +73,9 @@ services:
       #   script.google.com    Apps Script 웹앱 호출(모든 데이터 왕복)
       #   *.googleusercontent.com  구글 프로필 사진
       #   data: / blob:        릴스 썸네일(GAS가 base64로 내려줌)과 이미지 업로드 미리보기
+      #   t1.kakaocdn.net · postcode.map.kakao.com  설문 응답 페이지의 카카오 우편번호(스크립트 · iframe, 2026-10-10)
+      #   (cdn.jsdelivr.net은 설문 QR 라이브러리 qrcode-generator@1.4.4도 받는다 — SRI 고정)
+      # ⚠ 아래 Report-Only 값을 강제로 바꿀 때는 위 두 카카오 주소를 script-src·frame-src에 넣을 것(빠뜨리면 주소 검색이 막힌다)
       - path: /*
         name: Content-Security-Policy-Report-Only
-        value: "default-src 'self'; script-src 'self' 'unsafe-inline' https://accounts.google.com https://cdn.jsdelivr.net https://cdn.sheetjs.com; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; font-src 'self' data: https://cdn.jsdelivr.net; img-src 'self' data: blob: https://*.googleusercontent.com https://script.google.com; connect-src 'self' https://script.google.com https://accounts.google.com; frame-src https://accounts.google.com; frame-ancestors 'self' https://minix-workspace.onrender.com; object-src 'none'; base-uri 'self'; form-action 'self'"
+        value: "default-src 'self'; script-src 'self' 'unsafe-inline' https://accounts.google.com https://cdn.jsdelivr.net https://cdn.sheetjs.com https://t1.kakaocdn.net; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; font-src 'self' data: https://cdn.jsdelivr.net; img-src 'self' data: blob: https://*.googleusercontent.com https://script.google.com; connect-src 'self' https://script.google.com https://accounts.google.com; frame-src https://accounts.google.com https://postcode.map.kakao.com; frame-ancestors 'self' https://minix-workspace.onrender.com; object-src 'none'; base-uri 'self'; form-action 'self'"

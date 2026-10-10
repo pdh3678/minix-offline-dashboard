@@ -18,6 +18,7 @@ cd "$ROOT"
 PUBLIC_FILES=(
   index.html                      # 앱 본체
   dashboard.html                  # 옛 경로(/dashboard.html) 호환 사본 — index.html과 같은 파일
+  form.html                       # 설문 응답 페이지(로그인 없음) — Render Rewrite /s/* → /form.html. JS·CSS는 src/features/survey/
   Minix_BI_White_Transparency.png # 사이드바 로고
   favicon.ico
   favicon-16.png
@@ -59,7 +60,7 @@ for name in "${FORBIDDEN[@]}"; do
   if [ -n "$found" ]; then echo "[build-public] 실패: 비공개 파일이 public/에 있습니다 — $found" >&2; fail=1; fi
 done
 # 3-b) HTML이 참조하는 로컬 파일이 전부 복사됐는지(외부 https·data:·# 링크는 제외)
-for html in index.html dashboard.html; do
+for html in index.html dashboard.html form.html; do
   while IFS= read -r ref; do
     path="${ref%%[?#]*}"
     [ -z "$path" ] && continue
@@ -71,6 +72,10 @@ for html in index.html dashboard.html; do
   cmp -s "$html" "$OUT/$html" || { echo "[build-public] 실패: public/$html 이 원본과 다릅니다" >&2; fail=1; }
   grep -q "minix-gongu-dashboard.onrender.com" "$OUT/$html" || { echo "[build-public] 실패: public/$html 에 옛 주소 리다이렉트 스크립트가 없습니다" >&2; fail=1; }
 done
+# 3-d) form.html은 /s/{주소}로 서빙된다(Rewrite) — 상대경로는 /s/… 로 풀려 404가 되므로 로컬 자원은 전부 /로 시작해야 한다
+while IFS= read -r ref; do
+  case "$ref" in /*) ;; *) echo "[build-public] 실패: form.html 의 '$ref' 가 상대경로입니다 — /s/{주소}에서 열리므로 /로 시작하는 절대경로로 쓰세요" >&2; fail=1 ;; esac
+done < <(grep -oE '(src|href)="[^"]+"' "$OUT/form.html" | sed -E 's/^(src|href)="//; s/"$//' | grep -vE '^(https?:|//|data:|#|mailto:)' | sort -u)
 [ "$fail" = 0 ] || exit 1
 
 echo "[build-public] 완료 — $(find "$OUT" -type f | wc -l | tr -d ' ')개 파일"

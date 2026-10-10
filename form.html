@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="robots" content="noindex,nofollow">
+<meta name="referrer" content="strict-origin-when-cross-origin">
+<!-- 설문 응답 페이지(로그인 없음) — /s/{설문 주소}로 열린다(Render Rewrite /s/* → /form.html). form.html?f={설문ID}도 된다.
+     ⚠ 주소가 /s/emart-oct 인 채로 이 파일이 서빙되므로 상대경로는 /s/… 로 풀린다 — 모든 자원은 반드시 /로 시작하는 절대경로로.
+       scripts/build-public.sh가 상대경로를 찾으면 빌드를 실패시킨다.
+     대시보드(index.html)의 스크립트는 하나도 싣지 않는다 — 공용 설정(config.js: Apps Script 주소)과 설문 파일만. -->
+<title>미닉스 설문</title>
+<link rel="icon" href="/favicon.ico" sizes="any">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="stylesheet" as="style" crossorigin href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
+<link rel="stylesheet" href="/src/features/survey/form.css">
+</head>
+<body class="svf-page">
+<header class="svf-top"><img src="/Minix_BI_White_Transparency.png" alt="MINIX" class="svf-logo"></header>
+<main class="svf-main" id="svfRoot"><div class="svf-state"><span class="svf-spin"></span><p>설문을 불러오는 중…</p></div></main>
+<footer class="svf-foot">ⓒ 주식회사 앳홈 · 미닉스</footer>
+<script src="/src/shared/config.js"></script>
+<script src="/src/features/survey/survey-common.js"></script>
+<script src="/src/features/survey/form.js"></script>
+</body>
+</html>
