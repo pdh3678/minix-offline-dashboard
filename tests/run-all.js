@@ -52,7 +52,8 @@ const SUITES = [
   ['offline-inbox-ui.test.js', '자동 반영 화면 — 상태 패널(사용·트리거·폴더·마지막 실행·경고·파일별 결과), [지금 확인], 업로드로그 방식 열·수신함처리 사유, HTML 이스케이프'],
   ['offline-exclude.test.js', '코드 제외 — 모든 집계·미매칭에서 빠짐(원장 그대로)·해제 복귀·매핑 충돌 막기·코드체계 한 벌, ERP 제외 브랜드 자동 등록, 코드 매핑 [제외]·[제외 목록]·업로드 미리보기'],
   ['offline-himart-snapshot.test.js', '하이마트 불완전 파일 — 스냅샷형 급감 차단(수동·자동)·당일 경고, 스냅샷 삭제(판매 재계산·점포 재고 복원 = 안 올린 것과 같음, 다른 채널 불변), 취급 없음 표시, 업로드 화면'],
-  ['review-html-embed.test.js', '회고 HTML 임베드 — review_* 세션·첨부 폴더 제한·5MB/20MB, sandbox allow-scripts만·blob 없음, 높이 메시지 출처 검증, 원문 캐시']
+  ['survey-gas.test.js', '설문 GAS — 공유 드라이브 저장소(멱등)·공개 액션 두 개만·초안=없는 주소·이전 주소 이동, 제출 검증·함정 칸·최소 시간·분당·응답 수·제출 키, 영수증 비공개·형식 판정·중복키 HMAC, 주소 규칙·충돌·질문 ID 유지·삭제 질문 보관·복제, 마스킹·보기/엑셀 기록·처리상태·영수증 범위, 보유기간 삭제·트리거, Sheets API 미사용·로그에 개인정보 없음'],
+  ['review-html-embed.test.js','회고 HTML 임베드 — review_* 세션·첨부 폴더 제한·5MB/20MB, sandbox allow-scripts만·blob 없음, 높이 메시지 출처 검증, 원문 캐시']
 ];
 
 let failed = 0;

@@ -182,7 +182,7 @@ function installSheetsApi(off, id, failEvery) {
    · DriveApp.getFileById(id).getBlob().getBytes() = 부호 있는 바이트(-128~127)
    files[id].bytes = 내용(Buffer). calls = 호출 기록 */
 function installDrive() {
-  const files = {}, calls = [], deny = { move: false, trash: false };
+  const files = {}, calls = [], deny = { move: false, trash: false, remove: false };
   const DRIVE_ID = 'SHARED-DRIVE-1', FOLDER = 'application/vnd.google-apps.folder';
   let seq = 0;
   const view = f => { const o = Object.assign({}, f); delete o.bytes; delete o.trashed; delete o.parents; return JSON.parse(JSON.stringify(o)); };
@@ -210,7 +210,16 @@ function installDrive() {
     },
     create(res, media, opt) {
       calls.push({ op: 'create', res, opt }); need(opt, 'create');
-      return view(add({ name: res.name, mimeType: res.mimeType, parents: (res.parents || []).slice() }));
+      // media(Blob)가 오면 내용을 기억한다 — 설문 영수증 저장(apps-script-survey.js)
+      return view(add(Object.assign({ name: res.name, mimeType: res.mimeType, parents: (res.parents || []).slice() },
+        media ? { bytes: Buffer.from(media.getBytes().map(b => (b + 256) % 256)), size: String(media.getBytes().length) } : {})));
+    },
+    // 영구 삭제 — deny.remove = 공유 드라이브 관리자가 아닌 계정(휴지통만 된다)
+    remove(id, opt) {
+      calls.push({ op: 'remove', id, opt }); need(opt, 'remove');
+      if (!files[id] || files[id].trashed) throw new Error('File not found: ' + id);
+      if (deny.remove) throw new Error('The user does not have sufficient permissions for this file.');
+      delete files[id];
     },
     update(res, id, media, opt) {
       calls.push({ op: 'update', id, res, opt }); need(opt, 'update');
@@ -240,11 +249,13 @@ function installScriptApp() {
   let seq = 0;
   global.ScriptApp = {
     getService: () => ({ getUrl: () => 'mock' }),
+    getOAuthToken: () => 'mock-oauth-token',
     getProjectTriggers: () => triggers.slice(),
     deleteTrigger: t => { const i = triggers.indexOf(t); if (i >= 0) triggers.splice(i, 1); },
     newTrigger: handler => {
       const t = { id: 'T' + (++seq), handler, hours: null, getHandlerFunction: () => handler, getUniqueId() { return this.id; } };
-      const b = { timeBased: () => b, everyHours: n => { t.hours = n; return b; }, create: () => { triggers.push(t); return t; } };
+      const b = { timeBased: () => b, everyHours: n => { t.hours = n; return b; }, everyDays: n => { t.days = n; return b; }, atHour: h => { t.atHour = h; return b; },
+        inTimezone: z => { t.tz = z; return b; }, create: () => { triggers.push(t); return t; } };
       return b;
     }
   };
@@ -291,7 +302,7 @@ function loadOfflineGas(opts) {
   vm.runInContext(fs.readFileSync(path.join(dir, 'apps-script.js'), 'utf8'), ctx, { filename: 'apps-script.js' });
   vm.runInContext(fs.readFileSync(path.join(dir, 'apps-script-offline.js'), 'utf8'), ctx, { filename: 'apps-script-offline.js' });
   // 편집기 파일 순서 그대로 — offline_parsers는 브라우저 파서(src/features/offline/parsers.js) 그 파일
-  ['apps-script-offline-targets.js', 'apps-script-offline-inventory.js', 'apps-script-home.js', 'src/features/offline/parsers.js', 'apps-script-offline-inbox.js'].forEach(f => {
+  ['apps-script-offline-targets.js', 'apps-script-offline-inventory.js', 'apps-script-home.js', 'src/features/offline/parsers.js', 'apps-script-offline-inbox.js', 'apps-script-survey.js'].forEach(f => {
     const p = path.join(dir, f);
     if (fs.existsSync(p)) vm.runInContext(fs.readFileSync(p, 'utf8'), ctx, { filename: f });
   });
@@ -306,4 +317,4 @@ function dataRows(sheet) {
   return sheet._grid.slice(1, last).map(r => r.slice());
 }
 
-module.exports = { loadOfflineGas, dataRows, OFFLINE_ID, PROJ, STATS, resetStats, installDrive, installScriptApp };
+module.exports = { loadOfflineGas, dataRows, OFFLINE_ID, PROJ, STATS, resetStats, installDrive, installScriptApp, makeOfflineSS };

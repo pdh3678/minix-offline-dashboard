@@ -2628,6 +2628,9 @@ function doPost(e) {
     }
     var body = JSON.parse(e.postData.contents);
     _renewedSessionToken = null;
+    /* 설문 응답 페이지(로그인 없음, apps-script-survey.js) — **이 두 이름만** 세션 확인 전에 보낸다(접두어로 고르지 않는다).
+       나머지 survey_* (관리·결과·다운로드·영수증)는 아래에서 세션을 확인한 뒤에만 간다 */
+    if (body.action === 'survey_getPublic' || body.action === 'survey_submit') return _surveyPublicHandle(body.action, body.data);
     var ss = SpreadsheetApp.getActiveSpreadsheet();
     /* 세션 토큰은 본문으로도, 쿼리로도 올 수 있다 — _authRequest는 e.parameter만 보므로
        본문으로 온 경우 그쪽에 채워 넣어 한 곳에서만 판정하게 한다(검증 경로를 둘로 만들지 않는다). */
@@ -2641,7 +2644,9 @@ function doPost(e) {
     if (/^(offline|home)_/.test(String(body.action || ''))) return _offlineHandle(body.action, body.data, auth);
     // 회고 첨부 HTML(review_) — 파일 원문이 수 MB라 GET 청크(1,200자 단위)로는 보낼 수 없다
     if (/^review_/.test(String(body.action || ''))) return _reviewFileHandle(body.action, body.data);
-    throw new Error('doPost는 presence·offline_ 전용입니다(파트 홈 home_, 회고 첨부 review_ 포함) — 그 외 액션(' + body.action + ')은 doGet(GET)으로 보내야 합니다.');
+    // 설문 관리(survey_, apps-script-survey.js) — 세션 확인을 지난 요청만
+    if (/^survey_/.test(String(body.action || ''))) return _surveyHandle(body.action, body.data, auth);
+    throw new Error('doPost는 presence·offline_ 전용입니다(파트 홈 home_, 회고 첨부 review_, 설문 survey_ 포함) — 그 외 액션(' + body.action + ')은 doGet(GET)으로 보내야 합니다.');
   } catch (err) {
     return _json({ error: err.toString() });
   }
